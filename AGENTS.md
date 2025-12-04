@@ -149,27 +149,27 @@ The system is designed so that libmscore can be swapped out later without rewrit
 ## Deliverables Expected From Phase 0
 
 1.  **Load-and-render pipeline:**
-    *   MSCZ or MusicXML → WASM → SVG → UI
+    *   [x] MSCZ or MusicXML → WASM → SVG → UI
 2.  **Basic editor UI:**
-    *   Note selection and highlighting
-    *   Zoom/pan/scroll
-    *   Basic editing tools (pitch change, duration change)
+    *   [ ] Note selection and highlighting
+    *   [x] Zoom/pan/scroll
+    *   [ ] Basic editing tools (pitch change, duration change)
 3.  **AST mutation layer (via WASM bridge):**
-    *   A JS API that issues commands to mutate the score in WASM.
+    *   [ ] A JS API that issues commands to mutate the score in WASM.
 4.  **Undo/redo manager:**
-    *   Command-based
-    *   Replays semantic operations, not SVG diffs
+    *   [ ] Command-based
+    *   [ ] Replays semantic operations, not SVG diffs
 5.  **Diff/merge prototype:**
-    *   Basic abstractions for versioning AST snapshots
+    *   [ ] Basic abstractions for versioning AST snapshots
 6.  **Stable UX foundation:**
-    *   Panels, toolbars, keyboard shortcuts
-    *   React/Vue/Svelte state management
-    *   Components for systems, measures, notes
+    *   [x] Panels, toolbars, keyboard shortcuts (Basic Toolbar implemented)
+    *   [x] React/Vue/Svelte state management
+    *   [ ] Components for systems, measures, notes
 7.  **Documentation of public APIs for Phase 1 integration:**
-    *   AST access layer
-    *   Layout/render triggers
-    *   Selection model
-    *   Mutation commands
+    *   [ ] AST access layer
+    *   [ ] Layout/render triggers
+    *   [ ] Selection model
+    *   [ ] Mutation commands
 
 ## Guiding Principles for Phase 0
 

@@ -1,7 +1,7 @@
 import WebMscore from 'webmscore';
-import { InputFileFormat } from 'webmscore/schemas';
+import { InputFileFormat, Positions } from 'webmscore/schemas';
 
-export type { InputFileFormat };
+export type { InputFileFormat, Positions };
 
 export interface Score {
     destroy: () => void;
@@ -9,6 +9,8 @@ export interface Score {
     savePdf: () => Promise<Uint8Array>;
     setSoundFont: (data: Uint8Array) => Promise<void>;
     metadata: () => Promise<any>;
+    measurePositions: () => Promise<Positions>;
+    segmentPositions: () => Promise<Positions>;
 }
 
 export interface WebMscoreInstance {
