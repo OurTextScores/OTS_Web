@@ -651,7 +651,7 @@ bool _doubleDuration(uintptr_t score_ptr, int excerptId)
     MainScore score(score_ptr, excerptId);
     if (score->selection().element() && score->selection().element()->isChordRest()) {
         auto cr = toChordRest(score->selection().element());
-        score->inputState().setDuration(TDuration(cr->durationType()));
+        score->inputState().setDuration(mu::engraving::TDuration(cr->durationType()));
     }
     score->startCmd();
     score->cmdDoubleDuration();
@@ -664,7 +664,7 @@ bool _halfDuration(uintptr_t score_ptr, int excerptId)
     MainScore score(score_ptr, excerptId);
     if (score->selection().element() && score->selection().element()->isChordRest()) {
         auto cr = toChordRest(score->selection().element());
-        score->inputState().setDuration(TDuration(cr->durationType()));
+        score->inputState().setDuration(mu::engraving::TDuration(cr->durationType()));
     }
     score->startCmd();
     score->cmdHalfDuration();
