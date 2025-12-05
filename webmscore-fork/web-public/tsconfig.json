@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "moduleResolution": "node",
+    "typeRoots": ["./node_modules/@types"],
+    "lib": ["esnext", "dom"],
+    "allowJs": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "target": "esnext"
+  },
+  "include": ["src/index.js"]
+}

@@ -1,0 +1,149 @@
+name: Build webmscore
+
+on:
+  workflow_dispatch:
+    inputs: {}
+  push:
+    branches:
+      - 'webmscore'
+      - 'Xmader/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EM_VERSION: 2.0.6
+  EM_CACHE_FOLDER: 'emsdk-cache'
+  COMMIT_MSG: ${{ github.event.head_commit.message }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+      - uses: actions/setup-node@v1
+        with:
+          node-version: 12
+      - uses: actions/cache@v3
+        with:
+          path: ${{env.EM_CACHE_FOLDER}}
+          key: emsdk-${{env.EM_VERSION}}-${{ runner.os }}
+      - uses: actions/cache@v3
+        with:
+          # Allows updating the cache
+          # https://github.com/actions/cache/blob/main/tips-and-workarounds.md#update-a-cache
+          key: emmake_cache-${{ github.run_id }} 
+          restore-keys: |
+            emmake_cache
+          path: ${{ github.workspace }}/.ccache
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          aqtversion: '==2.1.*'
+          version: '5.15.2'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'wasm_32'
+          archives: 'qtbase'
+          dir: ${{ github.workspace }}/build.qt5
+          setup-python: true
+          cache: true
+      - name: Install emscripten
+        uses: Xmader/setup-emsdk@master
+        with:
+          version: ${{env.EM_VERSION}}
+          actions-cache-folder: ${{env.EM_CACHE_FOLDER}}
+      - name: Apply patches for Qt and emscripten
+        run: |
+          echo $Qt5_DIR
+          cp --verbose -r build/qt/* ${Qt5_DIR}
+          echo $(which emcc).py
+          sed -i -r "s/(shared.Settings.MEM_INIT_IN_WASM = )True/\1False/" "$(which emcc).py"
+      - name: Install ccache
+        run: |
+          sudo apt install -y ccache
+          ccache --version
+
+      - name: Build
+        run: |
+          cd web-public
+          npm i
+          npm run build:no-clean
+          npm pack
+
+      - name: Save build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: npm-pack
+          path: web-public/webmscore-*.tgz
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: false
+      - uses: actions/setup-node@v1
+        with:
+          node-version: 12
+
+      - name: Download webmscore package tarball
+        uses: actions/download-artifact@v3
+        with:
+          name: npm-pack
+          path: web-example
+      - name: Test
+        run: |
+          cd web-example
+          npm i
+          npm i ./webmscore-*.tgz
+          npm start
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: example-exports
+          path: web-example/exported*
+
+  publish:
+    if: github.ref_name == 'webmscore' && startsWith(github.event.head_commit.message, 'release v')
+
+    needs: [build, test]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: false
+      - uses: actions/setup-node@v1
+        with:
+          node-version: 12
+          # https://docs.github.com/en/actions/publishing-packages/publishing-nodejs-packages#publishing-packages-to-the-npm-registry
+          registry-url: https://registry.npmjs.org/
+      - name: Download webmscore package tarball
+        uses: actions/download-artifact@v3
+        with:
+          name: npm-pack
+      - run: |
+          echo "VERSION=$(echo $COMMIT_MSG | cut -d ' ' -f 2)" >> $GITHUB_ENV
+          echo $VERSION
+      - name: Publish to Github Releases
+        uses: softprops/action-gh-release@v1
+        with:
+          files: webmscore-*.tgz
+          name: webmscore ${{ env.VERSION }}
+          tag_name: ${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+      - name: Publish to NPM
+        run: npm publish webmscore-*.tgz
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} # npm_gUA5...

@@ -1,0 +1,11 @@
+webmscore.*
+node_modules
+
+# copied from ../README.md
+README.md
+CHANGELOG.md
+
+.cache
+
+*.d.ts
+schemas.js

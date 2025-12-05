@@ -1,0 +1,560 @@
+{
+ "engravingDefaults": {
+  "arrowShaftThickness": 0.15, 
+  "barlineSeparation": 0.5, 
+  "beamSpacing": 0.25, 
+  "beamThickness": 0.5, 
+  "bracketThickness": 0.5, 
+  "dashedBarlineDashLength": 0.42, 
+  "dashedBarlineGapLength": 0.3, 
+  "dashedBarlineThickness": 0.15, 
+  "hairpinThickness": 0.15, 
+  "legerLineExtension": 0.25, 
+  "legerLineThickness": 0.19, 
+  "lyricLineThickness": 0.15, 
+  "octaveLineThickness": 0.15, 
+  "pedalLineThickness": 0.15, 
+  "repeatBarlineDotSeparation": 0.34, 
+  "repeatEndingLineThickness": 0.15, 
+  "slurEndpointThickness": 0.07, 
+  "slurMidpointThickness": 0.33, 
+  "staffLineThickness": 0.15, 
+  "stemThickness": 0.15, 
+  "subBracketThickness": 0.15, 
+  "textEnclosureThickness": 0.15, 
+  "thickBarlineThickness": 0.5, 
+  "thinBarlineThickness": 0.15, 
+  "thinThickBarlineSeparation": 0.5, 
+  "tieEndpointThickness": 0.07, 
+  "tieMidpointThickness": 0.33, 
+  "tupletBracketThickness": 0.15
+ }, 
+ "fontName": "Finale Broadway", 
+ "fontVersion": 1.4,  
+ "glyphsWithAnchors": {
+  "U+F612": {
+   "stemDownNW": [
+    0.412, 
+    -0.372
+   ], 
+   "stemUpSE": [
+    1.272, 
+    0.352
+   ]
+  }, 
+  "U+F614": {
+   "stemDownNW": [
+    0.016, 
+    -0.436
+   ], 
+   "stemUpSE": [
+    0.972, 
+    0.4
+   ]
+  }, 
+  "U+F615": {
+   "stemDownNW": [
+    0.016, 
+    -0.436
+   ], 
+   "stemUpSE": [
+    0.972, 
+    0.4
+   ]
+  }, 
+  "U+F79E": {
+   "stemDownNW": [
+    0.0, 
+    0.02
+   ], 
+   "stemUpSE": [
+    1.364, 
+    0.144
+   ]
+  }, 
+  "U+F7AC": {
+   "stemDownNW": [
+    0.004, 
+    -0.38
+   ], 
+   "stemUpSE": [
+    0.96, 
+    0.404
+   ]
+  }, 
+  "flag16thDown": {
+   "stemDownSW": [
+    0.0, 
+    0.128
+   ]
+  }, 
+  "flag16thUp": {
+   "stemUpNW": [
+    0.0, 
+    -0.088
+   ]
+  }, 
+  "flag8thDown": {
+   "graceNoteSlashNW": [
+    -0.596, 
+    2.168
+   ], 
+   "graceNoteSlashSE": [
+    1.328, 
+    0.628
+   ], 
+   "stemDownSW": [
+    0.0, 
+    0.124
+   ]
+  }, 
+  "flag8thUp": {
+   "graceNoteSlashNE": [
+    1.284, 
+    -0.796
+   ], 
+   "graceNoteSlashSW": [
+    -0.644, 
+    -2.456
+   ], 
+   "stemUpNW": [
+    0.0, 
+    -0.032
+   ]
+  }, 
+  "metNoteDoubleWhole": {
+   "noteheadOrigin": [
+    0.396, 
+    0.0
+   ]
+  }, 
+  "noteheadBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.224
+   ], 
+   "stemUpSE": [
+    1.28, 
+    0.104
+   ]
+  }, 
+  "noteheadBlackParens": {
+   "stemDownNW": [
+    0.0, 
+    -0.188
+   ], 
+   "stemUpSE": [
+    1.268, 
+    0.14
+   ]
+  }, 
+  "noteheadCircleX": {
+   "stemDownNW": [
+    0.0, 
+    -0.064
+   ], 
+   "stemUpSE": [
+    1.364, 
+    0.06
+   ]
+  }, 
+  "noteheadCircledBlackLarge": {
+   "stemDownNW": [
+    0.0, 
+    -0.188
+   ], 
+   "stemUpSE": [
+    1.268, 
+    0.14
+   ]
+  }, 
+  "noteheadCircledHalfLarge": {
+   "stemDownNW": [
+    0.0, 
+    -0.204
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.268
+   ]
+  }, 
+  "noteheadDiamondBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.02
+   ], 
+   "stemUpSE": [
+    1.132, 
+    -0.028
+   ]
+  }, 
+  "noteheadDiamondBlackWide": {
+   "stemDownNW": [
+    0.0, 
+    0.012
+   ], 
+   "stemUpSE": [
+    1.28, 
+    0.028
+   ]
+  }, 
+  "noteheadDiamondHalfOld": {
+   "stemDownNW": [
+    0.0, 
+    0.016
+   ], 
+   "stemUpSE": [
+    1.06, 
+    0.0
+   ]
+  }, 
+  "noteheadDiamondHalfWide": {
+   "stemDownNW": [
+    0.0, 
+    0.04
+   ], 
+   "stemUpSE": [
+    1.06, 
+    -0.004
+   ]
+  }, 
+  "noteheadDoubleWhole": {
+   "noteheadOrigin": [
+    0.36, 
+    0.0
+   ]
+  }, 
+  "noteheadHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.2
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.276
+   ]
+  }, 
+  "noteheadHalfParens": {
+   "stemDownNW": [
+    0.0, 
+    -0.2
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.276
+   ]
+  }, 
+  "noteheadHalfWithX": {
+   "stemDownNW": [
+    0.0, 
+    0.004
+   ], 
+   "stemUpSE": [
+    1.656, 
+    0.004
+   ]
+  }, 
+  "noteheadMoonBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.304, 
+    0.424
+   ]
+  }, 
+  "noteheadMoonWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.304, 
+    0.424
+   ]
+  }, 
+  "noteheadPlusBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.016
+   ], 
+   "stemUpSE": [
+    0.976, 
+    -0.016
+   ]
+  }, 
+  "noteheadSlashDiamondWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.008
+   ], 
+   "stemUpSE": [
+    2.096, 
+    -0.024
+   ]
+  }, 
+  "noteheadSlashHorizontalEnds": {
+   "stemDownNW": [
+    0.0, 
+    -1.04
+   ], 
+   "stemUpSE": [
+    2.288, 
+    1.048
+   ]
+  }, 
+  "noteheadSlashVerticalEnds": {
+   "stemDownNW": [
+    0.0, 
+    -0.944
+   ], 
+   "stemUpSE": [
+    1.464, 
+    1.044
+   ]
+  }, 
+  "noteheadSlashVerticalEndsSmall": {
+   "stemDownNW": [
+    0.0, 
+    -0.668
+   ], 
+   "stemUpSE": [
+    1.352, 
+    0.656
+   ]
+  }, 
+  "noteheadSlashWhiteHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.944
+   ], 
+   "stemUpSE": [
+    4.108, 
+    0.92
+   ]
+  }, 
+  "noteheadSlashedBlack1": {
+   "stemDownNW": [
+    0.0, 
+    -0.188
+   ], 
+   "stemUpSE": [
+    1.268, 
+    0.164
+   ]
+  }, 
+  "noteheadSlashedBlack2": {
+   "stemDownNW": [
+    0.0, 
+    -0.188
+   ], 
+   "stemUpSE": [
+    1.268, 
+    0.136
+   ]
+  }, 
+  "noteheadSlashedHalf1": {
+   "stemDownNW": [
+    0.0, 
+    -0.204
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.272
+   ]
+  }, 
+  "noteheadSlashedHalf2": {
+   "stemDownNW": [
+    0.0, 
+    -0.204
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.272
+   ]
+  }, 
+  "noteheadSquareBlack": {
+   "stemDownNW": [
+    0.02, 
+    -0.416
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.404
+   ]
+  }, 
+  "noteheadSquareWhite": {
+   "stemDownNW": [
+    0.02, 
+    -0.416
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.404
+   ]
+  }, 
+  "noteheadTriangleDownBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.352
+   ], 
+   "stemUpSE": [
+    1.164, 
+    0.344
+   ]
+  }, 
+  "noteheadTriangleDownWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.444
+   ], 
+   "stemUpSE": [
+    1.16, 
+    0.436
+   ]
+  }, 
+  "noteheadTriangleLeftBlack": {
+   "stemDownNW": [
+    0.004, 
+    -0.468
+   ], 
+   "stemUpSE": [
+    1.264, 
+    -0.472
+   ]
+  }, 
+  "noteheadTriangleLeftWhite": {
+   "stemDownNW": [
+    0.004, 
+    -0.472
+   ], 
+   "stemUpSE": [
+    1.12, 
+    -0.472
+   ]
+  }, 
+  "noteheadTriangleRightBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.472
+   ], 
+   "stemUpSE": [
+    1.256, 
+    0.368
+   ]
+  }, 
+  "noteheadTriangleRightWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.404
+   ], 
+   "stemUpSE": [
+    1.112, 
+    0.516
+   ]
+  }, 
+  "noteheadTriangleRoundDownBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.196
+   ], 
+   "stemUpSE": [
+    1.232, 
+    0.208
+   ]
+  }, 
+  "noteheadTriangleRoundDownWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.196
+   ], 
+   "stemUpSE": [
+    1.232, 
+    0.208
+   ]
+  }, 
+  "noteheadTriangleUpBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.516
+   ], 
+   "stemUpSE": [
+    1.44, 
+    -0.512
+   ]
+  }, 
+  "noteheadTriangleUpRightBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.452
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.448
+   ]
+  }, 
+  "noteheadTriangleUpRightWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.452
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.448
+   ]
+  }, 
+  "noteheadTriangleUpWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.516
+   ], 
+   "stemUpSE": [
+    1.44, 
+    -0.512
+   ]
+  }, 
+  "noteheadVoidWithX": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.656, 
+    0.0
+   ]
+  }, 
+  "noteheadXBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.528
+   ], 
+   "stemUpSE": [
+    1.108, 
+    0.464
+   ]
+  }, 
+  "noteheadXOrnate": {
+   "stemDownNW": [
+    0.0, 
+    -0.416
+   ], 
+   "stemUpSE": [
+    0.956, 
+    0.396
+   ]
+  }, 
+  "wiggleGlissando": {
+   "repeatOffset": [
+    1.036, 
+    0.0
+   ]
+  }, 
+  "wiggleTrill": {
+   "repeatOffset": [
+    1.036, 
+    0.0
+   ]
+  }
+ }
+}

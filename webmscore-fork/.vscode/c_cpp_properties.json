@@ -1,0 +1,58 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/include/**",
+                "/usr/local/include/**",
+                "/usr/emsdk/upstream/emscripten/system/include/*"
+            ],
+            "defines": [
+                "Q_OS_WASM",
+                "ENABLE_AUDIO_EXPORT",
+                "HAVE_EXTERNAL_XIPH_LIBS",
+                "IF_ASSERT_FAILED=if /**(!(x))*/"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-x64",
+            "compileCommands": "${workspaceFolder}/build.debug/compile_commands.json",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/build.debug/",
+                    "${workspaceFolder}/mscore/",
+                    "${workspaceFolder}/libmscore/",
+                    "${workspaceFolder}/assets/",
+                    "${workspaceFolder}/audiofile/",
+                    "${workspaceFolder}/awl/",
+                    "${workspaceFolder}/build/",
+                    "${workspaceFolder}/bww2mxml/",
+                    "${workspaceFolder}/crashreporter/",
+                    "${workspaceFolder}/demos/",
+                    "${workspaceFolder}/doc/",
+                    "${workspaceFolder}/effects/",
+                    "${workspaceFolder}/fluid/",
+                    "${workspaceFolder}/fonts/",
+                    "${workspaceFolder}/fonttools/",
+                    "${workspaceFolder}/manual/",
+                    "${workspaceFolder}/midi/",
+                    "${workspaceFolder}/miditools/",
+                    "${workspaceFolder}/mscore/",
+                    "${workspaceFolder}/mtest/",
+                    "${workspaceFolder}/rdoc/",
+                    "${workspaceFolder}/share/",
+                    "${workspaceFolder}/synthesizer/",
+                    "${workspaceFolder}/test/",
+                    "${workspaceFolder}/telemetry/",
+                    "${workspaceFolder}/thirdparty/",
+                    "${workspaceFolder}/vtest/",
+                    "${workspaceFolder}/zerberus/",
+                    "${workspaceFolder}/*"
+                ]
+            }
+        }
+    ],
+    "version": 4
+}

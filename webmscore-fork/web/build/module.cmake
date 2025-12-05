@@ -1,0 +1,3 @@
+
+# for compatibility
+include(SetupModule)

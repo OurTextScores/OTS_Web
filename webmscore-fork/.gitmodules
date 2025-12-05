@@ -1,0 +1,9 @@
+[submodule "thirdparty/freetype-2-10"]
+	path = thirdparty/freetype-2-10
+	url = https://github.com/freetype/freetype.git
+[submodule "thirdparty/brotli"]
+	path = thirdparty/brotli
+	url = https://github.com/google/brotli.git
+[submodule "thirdparty/libsndfile"]
+	path = thirdparty/libsndfile
+	url = https://github.com/libsndfile/libsndfile.git

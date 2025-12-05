@@ -1,0 +1,251 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * MuseScore-CLA-applies
+ *
+ * MuseScore
+ * Music Composition & Notation
+ *
+ * Copyright (C) 2021 MuseScore BVBA and others
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#ifndef MU_UICOMPONENTS_POPUPVIEW_H
+#define MU_UICOMPONENTS_POPUPVIEW_H
+
+#include <QQuickItem>
+#include <QQmlParserStatus>
+
+#include "types/ret.h"
+#include "async/asyncable.h"
+
+#include "modularity/ioc.h"
+#include "ui/imainwindow.h"
+#include "ui/iuiconfiguration.h"
+#include "ui/inavigationcontroller.h"
+#include "ui/view/navigationcontrol.h"
+
+#include "popupwindow/ipopupwindow.h"
+#include "internal/popupviewclosecontroller.h"
+
+class QQuickCloseEvent;
+
+namespace mu::uicomponents {
+class PopupView : public QObject, public QQmlParserStatus, async::Asyncable
+{
+    Q_OBJECT
+    Q_INTERFACES(QQmlParserStatus)
+
+    Q_PROPERTY(QQuickItem * parent READ parentItem WRITE setParentItem NOTIFY parentItemChanged)
+    Q_PROPERTY(QQuickItem * contentItem READ contentItem WRITE setContentItem NOTIFY contentItemChanged)
+
+    Q_PROPERTY(QWindow * window READ window NOTIFY windowChanged)
+
+    //! NOTE Local, related parent
+    Q_PROPERTY(qreal x READ localX WRITE setLocalX NOTIFY xChanged)
+    Q_PROPERTY(qreal y READ localY WRITE setLocalY NOTIFY yChanged)
+
+    Q_PROPERTY(bool showArrow READ showArrow WRITE setShowArrow NOTIFY showArrowChanged)
+    Q_PROPERTY(int padding READ padding WRITE setPadding NOTIFY paddingChanged)
+
+    Q_PROPERTY(QQuickItem * anchorItem READ anchorItem WRITE setAnchorItem NOTIFY anchorItemChanged)
+    Q_PROPERTY(bool opensUpward READ opensUpward NOTIFY opensUpwardChanged)
+    Q_PROPERTY(int arrowX READ arrowX WRITE setArrowX NOTIFY arrowXChanged)
+
+    Q_PROPERTY(bool isOpened READ isOpened NOTIFY isOpenedChanged)
+    Q_PROPERTY(OpenPolicy openPolicy READ openPolicy WRITE setOpenPolicy NOTIFY openPolicyChanged)
+    Q_PROPERTY(ClosePolicy closePolicy READ closePolicy WRITE setClosePolicy NOTIFY closePolicyChanged)
+
+    Q_PROPERTY(
+        bool activateParentOnClose READ activateParentOnClose WRITE setActivateParentOnClose NOTIFY activateParentOnCloseChanged)
+
+    //! NOTE Used for dialogs, but be here so that dialogs and just popups have one api
+    Q_PROPERTY(QString title READ title WRITE setTitle NOTIFY titleChanged)
+    Q_PROPERTY(QString objectId READ objectId WRITE setObjectId NOTIFY objectIdChanged)
+    Q_PROPERTY(bool modal READ modal WRITE setModal NOTIFY modalChanged)
+    Q_PROPERTY(bool frameless READ frameless WRITE setFrameless NOTIFY framelessChanged)
+    Q_PROPERTY(bool resizable READ resizable WRITE setResizable NOTIFY resizableChanged)
+    Q_PROPERTY(QVariantMap ret READ ret WRITE setRet NOTIFY retChanged)
+
+    Q_ENUMS(OpenPolicy)
+    Q_ENUMS(ClosePolicy)
+
+    INJECT(uicomponents, ui::IMainWindow, mainWindow)
+    INJECT(uicomponents, ui::IUiConfiguration, uiConfiguration)
+    INJECT(uicomponents, ui::INavigationController, navigationController)
+
+public:
+
+    explicit PopupView(QQuickItem* parent = nullptr);
+    ~PopupView() override;
+
+    enum OpenPolicy {
+        Default = 0,
+        NoActivateFocus
+    };
+
+    enum ClosePolicy {
+        NoAutoClose = 0,
+        CloseOnPressOutsideParent
+    };
+
+    QQuickItem* parentItem() const;
+    QQuickItem* contentItem() const;
+
+    QWindow* window() const;
+
+    qreal localX() const;
+    qreal localY() const;
+    QRect geometry() const;
+
+    Q_INVOKABLE void forceActiveFocus();
+
+    Q_INVOKABLE void open();
+    Q_INVOKABLE void close(bool force = false);
+    Q_INVOKABLE void toggleOpened();
+
+    Q_INVOKABLE void setParentWindow(QWindow* window);
+
+    OpenPolicy openPolicy() const;
+    ClosePolicy closePolicy() const;
+
+    bool activateParentOnClose() const;
+
+    ui::INavigationControl* navigationParentControl() const;
+
+    bool isOpened() const;
+
+    QString objectId() const;
+    QString title() const;
+    bool modal() const;
+    bool frameless() const;
+    bool resizable() const;
+    QVariantMap ret() const;
+
+    bool opensUpward() const;
+    int arrowX() const;
+    int padding() const;
+    bool showArrow() const;
+    QQuickItem* anchorItem() const;
+
+public slots:
+    void setParentItem(QQuickItem* parent);
+    void setContentItem(QQuickItem* content);
+    void setLocalX(qreal x);
+    void setLocalY(qreal y);
+    void setOpenPolicy(OpenPolicy openPolicy);
+    void setClosePolicy(ClosePolicy closePolicy);
+    void setNavigationParentControl(ui::INavigationControl* parentNavigationControl);
+    void setObjectId(QString objectId);
+    void setTitle(QString title);
+    void setModal(bool modal);
+    void setFrameless(bool frameless);
+    void setResizable(bool resizable);
+    void setRet(QVariantMap ret);
+
+    void setOpensUpward(bool opensUpward);
+    void setArrowX(int arrowX);
+    void setPadding(int padding);
+    void setShowArrow(bool showArrow);
+    void setAnchorItem(QQuickItem* anchorItem);
+
+    void setActivateParentOnClose(bool activateParentOnClose);
+
+signals:
+    void parentItemChanged();
+    void contentItemChanged();
+    void windowChanged();
+    void xChanged(qreal x);
+    void yChanged(qreal y);
+    void openPolicyChanged(OpenPolicy openPolicy);
+    void closePolicyChanged(ClosePolicy closePolicy);
+    void navigationParentControlChanged(ui::INavigationControl* navigationParentControl);
+    void objectIdChanged(QString objectId);
+    void titleChanged(QString title);
+    void modalChanged(bool modal);
+    void framelessChanged(bool frameless);
+    void resizableChanged(bool resizable);
+    void retChanged(QVariantMap ret);
+
+    void isOpenedChanged();
+    void opened();
+    void aboutToClose(QQuickCloseEvent* closeEvent);
+    void closed(bool force);
+
+    void opensUpwardChanged(bool opensUpward);
+    void arrowXChanged(int arrowX);
+    void paddingChanged(int padding);
+    void showArrowChanged(bool showArrow);
+    void anchorItemChanged(QQuickItem* anchorItem);
+
+    void activateParentOnCloseChanged(bool activateParentOnClose);
+
+protected:
+    virtual bool isDialog() const;
+    void classBegin() override;
+    void componentComplete() override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
+    void doFocusOut();
+    void windowMoveEvent();
+
+    bool isMouseWithinBoundaries(const QPoint& mousePos) const;
+
+    QWindow* qWindow() const;
+    virtual void beforeShow();
+    virtual void onHidden();
+
+    void repositionWindowIfNeed();
+
+    void setErrCode(Ret::Code code);
+
+    QScreen* resolveScreen() const;
+    QRect currentScreenGeometry() const;
+    virtual void updatePosition();
+    void updateContentPosition();
+
+    virtual QRect viewGeometry() const;
+    QRectF anchorGeometry() const;
+
+    void resolveNavigationParentControl();
+    void activateNavigationParentControl();
+
+    IPopupWindow* m_window = nullptr;
+
+    QQuickItem* m_contentItem = nullptr;
+
+    QQuickItem* m_anchorItem = nullptr;
+
+    QPointF m_localPos;
+    QPointF m_globalPos;
+    OpenPolicy m_openPolicy = OpenPolicy::Default;
+    ClosePolicy m_closePolicy = ClosePolicy::CloseOnPressOutsideParent;
+    bool m_activateParentOnClose = true;
+    ui::INavigationControl* m_navigationParentControl = nullptr;
+    QString m_objectId;
+    QString m_title;
+    bool m_modal = true;
+    bool m_frameless = false;
+    bool m_resizable = false;
+    QVariantMap m_ret;
+    bool m_opensUpward = false;
+    int m_arrowX = 0;
+    int m_padding = 0;
+    bool m_showArrow = false;
+
+    PopupViewCloseController* m_closeController = nullptr;
+    bool m_forceClosed = false;
+};
+}
+
+#endif // MU_UICOMPONENTS_POPUPVIEW_H

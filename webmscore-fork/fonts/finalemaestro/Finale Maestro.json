@@ -1,0 +1,3414 @@
+{
+ "engravingDefaults": {
+  "arrowShaftThickness": 0.1, 
+  "barlineSeparation": 0.5, 
+  "beamSpacing": 0.25, 
+  "beamThickness": 0.5, 
+  "bracketThickness": 0.5, 
+  "dashedBarlineDashLength": 0.42, 
+  "dashedBarlineGapLength": 0.3, 
+  "dashedBarlineThickness": 0.08, 
+  "hairpinThickness": 0.1, 
+  "legerLineExtension": 0.25, 
+  "legerLineThickness": 0.11, 
+  "lyricLineThickness": 0.1, 
+  "octaveLineThickness": 0.1, 
+  "pedalLineThickness": 0.1, 
+  "repeatBarlineDotSeparation": 0.34, 
+  "repeatEndingLineThickness": 0.13, 
+  "slurEndpointThickness": 0.05, 
+  "slurMidpointThickness": 0.25, 
+  "staffLineThickness": 0.091, 
+  "stemThickness": 0.091, 
+  "subBracketThickness": 0.1, 
+  "textEnclosureThickness": 0.13, 
+  "thickBarlineThickness": 0.5, 
+  "thinBarlineThickness": 0.1,
+  "thinThickBarlineSeparation": 0.5,
+  "tieEndpointThickness": 0.05, 
+  "tieMidpointThickness": 0.25, 
+  "tupletBracketThickness": 0.1
+ }, 
+ "fontName": "Finale Maestro", 
+ "fontVersion": 2.7, 
+ "glyphsWithAnchors": {
+  "U+F600": {
+   "noteheadOrigin": [
+    0.36, 
+    0.0
+   ]
+  }, 
+  "U+F601": {
+   "noteheadOrigin": [
+    0.056, 
+    0.0
+   ]
+  }, 
+  "U+F603": {
+   "stemDownNW": [
+    0.0, 
+    -0.208
+   ], 
+   "stemUpSE": [
+    1.412, 
+    0.136
+   ]
+  }, 
+  "U+F604": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.372, 
+    0.168
+   ]
+  }, 
+  "U+F611": {
+   "stemDownNW": [
+    0.0, 
+    -0.46
+   ], 
+   "stemUpSE": [
+    1.14, 
+    0.456
+   ]
+  }, 
+  "U+F612": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.536, 
+    0.0
+   ]
+  }, 
+  "U+F613": {
+   "stemDownNW": [
+    0.0, 
+    -0.5
+   ], 
+   "stemUpSE": [
+    1.04, 
+    0.5
+   ]
+  }, 
+  "U+F614": {
+   "stemDownNW": [
+    0.0, 
+    -0.5
+   ], 
+   "stemUpSE": [
+    1.04, 
+    0.5
+   ]
+  }, 
+  "U+F615": {
+   "stemDownNW": [
+    0.0, 
+    -0.5
+   ], 
+   "stemUpSE": [
+    1.04, 
+    0.5
+   ]
+  }, 
+  "U+F616": {
+   "stemDownNW": [
+    0.0, 
+    -0.52
+   ], 
+   "stemUpSE": [
+    1.4, 
+    -0.52
+   ]
+  }, 
+  "U+F617": {
+   "stemDownNW": [
+    0.0, 
+    0.472
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.472
+   ]
+  }, 
+  "U+F618": {
+   "stemDownNW": [
+    0.0, 
+    -0.496
+   ], 
+   "stemUpSE": [
+    1.148, 
+    -0.496
+   ]
+  }, 
+  "U+F619": {
+   "stemDownNW": [
+    0.0, 
+    -0.532
+   ], 
+   "stemUpSE": [
+    1.148, 
+    0.34
+   ]
+  }, 
+  "U+F61A": {
+   "stemDownNW": [
+    0.0, 
+    0.472
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.472
+   ]
+  }, 
+  "U+F61B": {
+   "stemDownNW": [
+    0.0, 
+    0.06
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.06
+   ]
+  }, 
+  "U+F61C": {
+   "stemDownNW": [
+    0.0, 
+    0.184
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.184
+   ]
+  }, 
+  "U+F624": {
+   "stemDownNW": [
+    0.0, 
+    -0.472
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.472
+   ]
+  }, 
+  "U+F625": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.132, 
+    0.0
+   ]
+  }, 
+  "U+F626": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.0
+   ]
+  }, 
+  "U+F627": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.092, 
+    0.0
+   ]
+  }, 
+  "U+F628": {
+   "stemDownNW": [
+    0.0, 
+    -0.524
+   ], 
+   "stemUpSE": [
+    1.324, 
+    0.48
+   ]
+  }, 
+  "U+F629": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    0.952, 
+    0.0
+   ]
+  }, 
+  "U+F690": {
+   "stemDownNW": [
+    0.0, 
+    -0.168
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.132
+   ]
+  }, 
+  "U+F691": {
+   "stemDownNW": [
+    0.0, 
+    -0.176
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "U+F692": {
+   "stemDownNW": [
+    0.0, 
+    -0.18
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.132
+   ]
+  }, 
+  "U+F693": {
+   "stemDownNW": [
+    0.0, 
+    -0.168
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "U+F694": {
+   "stemDownNW": [
+    0.0, 
+    -0.18
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.132
+   ]
+  }, 
+  "U+F695": {
+   "stemDownNW": [
+    0.0, 
+    -0.176
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.132
+   ]
+  }, 
+  "U+F696": {
+   "stemDownNW": [
+    0.0, 
+    -0.176
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.132
+   ]
+  }, 
+  "U+F697": {
+   "stemDownNW": [
+    0.0, 
+    -0.176
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.132
+   ]
+  }, 
+  "U+F698": {
+   "stemDownNW": [
+    0.0, 
+    -0.176
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "U+F699": {
+   "stemDownNW": [
+    0.0, 
+    -0.144
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.088
+   ]
+  }, 
+  "U+F69A": {
+   "stemDownNW": [
+    0.0, 
+    -0.132
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "U+F69B": {
+   "stemDownNW": [
+    0.0, 
+    -0.132
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.088
+   ]
+  }, 
+  "U+F69C": {
+   "stemDownNW": [
+    0.0, 
+    -0.132
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "U+F69D": {
+   "stemDownNW": [
+    0.0, 
+    -0.14
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "U+F69E": {
+   "stemDownNW": [
+    0.0, 
+    -0.14
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "U+F69F": {
+   "stemDownNW": [
+    0.0, 
+    -0.132
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "U+F6A0": {
+   "stemDownNW": [
+    0.0, 
+    -0.132
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.088
+   ]
+  }, 
+  "U+F6A1": {
+   "stemDownNW": [
+    0.0, 
+    -0.14
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "U+F6AD": {
+   "stemDownNW": [
+    0.0, 
+    -0.14
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "U+F6AE": {
+   "stemDownNW": [
+    0.0, 
+    -0.168
+   ], 
+   "stemUpSE": [
+    1.396, 
+    0.14
+   ]
+  }, 
+  "U+F6B0": {
+   "stemDownNW": [
+    0.0, 
+    -0.152
+   ], 
+   "stemUpSE": [
+    1.416, 
+    0.14
+   ]
+  }, 
+  "U+F701": {
+   "stemUpNW": [
+    0.0, 
+    -0.008
+   ]
+  }, 
+  "U+F702": {
+   "stemUpNW": [
+    0.0, 
+    -0.052
+   ]
+  }, 
+  "U+F703": {
+   "stemUpNW": [
+    0.0, 
+    -0.012
+   ]
+  }, 
+  "U+F704": {
+   "stemDownSW": [
+    0.0, 
+    0.044
+   ]
+  }, 
+  "U+F705": {
+   "stemDownSW": [
+    0.0, 
+    0.052
+   ]
+  }, 
+  "accidentalSharpOneArrowDown": {
+   "cutOutSW": [
+    0.12, 
+    -0.916
+   ]
+  }, 
+  "accidentalSharpThreeArrowsDown": {
+   "cutOutSW": [
+    0.3, 
+    -1.464
+   ]
+  }, 
+  "beamAccelRit1": {
+   "repeatOffset": [
+    2.564, 
+    0.0
+   ]
+  }, 
+  "beamAccelRit10": {
+   "repeatOffset": [
+    1.148, 
+    0.0
+   ]
+  }, 
+  "beamAccelRit11": {
+   "repeatOffset": [
+    0.972, 
+    0.0
+   ]
+  }, 
+  "beamAccelRit12": {
+   "repeatOffset": [
+    0.824, 
+    0.0
+   ]
+  }, 
+  "beamAccelRit13": {
+   "repeatOffset": [
+    0.66, 
+    0.0
+   ]
+  }, 
+  "beamAccelRit14": {
+   "repeatOffset": [
+    0.5, 
+    0.0
+   ]
+  }, 
+  "beamAccelRit15": {
+   "repeatOffset": [
+    0.34, 
+    -0.004
+   ]
+  }, 
+  "beamAccelRit2": {
+   "repeatOffset": [
+    2.412, 
+    0.0
+   ]
+  }, 
+  "beamAccelRit3": {
+   "repeatOffset": [
+    2.244, 
+    -0.008
+   ]
+  }, 
+  "beamAccelRit4": {
+   "repeatOffset": [
+    2.084, 
+    0.0
+   ]
+  }, 
+  "beamAccelRit5": {
+   "repeatOffset": [
+    1.92, 
+    0.02
+   ]
+  }, 
+  "beamAccelRit6": {
+   "repeatOffset": [
+    1.764, 
+    0.008
+   ]
+  }, 
+  "beamAccelRit7": {
+   "repeatOffset": [
+    1.616, 
+    0.0
+   ]
+  }, 
+  "beamAccelRit8": {
+   "repeatOffset": [
+    1.456, 
+    0.0
+   ]
+  }, 
+  "beamAccelRit9": {
+   "repeatOffset": [
+    1.304, 
+    0.0
+   ]
+  }, 
+  "flag1024thDown": {
+   "stemDownSW": [
+    0.0, 
+    -3.856
+   ]
+  }, 
+  "flag1024thUp": {
+   "stemUpNW": [
+    0.0, 
+    4.064
+   ]
+  }, 
+  "flag128thDown": {
+   "stemDownSW": [
+    0.0, 
+    -2.076
+   ]
+  }, 
+  "flag128thUp": {
+   "stemUpNW": [
+    0.0, 
+    1.9
+   ]
+  }, 
+  "flag16thDown": {
+   "stemDownSW": [
+    0.0, 
+    0.128
+   ]
+  }, 
+  "flag16thUp": {
+   "stemUpNW": [
+    0.0, 
+    -0.088
+   ]
+  }, 
+  "flag256thDown": {
+   "stemDownSW": [
+    0.0, 
+    -2.812
+   ]
+  }, 
+  "flag256thUp": {
+   "stemUpNW": [
+    0.0, 
+    2.592
+   ]
+  }, 
+  "flag32ndDown": {
+   "stemDownSW": [
+    0.0, 
+    -0.448
+   ]
+  }, 
+  "flag32ndUp": {
+   "stemUpNW": [
+    0.0, 
+    0.376
+   ]
+  }, 
+  "flag512thDown": {
+   "stemDownSW": [
+    0.0, 
+    -3.336
+   ]
+  }, 
+  "flag512thUp": {
+   "stemUpNW": [
+    0.0, 
+    3.324
+   ]
+  }, 
+  "flag64thDown": {
+   "stemDownSW": [
+    0.0, 
+    -1.244
+   ]
+  }, 
+  "flag64thUp": {
+   "stemUpNW": [
+    0.0, 
+    1.172
+   ]
+  }, 
+  "flag8thDown": {
+   "graceNoteSlashNW": [
+    -0.416, 
+    2.34
+   ], 
+   "graceNoteSlashSE": [
+    1.508, 
+    0.884
+   ], 
+   "stemDownSW": [
+    0.0, 
+    0.132
+   ]
+  }, 
+  "flag8thUp": {
+   "graceNoteSlashNE": [
+    1.472, 
+    -0.692
+   ], 
+   "graceNoteSlashSW": [
+    -0.4, 
+    -2.324
+   ], 
+   "stemUpNW": [
+    0.0, 
+    -0.04
+   ]
+  }, 
+  "gClefLigatedNumberAbove": {
+   "numeralBottom": [
+    2.22, 
+    3.476
+   ]
+  }, 
+  "gClefLigatedNumberBelow": {
+   "numeralBottom": [
+    0.94, 
+    -2.596
+   ]
+  }, 
+  "guitarVibratoStroke": {
+   "repeatOffset": [
+    0.572, 
+    0.0
+   ]
+  }, 
+  "guitarWideVibratoStroke": {
+   "repeatOffset": [
+    0.824, 
+    0.0
+   ]
+  }, 
+  "mensuralNoteheadMinimaWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.272, 
+    0.0
+   ]
+  }, 
+  "metNoteDoubleWhole": {
+   "noteheadOrigin": [
+    0.396, 
+    0.0
+   ]
+  }, 
+  "noteABlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteAFlatBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteAFlatHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteAHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteASharpBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteASharpHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteBBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteBFlatBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteBFlatHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteBHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteBSharpBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteBSharpHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteCBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteCFlatBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteCFlatHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteCHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteCSharpBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteCSharpHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteDBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteDFlatBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteDFlatHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteDHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteDSharpBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteDSharpHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteDoBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteDoHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteEBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteEFlatBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteEFlatHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteEHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteESharpBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteESharpHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteEmptyBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteEmptyHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteFBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteFFlatBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteFFlatHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteFHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteFSharpBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteFSharpHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteFaBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteFaHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteGBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteGFlatBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteGFlatHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteGHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteGSharpBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteGSharpHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteHBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteHHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteHSharpBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteHSharpHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteLaBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteLaHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteMiBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteMiHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteReBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteReHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteShapeArrowheadLeftBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.22, 
+    0.448
+   ]
+  }, 
+  "noteShapeArrowheadLeftWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.22, 
+    0.448
+   ]
+  }, 
+  "noteShapeDiamondBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.532, 
+    0.0
+   ]
+  }, 
+  "noteShapeDiamondWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.532, 
+    0.0
+   ]
+  }, 
+  "noteShapeIsoscelesTriangleBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.272, 
+    0.0
+   ]
+  }, 
+  "noteShapeIsoscelesTriangleWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.272, 
+    0.0
+   ]
+  }, 
+  "noteShapeKeystoneBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.516
+   ], 
+   "stemUpSE": [
+    1.412, 
+    0.516
+   ]
+  }, 
+  "noteShapeKeystoneWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.516
+   ], 
+   "stemUpSE": [
+    1.412, 
+    0.516
+   ]
+  }, 
+  "noteShapeMoonBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.06
+   ], 
+   "stemUpSE": [
+    1.532, 
+    0.06
+   ]
+  }, 
+  "noteShapeMoonLeftBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.124, 
+    0.0
+   ]
+  }, 
+  "noteShapeMoonLeftWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.124, 
+    0.0
+   ]
+  }, 
+  "noteShapeMoonWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.06
+   ], 
+   "stemUpSE": [
+    1.532, 
+    0.06
+   ]
+  }, 
+  "noteShapeQuarterMoonBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.516
+   ], 
+   "stemUpSE": [
+    1.12, 
+    0.0
+   ]
+  }, 
+  "noteShapeQuarterMoonWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.516
+   ], 
+   "stemUpSE": [
+    1.12, 
+    0.0
+   ]
+  }, 
+  "noteShapeRoundBlack": {
+   "stemDownNW": [
+    0.004, 
+    -0.16
+   ], 
+   "stemUpSE": [
+    1.276, 
+    0.14
+   ]
+  }, 
+  "noteShapeRoundWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.2
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.196
+   ]
+  }, 
+  "noteShapeSquareBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.52
+   ], 
+   "stemUpSE": [
+    1.532, 
+    -0.52
+   ]
+  }, 
+  "noteShapeSquareWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.52
+   ], 
+   "stemUpSE": [
+    1.532, 
+    -0.52
+   ]
+  }, 
+  "noteShapeTriangleLeftBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.52
+   ], 
+   "stemUpSE": [
+    1.532, 
+    -0.332
+   ]
+  }, 
+  "noteShapeTriangleLeftWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.52
+   ], 
+   "stemUpSE": [
+    1.532, 
+    -0.332
+   ]
+  }, 
+  "noteShapeTriangleRightBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.52
+   ], 
+   "stemUpSE": [
+    1.532, 
+    -0.52
+   ]
+  }, 
+  "noteShapeTriangleRightWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.52
+   ], 
+   "stemUpSE": [
+    1.532, 
+    -0.52
+   ]
+  }, 
+  "noteShapeTriangleRoundBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.18
+   ], 
+   "stemUpSE": [
+    1.532, 
+    0.18
+   ]
+  }, 
+  "noteShapeTriangleRoundLeftBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.396, 
+    0.0
+   ]
+  }, 
+  "noteShapeTriangleRoundLeftWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.396, 
+    0.0
+   ]
+  }, 
+  "noteShapeTriangleRoundWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.18
+   ], 
+   "stemUpSE": [
+    1.532, 
+    0.18
+   ]
+  }, 
+  "noteShapeTriangleUpBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.52
+   ], 
+   "stemUpSE": [
+    1.532, 
+    -0.52
+   ]
+  }, 
+  "noteShapeTriangleUpWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.52
+   ], 
+   "stemUpSE": [
+    1.532, 
+    -0.52
+   ]
+  }, 
+  "noteSiBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteSiHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteSoBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteSoHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteTiBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.4, 
+    0.14
+   ]
+  }, 
+  "noteTiHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.128
+   ], 
+   "stemUpSE": [
+    1.452, 
+    0.096
+   ]
+  }, 
+  "noteheadBlack": {
+   "cutOutNW": [
+    0.22, 
+    0.272
+   ], 
+   "cutOutSE": [
+    0.976, 
+    -0.348
+   ], 
+   "splitStemDownNE": [
+    1.064, 
+    -0.28
+   ], 
+   "splitStemDownNW": [
+    0.116, 
+    -0.42
+   ], 
+   "splitStemUpSE": [
+    1.116, 
+    0.428
+   ], 
+   "splitStemUpSW": [
+    0.332, 
+    0.356
+   ], 
+   "stemDownNW": [
+    0.0, 
+    -0.16
+   ], 
+   "stemUpSE": [
+    1.272, 
+    0.14
+   ]
+  }, 
+  "noteheadBlackParens": {
+   "stemDownNW": [
+    0.532, 
+    -0.148
+   ], 
+   "stemUpSE": [
+    1.744, 
+    0.128
+   ]
+  }, 
+  "noteheadCircleSlash": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.032, 
+    0.0
+   ]
+  }, 
+  "noteheadCircleX": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.088, 
+    0.0
+   ]
+  }, 
+  "noteheadCircleXDoubleWhole": {
+   "noteheadOrigin": [
+    0.384, 
+    0.0
+   ]
+  }, 
+  "noteheadCircleXHalf": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.088, 
+    0.0
+   ]
+  }, 
+  "noteheadCircledBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.14
+   ], 
+   "stemUpSE": [
+    1.212, 
+    0.124
+   ]
+  }, 
+  "noteheadCircledBlackLarge": {
+   "stemDownNW": [
+    0.0, 
+    -0.148
+   ], 
+   "stemUpSE": [
+    1.212, 
+    0.128
+   ]
+  }, 
+  "noteheadCircledDoubleWhole": {
+   "noteheadOrigin": [
+    0.436, 
+    0.0
+   ]
+  }, 
+  "noteheadCircledDoubleWholeLarge": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    2.336, 
+    0.0
+   ]
+  }, 
+  "noteheadCircledHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.18
+   ], 
+   "stemUpSE": [
+    1.184, 
+    0.176
+   ]
+  }, 
+  "noteheadCircledHalfLarge": {
+   "stemDownNW": [
+    0.0, 
+    -0.18
+   ], 
+   "stemUpSE": [
+    1.184, 
+    0.176
+   ]
+  }, 
+  "noteheadCircledWholeLarge": {
+   "stemDownNW": [
+    0.0, 
+    -0.004
+   ], 
+   "stemUpSE": [
+    2.224, 
+    0.0
+   ]
+  }, 
+  "noteheadCircledXLarge": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.596, 
+    0.0
+   ]
+  }, 
+  "noteheadClusterDoubleWhole2nd": {
+   "noteheadOrigin": [
+    0.392, 
+    0.0
+   ]
+  }, 
+  "noteheadClusterDoubleWhole3rd": {
+   "noteheadOrigin": [
+    0.4, 
+    0.0
+   ]
+  }, 
+  "noteheadClusterHalf2nd": {
+   "stemDownNW": [
+    0.0, 
+    -0.188
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.692
+   ]
+  }, 
+  "noteheadClusterHalf3rd": {
+   "stemDownNW": [
+    0.0, 
+    -0.188
+   ], 
+   "stemUpSE": [
+    1.312, 
+    1.212
+   ]
+  }, 
+  "noteheadClusterHalfBottom": {
+   "stemDownNW": [
+    0.0, 
+    -0.204
+   ]
+  }, 
+  "noteheadClusterHalfTop": {
+   "stemUpSE": [
+    1.312, 
+    0.196
+   ]
+  }, 
+  "noteheadClusterQuarter2nd": {
+   "stemDownNW": [
+    0.0, 
+    -0.156
+   ], 
+   "stemUpSE": [
+    1.272, 
+    0.696
+   ]
+  }, 
+  "noteheadClusterQuarter3rd": {
+   "stemDownNW": [
+    0.0, 
+    -0.156
+   ], 
+   "stemUpSE": [
+    1.272, 
+    1.208
+   ]
+  }, 
+  "noteheadClusterQuarterBottom": {
+   "stemDownNW": [
+    0.0, 
+    -0.16
+   ]
+  }, 
+  "noteheadClusterQuarterTop": {
+   "stemUpSE": [
+    1.272, 
+    0.14
+   ]
+  }, 
+  "noteheadClusterRoundBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.108
+   ], 
+   "stemUpSE": [
+    1.312, 
+    2.124
+   ]
+  }, 
+  "noteheadClusterRoundWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.312, 
+    2.124
+   ]
+  }, 
+  "noteheadClusterSquareBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.428
+   ], 
+   "stemUpSE": [
+    1.208, 
+    2.412
+   ]
+  }, 
+  "noteheadClusterSquareWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.404
+   ], 
+   "stemUpSE": [
+    1.208, 
+    2.42
+   ]
+  }, 
+  "noteheadDiamondBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.132, 
+    0.0
+   ]
+  }, 
+  "noteheadDiamondBlackOld": {
+   "stemDownNW": [
+    0.0, 
+    0.008
+   ], 
+   "stemUpSE": [
+    1.2, 
+    -0.008
+   ]
+  }, 
+  "noteheadDiamondBlackWide": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.496, 
+    0.0
+   ]
+  }, 
+  "noteheadDiamondClusterBlack2nd": {
+   "stemDownNW": [
+    0.0, 
+    0.124
+   ], 
+   "stemUpSE": [
+    1.392, 
+    0.528
+   ]
+  }, 
+  "noteheadDiamondClusterBlack3rd": {
+   "stemDownNW": [
+    0.0, 
+    0.128
+   ], 
+   "stemUpSE": [
+    1.392, 
+    0.86
+   ]
+  }, 
+  "noteheadDiamondClusterBlackBottom": {
+   "stemDownNW": [
+    0.0, 
+    0.128
+   ]
+  }, 
+  "noteheadDiamondClusterBlackTop": {
+   "stemUpSE": [
+    1.392, 
+    -0.176
+   ]
+  }, 
+  "noteheadDiamondClusterWhite2nd": {
+   "stemDownNW": [
+    0.0, 
+    0.128
+   ], 
+   "stemUpSE": [
+    1.392, 
+    0.532
+   ]
+  }, 
+  "noteheadDiamondClusterWhite3rd": {
+   "stemDownNW": [
+    0.0, 
+    0.124
+   ], 
+   "stemUpSE": [
+    1.392, 
+    0.856
+   ]
+  }, 
+  "noteheadDiamondClusterWhiteBottom": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ]
+  }, 
+  "noteheadDiamondClusterWhiteTop": {
+   "stemUpSE": [
+    1.392, 
+    0.0
+   ]
+  }, 
+  "noteheadDiamondDoubleWhole": {
+   "noteheadOrigin": [
+    0.392, 
+    0.06
+   ]
+  }, 
+  "noteheadDiamondDoubleWholeOld": {
+   "noteheadOrigin": [
+    0.432, 
+    0.008
+   ]
+  }, 
+  "noteheadDiamondHalf": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.132, 
+    0.0
+   ]
+  }, 
+  "noteheadDiamondHalfFilled": {
+   "stemDownNW": [
+    0.0, 
+    0.008
+   ], 
+   "stemUpSE": [
+    1.2, 
+    -0.008
+   ]
+  }, 
+  "noteheadDiamondHalfOld": {
+   "stemDownNW": [
+    0.0, 
+    0.008
+   ], 
+   "stemUpSE": [
+    1.2, 
+    -0.008
+   ]
+  }, 
+  "noteheadDiamondHalfWide": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.496, 
+    0.0
+   ]
+  }, 
+  "noteheadDiamondOpen": {
+   "stemDownNW": [
+    0.0, 
+    0.008
+   ], 
+   "stemUpSE": [
+    1.2, 
+    -0.008
+   ]
+  }, 
+  "noteheadDiamondWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.132, 
+    0.0
+   ]
+  }, 
+  "noteheadDiamondWhiteWide": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.496, 
+    0.0
+   ]
+  }, 
+  "noteheadDoubleWhole": {
+   "noteheadOrigin": [
+    0.36, 
+    0.0
+   ]
+  }, 
+  "noteheadDoubleWholeAlt": {
+   "noteheadOrigin": [
+    0.092, 
+    0.0
+   ]
+  }, 
+  "noteheadDoubleWholeParens": {
+   "noteheadOrigin": [
+    0.908, 
+    0.0
+   ]
+  }, 
+  "noteheadDoubleWholeWithX": {
+   "noteheadOrigin": [
+    0.384, 
+    0.0
+   ]
+  }, 
+  "noteheadHalf": {
+   "cutOutNW": [
+    0.208, 
+    0.268
+   ], 
+   "cutOutSE": [
+    1.104, 
+    -0.296
+   ], 
+   "splitStemDownNE": [
+    1.012, 
+    -0.376
+   ], 
+   "splitStemDownNW": [
+    0.124, 
+    -0.436
+   ], 
+   "splitStemUpSE": [
+    1.116, 
+    0.476
+   ], 
+   "splitStemUpSW": [
+    0.332, 
+    0.372
+   ], 
+   "stemDownNW": [
+    0.0, 
+    -0.2
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.196
+   ]
+  }, 
+  "noteheadHalfParens": {
+   "stemDownNW": [
+    0.568, 
+    -0.184
+   ], 
+   "stemUpSE": [
+    1.752, 
+    0.172
+   ]
+  }, 
+  "noteheadHalfWithX": {
+   "stemDownNW": [
+    0.0, 
+    -0.2
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.196
+   ]
+  }, 
+  "noteheadHeavyX": {
+   "stemDownNW": [
+    0.0, 
+    -0.516
+   ], 
+   "stemUpSE": [
+    1.736, 
+    0.516
+   ]
+  }, 
+  "noteheadHeavyXHat": {
+   "stemDownNW": [
+    0.0, 
+    -0.516
+   ], 
+   "stemUpSE": [
+    1.664, 
+    0.592
+   ]
+  }, 
+  "noteheadLargeArrowDownBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.5
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.5
+   ]
+  }, 
+  "noteheadLargeArrowDownDoubleWhole": {
+   "noteheadOrigin": [
+    0.452, 
+    0.0
+   ]
+  }, 
+  "noteheadLargeArrowDownHalf": {
+   "stemDownNW": [
+    0.0, 
+    0.5
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.5
+   ]
+  }, 
+  "noteheadLargeArrowUpBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.5
+   ], 
+   "stemUpSE": [
+    1.26, 
+    -0.5
+   ]
+  }, 
+  "noteheadLargeArrowUpDoubleWhole": {
+   "noteheadOrigin": [
+    0.452, 
+    0.0
+   ]
+  }, 
+  "noteheadLargeArrowUpHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.5
+   ], 
+   "stemUpSE": [
+    1.26, 
+    -0.5
+   ]
+  }, 
+  "noteheadMoonBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.06
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.06
+   ]
+  }, 
+  "noteheadMoonWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.06
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.06
+   ]
+  }, 
+  "noteheadPlusBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.012, 
+    0.0
+   ]
+  }, 
+  "noteheadPlusDoubleWhole": {
+   "noteheadOrigin": [
+    0.488, 
+    0.0
+   ]
+  }, 
+  "noteheadPlusHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.172
+   ], 
+   "stemUpSE": [
+    1.068, 
+    0.16
+   ]
+  }, 
+  "noteheadRoundBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.032, 
+    0.0
+   ]
+  }, 
+  "noteheadRoundBlackDoubleSlashed": {
+   "stemDownNW": [
+    0.0, 
+    0.004
+   ], 
+   "stemUpSE": [
+    1.032, 
+    0.0
+   ]
+  }, 
+  "noteheadRoundBlackLarge": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.996, 
+    0.0
+   ]
+  }, 
+  "noteheadRoundBlackSlashed": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.032, 
+    0.0
+   ]
+  }, 
+  "noteheadRoundBlackSlashedLarge": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.996, 
+    0.0
+   ]
+  }, 
+  "noteheadRoundWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.032, 
+    0.0
+   ]
+  }, 
+  "noteheadRoundWhiteDoubleSlashed": {
+   "stemDownNW": [
+    0.0, 
+    0.004
+   ], 
+   "stemUpSE": [
+    1.032, 
+    0.0
+   ]
+  }, 
+  "noteheadRoundWhiteLarge": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.996, 
+    0.0
+   ]
+  }, 
+  "noteheadRoundWhiteSlashed": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.032, 
+    0.0
+   ]
+  }, 
+  "noteheadRoundWhiteSlashedLarge": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.996, 
+    0.0
+   ]
+  }, 
+  "noteheadRoundWhiteWithDot": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.032, 
+    0.0
+   ]
+  }, 
+  "noteheadRoundWhiteWithDotLarge": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.996, 
+    0.0
+   ]
+  }, 
+  "noteheadSlashDiamondWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    2.028, 
+    0.0
+   ]
+  }, 
+  "noteheadSlashHorizontalEnds": {
+   "stemDownNW": [
+    0.0, 
+    -1.016
+   ], 
+   "stemUpSE": [
+    2.56, 
+    1.012
+   ]
+  }, 
+  "noteheadSlashHorizontalEndsMuted": {
+   "stemDownNW": [
+    0.0, 
+    -1.016
+   ], 
+   "stemUpSE": [
+    2.536, 
+    1.012
+   ]
+  }, 
+  "noteheadSlashVerticalEnds": {
+   "stemDownNW": [
+    0.0, 
+    -0.664
+   ], 
+   "stemUpSE": [
+    1.324, 
+    0.64
+   ]
+  }, 
+  "noteheadSlashVerticalEndsMuted": {
+   "stemDownNW": [
+    0.0, 
+    -0.66
+   ], 
+   "stemUpSE": [
+    1.652, 
+    0.652
+   ]
+  }, 
+  "noteheadSlashVerticalEndsSmall": {
+   "stemDownNW": [
+    0.0, 
+    -0.26
+   ], 
+   "stemUpSE": [
+    0.756, 
+    0.264
+   ]
+  }, 
+  "noteheadSlashWhiteHalf": {
+   "stemDownNW": [
+    0.0, 
+    -1.016
+   ], 
+   "stemUpSE": [
+    3.424, 
+    1.012
+   ]
+  }, 
+  "noteheadSlashWhiteMuted": {
+   "stemDownNW": [
+    0.0, 
+    -1.016
+   ], 
+   "stemUpSE": [
+    3.304, 
+    1.012
+   ]
+  }, 
+  "noteheadSlashX": {
+   "stemDownNW": [
+    0.0, 
+    -1.016
+   ], 
+   "stemUpSE": [
+    2.076, 
+    1.012
+   ]
+  }, 
+  "noteheadSlashedBlack1": {
+   "stemDownNW": [
+    0.0, 
+    -0.164
+   ], 
+   "stemUpSE": [
+    1.28, 
+    0.136
+   ]
+  }, 
+  "noteheadSlashedBlack2": {
+   "stemDownNW": [
+    0.0, 
+    -0.16
+   ], 
+   "stemUpSE": [
+    1.272, 
+    0.14
+   ]
+  }, 
+  "noteheadSlashedDoubleWhole1": {
+   "noteheadOrigin": [
+    0.388, 
+    0.0
+   ]
+  }, 
+  "noteheadSlashedDoubleWhole2": {
+   "noteheadOrigin": [
+    0.388, 
+    -0.004
+   ]
+  }, 
+  "noteheadSlashedHalf1": {
+   "stemDownNW": [
+    0.0, 
+    -0.2
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.196
+   ]
+  }, 
+  "noteheadSlashedHalf2": {
+   "stemDownNW": [
+    0.0, 
+    -0.2
+   ], 
+   "stemUpSE": [
+    1.312, 
+    0.196
+   ]
+  }, 
+  "noteheadSquareBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.472
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.472
+   ]
+  }, 
+  "noteheadSquareBlackLarge": {
+   "stemDownNW": [
+    0.0, 
+    0.0
+   ], 
+   "stemUpSE": [
+    1.996, 
+    0.0
+   ]
+  }, 
+  "noteheadSquareBlackWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.996
+   ], 
+   "stemUpSE": [
+    1.996, 
+    1.0
+   ]
+  }, 
+  "noteheadSquareWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.472
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.472
+   ]
+  }, 
+  "noteheadTriangleDownBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.516
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.516
+   ]
+  }, 
+  "noteheadTriangleDownDoubleWhole": {
+   "noteheadOrigin": [
+    0.484, 
+    0.0
+   ]
+  }, 
+  "noteheadTriangleDownHalf": {
+   "stemDownNW": [
+    0.0, 
+    0.512
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.512
+   ]
+  }, 
+  "noteheadTriangleDownWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.516
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.516
+   ]
+  }, 
+  "noteheadTriangleLeftBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.472
+   ], 
+   "stemUpSE": [
+    1.26, 
+    -0.472
+   ]
+  }, 
+  "noteheadTriangleLeftWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.496
+   ], 
+   "stemUpSE": [
+    1.148, 
+    -0.496
+   ]
+  }, 
+  "noteheadTriangleRightBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.472
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.392
+   ]
+  }, 
+  "noteheadTriangleRightWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.532
+   ], 
+   "stemUpSE": [
+    1.148, 
+    0.284
+   ]
+  }, 
+  "noteheadTriangleRoundDownBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.184
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.184
+   ]
+  }, 
+  "noteheadTriangleRoundDownWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.184
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.184
+   ]
+  }, 
+  "noteheadTriangleUpBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.512
+   ], 
+   "stemUpSE": [
+    1.26, 
+    -0.512
+   ]
+  }, 
+  "noteheadTriangleUpDoubleWhole": {
+   "noteheadOrigin": [
+    0.484, 
+    0.0
+   ]
+  }, 
+  "noteheadTriangleUpHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.516
+   ], 
+   "stemUpSE": [
+    1.26, 
+    -0.516
+   ]
+  }, 
+  "noteheadTriangleUpRightBlack": {
+   "stemDownNW": [
+    0.0, 
+    0.472
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.472
+   ]
+  }, 
+  "noteheadTriangleUpRightWhite": {
+   "stemDownNW": [
+    0.0, 
+    0.472
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.472
+   ]
+  }, 
+  "noteheadTriangleUpWhite": {
+   "stemDownNW": [
+    0.0, 
+    -0.512
+   ], 
+   "stemUpSE": [
+    1.26, 
+    -0.512
+   ]
+  }, 
+  "noteheadVoidWithX": {
+   "stemDownNW": [
+    0.0, 
+    -0.16
+   ], 
+   "stemUpSE": [
+    1.272, 
+    0.14
+   ]
+  }, 
+  "noteheadWhole": {
+   "cutOutNW": [
+    0.164, 
+    0.336
+   ], 
+   "cutOutSE": [
+    1.496, 
+    -0.348
+   ]
+  }, 
+  "noteheadXBlack": {
+   "stemDownNW": [
+    0.0, 
+    -0.444
+   ], 
+   "stemUpSE": [
+    1.076, 
+    0.444
+   ]
+  }, 
+  "noteheadXDoubleWhole": {
+   "noteheadOrigin": [
+    0.38, 
+    0.0
+   ]
+  }, 
+  "noteheadXHalf": {
+   "stemDownNW": [
+    0.0, 
+    -0.548
+   ], 
+   "stemUpSE": [
+    1.592, 
+    0.544
+   ]
+  }, 
+  "noteheadXOrnate": {
+   "stemDownNW": [
+    0.0, 
+    -0.5
+   ], 
+   "stemUpSE": [
+    1.008, 
+    0.5
+   ]
+  }, 
+  "noteheadXOrnateEllipse": {
+   "stemDownNW": [
+    0.264, 
+    -0.46
+   ], 
+   "stemUpSE": [
+    1.26, 
+    0.46
+   ]
+  }, 
+  "ornamentBottomLeftConcaveStroke": {
+   "repeatOffset": [
+    0.484, 
+    0.0
+   ]
+  }, 
+  "ornamentBottomLeftConcaveStrokeLarge": {
+   "repeatOffset": [
+    1.656, 
+    0.0
+   ]
+  }, 
+  "ornamentBottomLeftConvexStroke": {
+   "repeatOffset": [
+    1.82, 
+    0.0
+   ]
+  }, 
+  "ornamentHighLeftConcaveStroke": {
+   "repeatOffset": [
+    1.428, 
+    -0.008
+   ]
+  }, 
+  "ornamentHighLeftConvexStroke": {
+   "repeatOffset": [
+    1.104, 
+    -0.008
+   ]
+  }, 
+  "ornamentLeftPlus": {
+   "repeatOffset": [
+    2.532, 
+    0.0
+   ]
+  }, 
+  "ornamentLeftShakeT": {
+   "repeatOffset": [
+    0.912, 
+    0.0
+   ]
+  }, 
+  "ornamentLeftVerticalStroke": {
+   "repeatOffset": [
+    0.748, 
+    0.0
+   ]
+  }, 
+  "ornamentLeftVerticalStrokeWithCross": {
+   "repeatOffset": [
+    1.032, 
+    -0.004
+   ]
+  }, 
+  "ornamentLowLeftConcaveStroke": {
+   "repeatOffset": [
+    1.408, 
+    0.0
+   ]
+  }, 
+  "ornamentLowLeftConvexStroke": {
+   "repeatOffset": [
+    1.36, 
+    0.0
+   ]
+  }, 
+  "ornamentMiddleVerticalStroke": {
+   "repeatOffset": [
+    0.004, 
+    0.0
+   ]
+  }, 
+  "ornamentTopLeftConcaveStroke": {
+   "repeatOffset": [
+    1.428, 
+    0.0
+   ]
+  }, 
+  "ornamentTopLeftConvexStroke": {
+   "repeatOffset": [
+    1.132, 
+    0.0
+   ]
+  }, 
+  "ornamentZigZagLineNoRightEnd": {
+   "repeatOffset": [
+    1.0, 
+    0.0
+   ]
+  }, 
+  "ornamentZigZagLineWithRightEnd": {
+   "repeatOffset": [
+    1.244, 
+    0.0
+   ]
+  }, 
+  "wiggleArpeggiatoDown": {
+   "repeatOffset": [
+    1.02, 
+    0.0
+   ]
+  }, 
+  "wiggleArpeggiatoDownArrow": {
+   "repeatOffset": [
+    1.788, 
+    0.0
+   ]
+  }, 
+  "wiggleArpeggiatoDownSwash": {
+   "repeatOffset": [
+    1.736, 
+    0.0
+   ]
+  }, 
+  "wiggleArpeggiatoUp": {
+   "repeatOffset": [
+    1.028, 
+    -0.004
+   ]
+  }, 
+  "wiggleArpeggiatoUpArrow": {
+   "repeatOffset": [
+    1.836, 
+    0.0
+   ]
+  }, 
+  "wiggleArpeggiatoUpSwash": {
+   "repeatOffset": [
+    1.94, 
+    0.0
+   ]
+  }, 
+  "wiggleCircular": {
+   "repeatOffset": [
+    1.484, 
+    0.0
+   ]
+  }, 
+  "wiggleCircularConstant": {
+   "repeatOffset": [
+    0.824, 
+    0.0
+   ]
+  }, 
+  "wiggleCircularConstantFlipped": {
+   "repeatOffset": [
+    0.824, 
+    0.0
+   ]
+  }, 
+  "wiggleCircularConstantFlippedLarge": {
+   "repeatOffset": [
+    1.188, 
+    0.0
+   ]
+  }, 
+  "wiggleCircularConstantLarge": {
+   "repeatOffset": [
+    1.196, 
+    0.0
+   ]
+  }, 
+  "wiggleCircularEnd": {
+   "repeatOffset": [
+    0.756, 
+    0.0
+   ]
+  }, 
+  "wiggleCircularLarge": {
+   "repeatOffset": [
+    1.604, 
+    0.0
+   ]
+  }, 
+  "wiggleCircularLarger": {
+   "repeatOffset": [
+    2.252, 
+    0.0
+   ]
+  }, 
+  "wiggleCircularLargerStill": {
+   "repeatOffset": [
+    2.964, 
+    0.0
+   ]
+  }, 
+  "wiggleCircularLargest": {
+   "repeatOffset": [
+    3.968, 
+    0.0
+   ]
+  }, 
+  "wiggleCircularSmall": {
+   "repeatOffset": [
+    1.1, 
+    0.0
+   ]
+  }, 
+  "wiggleCircularStart": {
+   "repeatOffset": [
+    1.92, 
+    0.0
+   ]
+  }, 
+  "wiggleGlissando": {
+   "repeatOffset": [
+    0.948, 
+    -0.004
+   ]
+  }, 
+  "wiggleGlissandoGroup1": {
+   "repeatOffset": [
+    1.228, 
+    0.0
+   ]
+  }, 
+  "wiggleGlissandoGroup2": {
+   "repeatOffset": [
+    0.556, 
+    0.0
+   ]
+  }, 
+  "wiggleGlissandoGroup3": {
+   "repeatOffset": [
+    0.516, 
+    0.0
+   ]
+  }, 
+  "wiggleRandom1": {
+   "repeatOffset": [
+    7.912, 
+    0.0
+   ]
+  }, 
+  "wiggleRandom2": {
+   "repeatOffset": [
+    7.62, 
+    0.0
+   ]
+  }, 
+  "wiggleRandom3": {
+   "repeatOffset": [
+    7.424, 
+    0.0
+   ]
+  }, 
+  "wiggleRandom4": {
+   "repeatOffset": [
+    7.424, 
+    0.0
+   ]
+  }, 
+  "wiggleSawtooth": {
+   "repeatOffset": [
+    2.884, 
+    0.004
+   ]
+  }, 
+  "wiggleSawtoothNarrow": {
+   "repeatOffset": [
+    2.244, 
+    0.0
+   ]
+  }, 
+  "wiggleSawtoothWide": {
+   "repeatOffset": [
+    3.208, 
+    0.0
+   ]
+  }, 
+  "wiggleSquareWave": {
+   "repeatOffset": [
+    3.012, 
+    -0.004
+   ]
+  }, 
+  "wiggleSquareWaveNarrow": {
+   "repeatOffset": [
+    2.06, 
+    0.0
+   ]
+  }, 
+  "wiggleSquareWaveWide": {
+   "repeatOffset": [
+    3.98, 
+    0.0
+   ]
+  }, 
+  "wiggleTrill": {
+   "repeatOffset": [
+    0.852, 
+    0.0
+   ]
+  }, 
+  "wiggleTrillFast": {
+   "repeatOffset": [
+    0.756, 
+    0.0
+   ]
+  }, 
+  "wiggleTrillFaster": {
+   "repeatOffset": [
+    0.688, 
+    0.0
+   ]
+  }, 
+  "wiggleTrillFasterStill": {
+   "repeatOffset": [
+    0.604, 
+    0.0
+   ]
+  }, 
+  "wiggleTrillFastest": {
+   "repeatOffset": [
+    0.528, 
+    0.0
+   ]
+  }, 
+  "wiggleTrillSlow": {
+   "repeatOffset": [
+    1.128, 
+    0.0
+   ]
+  }, 
+  "wiggleTrillSlower": {
+   "repeatOffset": [
+    1.268, 
+    0.0
+   ]
+  }, 
+  "wiggleTrillSlowerStill": {
+   "repeatOffset": [
+    1.392, 
+    0.0
+   ]
+  }, 
+  "wiggleTrillSlowest": {
+   "repeatOffset": [
+    1.576, 
+    0.0
+   ]
+  }, 
+  "wiggleVIbratoLargestSlower": {
+   "repeatOffset": [
+    3.732, 
+    0.0
+   ]
+  }, 
+  "wiggleVIbratoMediumSlower": {
+   "repeatOffset": [
+    1.624, 
+    0.0
+   ]
+  }, 
+  "wiggleVibrato": {
+   "repeatOffset": [
+    0.572, 
+    -0.004
+   ]
+  }, 
+  "wiggleVibratoLargeFast": {
+   "repeatOffset": [
+    1.732, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoLargeFaster": {
+   "repeatOffset": [
+    1.504, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoLargeFasterStill": {
+   "repeatOffset": [
+    1.264, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoLargeFastest": {
+   "repeatOffset": [
+    1.096, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoLargeSlow": {
+   "repeatOffset": [
+    2.044, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoLargeSlower": {
+   "repeatOffset": [
+    2.524, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoLargeSlowest": {
+   "repeatOffset": [
+    3.004, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoLargestFast": {
+   "repeatOffset": [
+    2.732, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoLargestFaster": {
+   "repeatOffset": [
+    2.244, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoLargestFasterStill": {
+   "repeatOffset": [
+    1.916, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoLargestFastest": {
+   "repeatOffset": [
+    1.616, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoLargestSlow": {
+   "repeatOffset": [
+    3.204, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoLargestSlowest": {
+   "repeatOffset": [
+    4.464, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoMediumFast": {
+   "repeatOffset": [
+    1.152, 
+    -0.004
+   ]
+  }, 
+  "wiggleVibratoMediumFaster": {
+   "repeatOffset": [
+    0.968, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoMediumFasterStill": {
+   "repeatOffset": [
+    0.828, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoMediumFastest": {
+   "repeatOffset": [
+    0.74, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoMediumSlow": {
+   "repeatOffset": [
+    1.408, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoMediumSlowest": {
+   "repeatOffset": [
+    1.964, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallFast": {
+   "repeatOffset": [
+    0.816, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallFaster": {
+   "repeatOffset": [
+    0.68, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallFasterStill": {
+   "repeatOffset": [
+    0.596, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallFastest": {
+   "repeatOffset": [
+    0.544, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallSlow": {
+   "repeatOffset": [
+    0.996, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallSlower": {
+   "repeatOffset": [
+    1.176, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallSlowest": {
+   "repeatOffset": [
+    1.452, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallestFast": {
+   "repeatOffset": [
+    0.668, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallestFaster": {
+   "repeatOffset": [
+    0.592, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallestFasterStill": {
+   "repeatOffset": [
+    0.492, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallestFastest": {
+   "repeatOffset": [
+    0.46, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallestSlow": {
+   "repeatOffset": [
+    0.788, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallestSlower": {
+   "repeatOffset": [
+    0.912, 
+    0.0
+   ]
+  }, 
+  "wiggleVibratoSmallestSlowest": {
+   "repeatOffset": [
+    1.156, 
+    -0.004
+   ]
+  }, 
+  "wiggleVibratoStart": {
+   "repeatOffset": [
+    1.828, 
+    -0.004
+   ]
+  }, 
+  "wiggleVibratoWide": {
+   "repeatOffset": [
+    0.824, 
+    0.0
+   ]
+  }, 
+  "wiggleWavy": {
+   "repeatOffset": [
+    3.188, 
+    0.0
+   ]
+  }, 
+  "wiggleWavyNarrow": {
+   "repeatOffset": [
+    2.22, 
+    0.0
+   ]
+  }, 
+  "wiggleWavyWide": {
+   "repeatOffset": [
+    4.152, 
+    0.0
+   ]
+  }
+ }
+}

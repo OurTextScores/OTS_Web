@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebMscore</title>
+</head>
+
+<body>
+    <script src="https://cdn.jsdelivr.net/npm/file-saver/dist/FileSaver.min.js"></script>
+    <script src="./node_modules/webmscore/webmscore.js"></script>
+    <script type="module">
+        // import WebMscore from './node_modules/webmscore/src/index.js'
+
+        const name = 'Aequale_No_1.mscz'
+
+        const fontUrls = [
+            'https://cdn.jsdelivr.net/gh/adobe-fonts/source-han-sans@release/SubsetOTF/CN/SourceHanSansCN-Regular.otf',
+            'https://cdn.jsdelivr.net/gh/adobe-fonts/source-han-sans@release/SubsetOTF/KR/SourceHanSansKR-Regular.otf',
+        ]
+
+        const soundfontUrl = 'https://cdn.jsdelivr.net/gh/musescore/MuseScore@2.1/share/sound/FluidR3Mono_GM.sf3'
+
+        async function fetchData(url) {
+            const r = await fetch(url)
+            const data = await r.arrayBuffer()
+            return new Uint8Array(data)
+        }
+
+        WebMscore.ready.then(async () => {
+            const filedata = await fetchData(`./${name}`)
+            const fonts = await Promise.all(fontUrls.map(u => fetchData(u)))
+            const soundfont = await fetchData(soundfontUrl)
+
+            const score = await WebMscore.load('mscz', filedata, fonts)
+            console.log(score)
+
+            const title = await score.titleFilenameSafe()
+            console.log('score title:', title)
+            console.log('number of pages:', await score.npages())
+
+            saveAs(new Blob([await score.saveXml()]), `${title}.musicxml`)
+            console.log('generated MusicXML file')
+
+            const n = await score.npages()
+            for (let index = 0; index < n; index++) {
+                const f = `${title}-${index}.svg`
+                const svg = await score.saveSvg(index, true)
+                saveAs(new Blob([svg]), f)
+                console.log(`generated SVG page ${index}`)
+            }
+
+            saveAs(new Blob([await score.saveMxl()]), `${title}.mxl`)
+            console.log('generated compressed MusicXML file')
+
+            saveAs(new Blob([await score.saveMidi()]), `${title}.mid`)
+            console.log('generated MIDI file')
+
+            await score.setSoundFont(soundfont) // load soundfont
+            saveAs(new Blob([await score.saveAudio('ogg')]), `${title}.ogg`)
+            console.log('generated OGG audio file')
+
+            const metadata = await score.metadata()
+            saveAs(new Blob([JSON.stringify(metadata)]), `metadata.json`)
+            console.log('score metadata', metadata)
+
+            //
+            // synthesize audio, and output using the Web Audio API
+            //
+            const CHANNELS = 2
+            const FRAME_LENGTH = 512
+            const audioCtx = new (AudioContext || webkitAudioContext)()
+            const audioBuf = audioCtx.createBuffer(CHANNELS, (metadata.duration + 1) * 44100, 44100)
+
+            const fn = await score.synthAudio(0)
+            for (let i = 0; ; i += FRAME_LENGTH) {
+                const res = await fn()
+                const frames = new Float32Array(res.chunk.buffer)
+
+                // audio frames are non-interleaved
+                // Float32Array[ channelA 512 frames, channelB 512 frames ]
+                for (let c = 0; c < CHANNELS; c++) {
+                    const buf = frames.subarray(c * FRAME_LENGTH, (c + 1) * FRAME_LENGTH)
+                    audioBuf.copyToChannel(buf, c, i)
+                }
+
+                if (res.done) {
+                    break
+                }
+            }
+
+            const source = audioCtx.createBufferSource()
+            source.buffer = audioBuf
+            source.connect(audioCtx.destination)
+            source.start()
+
+            //
+            // destroy
+            //
+            score.destroy()
+            console.log('destroyed')
+        })
+    </script>
+</body>
+
+</html>
