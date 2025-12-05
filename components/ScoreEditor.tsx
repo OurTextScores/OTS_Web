@@ -158,46 +158,17 @@ export default function ScoreEditor() {
     };
 
     const refreshSelectionOverlay = () => {
-        if (!containerRef.current || !selectedPoint) {
+        if (!containerRef.current) {
             return;
         }
 
         const containerRect = containerRef.current.getBoundingClientRect();
-        const clientX = containerRect.left + selectedPoint.x * zoom;
-        const clientY = containerRect.top + selectedPoint.y * zoom;
-        let el = document.elementFromPoint(clientX, clientY) as Element | null;
-
-        while (el && el !== containerRef.current) {
-            if (el.classList && (el.classList.contains('Note') || el.classList.contains('Rest') || el.classList.contains('Chord'))) {
-                break;
-            }
-            el = el.parentElement;
-        }
-
-        // Fallback: try to find an element marked as selected in the rendered SVG
-        if (!el || el === containerRef.current) {
-            el = containerRef.current.querySelector('.selected') as Element | null;
-        }
-
-        // Fallback 2: pick the closest Note/Rest/Chord to the previous point
-        if ((!el || el === containerRef.current) && selectedPoint) {
-            const candidates = Array.from(containerRef.current.querySelectorAll('.Note, .Rest, .Chord'));
-            let best: { el: Element, dist: number } | null = null;
-            for (const cand of candidates) {
-                const rect = cand.getBoundingClientRect();
-                if (rect.width <= 0 || rect.height <= 0) continue;
-                const cx = (rect.left - containerRect.left) / zoom + rect.width / (2 * zoom);
-                const cy = (rect.top - containerRect.top) / zoom + rect.height / (2 * zoom);
-                const dx = cx - selectedPoint.x;
-                const dy = cy - selectedPoint.y;
-                const d2 = dx * dx + dy * dy;
-                if (!best || d2 < best.dist) {
-                    best = { el: cand, dist: d2 };
-                }
-            }
-            if (best) {
-                el = best.el;
-            }
+        // Prefer any element that the SVG marks as selected
+        const selectors = ['.selected', '.note-selected', '.ms-selection'];
+        let el: Element | null = null;
+        for (const sel of selectors) {
+            el = containerRef.current.querySelector(sel);
+            if (el) break;
         }
 
         if (!el || el === containerRef.current) {
@@ -214,7 +185,7 @@ export default function ScoreEditor() {
             setSelectedElement({ x, y, w, h });
             const centerX = x + w / 2;
             const centerY = y + h / 2;
-            setSelectedPoint(prev => prev ? { ...prev, x: centerX, y: centerY } : { page: 0, x: centerX, y: centerY });
+            setSelectedPoint({ page: extractPageIndex(el) ?? 0, x: centerX, y: centerY });
         }
     };
 
