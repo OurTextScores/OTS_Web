@@ -178,7 +178,17 @@ export default function ScoreEditor() {
         }
 
         try {
-            await action();
+            const result = await action();
+            if (result === false) {
+                console.warn(`Mutation "${label}" returned false (no-op).`);
+            }
+            if (score.relayout) {
+                try {
+                    await score.relayout();
+                } catch (relayoutErr) {
+                    console.warn('Relayout after mutation failed:', relayoutErr);
+                }
+            }
             await renderScore(score);
         } catch (err) {
             console.error(`Mutation "${label}" failed:`, err);
