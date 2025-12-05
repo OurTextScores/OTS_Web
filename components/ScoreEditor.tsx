@@ -179,6 +179,27 @@ export default function ScoreEditor() {
             el = containerRef.current.querySelector('.selected') as Element | null;
         }
 
+        // Fallback 2: pick the closest Note/Rest/Chord to the previous point
+        if ((!el || el === containerRef.current) && selectedPoint) {
+            const candidates = Array.from(containerRef.current.querySelectorAll('.Note, .Rest, .Chord'));
+            let best: { el: Element, dist: number } | null = null;
+            for (const cand of candidates) {
+                const rect = cand.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                const cx = (rect.left - containerRect.left) / zoom + rect.width / (2 * zoom);
+                const cy = (rect.top - containerRect.top) / zoom + rect.height / (2 * zoom);
+                const dx = cx - selectedPoint.x;
+                const dy = cy - selectedPoint.y;
+                const d2 = dx * dx + dy * dy;
+                if (!best || d2 < best.dist) {
+                    best = { el: cand, dist: d2 };
+                }
+            }
+            if (best) {
+                el = best.el;
+            }
+        }
+
         if (!el || el === containerRef.current) {
             return;
         }
