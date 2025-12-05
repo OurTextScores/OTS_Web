@@ -74,7 +74,11 @@ export default function ScoreEditor() {
 
             const loadedScore = await WebMscore.load(format, data);
             setScore(loadedScore);
-            setMutationEnabled(hasMutationApi(loadedScore));
+            const mutationsAvailable = hasMutationApi(loadedScore);
+            if (!mutationsAvailable) {
+                console.warn('Mutation APIs not detected on loaded score; enabling toolbar anyway.');
+            }
+            setMutationEnabled(true);
             await renderScore(loadedScore);
 
             // segmentPositions causes a crash in this version of webmscore/emscripten environment
@@ -111,7 +115,11 @@ export default function ScoreEditor() {
             // Re-load with default layout
             const loadedScore = await WebMscore.load(format, data);
             setScore(loadedScore);
-            setMutationEnabled(hasMutationApi(loadedScore));
+            const mutationsAvailable = hasMutationApi(loadedScore);
+            if (!mutationsAvailable) {
+                console.warn('Mutation APIs not detected on loaded score; enabling toolbar anyway.');
+            }
+            setMutationEnabled(true);
 
             await renderScore(loadedScore);
 
