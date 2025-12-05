@@ -6,7 +6,8 @@
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "check:wasm": "node scripts/check-wasm.js"
   },
   "dependencies": {
     "next": "16.0.7",

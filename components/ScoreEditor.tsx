@@ -205,27 +205,31 @@ export default function ScoreEditor() {
         let found = false;
 
         while (element && element !== containerRef.current) {
-            if (element.classList && (element.classList.contains('Note') || element.classList.contains('Rest'))) {
+            if (element.classList && (element.classList.contains('Note') || element.classList.contains('Rest') || element.classList.contains('Chord'))) {
                 found = true;
                 break;
             }
             element = element.parentElement;
         }
 
-        if (found && element) {
-            // Get bounding box relative to the viewport
-            const rect = element.getBoundingClientRect();
-            const containerRect = containerRef.current.getBoundingClientRect();
+        // Fall back to the clicked element for bounding box if we didn't find a known class
+        const targetElement = (found && element) ? element : target;
+        const rect = targetElement.getBoundingClientRect();
+        const containerRect = containerRef.current.getBoundingClientRect();
 
-            const x = (rect.left - containerRect.left) / zoom;
-            const y = (rect.top - containerRect.top) / zoom;
-            const w = rect.width / zoom;
-            const h = rect.height / zoom;
+        const x = (rect.left - containerRect.left) / zoom;
+        const y = (rect.top - containerRect.top) / zoom;
+        const w = rect.width / zoom;
+        const h = rect.height / zoom;
 
-            console.log('Selected:', element.tagName, element.getAttribute('class'));
+        if (w > 0 && h > 0) {
+            const pageIndex = extractPageIndex(targetElement) ?? 0;
+            // Use center of the box for selection to reduce edge misses
+            const centerX = x + w / 2;
+            const centerY = y + h / 2;
+
             setSelectedElement({ x, y, w, h });
-            const pageIndex = extractPageIndex(element) ?? 0;
-            score?.selectElementAtPoint?.(pageIndex, x, y).catch(err => {
+            score?.selectElementAtPoint?.(pageIndex, centerX, centerY).catch(err => {
                 console.warn('selectElementAtPoint not available or failed:', err);
             });
         } else {
