@@ -243,7 +243,11 @@ export default function ScoreEditor() {
                 }
             }
             await renderScore(score);
-            refreshSelectionOverlay();
+            if (typeof window !== 'undefined') {
+                window.requestAnimationFrame(() => refreshSelectionOverlay());
+            } else {
+                refreshSelectionOverlay();
+            }
         } catch (err) {
             console.error(`Mutation "${label}" failed:`, err);
             alert(`Unable to ${label}. Check the console for details.`);
