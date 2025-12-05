@@ -193,3 +193,8 @@ Next steps / risks
 - Rebuild webmscore with platform=`wasm` so the memory-initializer “offscreen” patch is no longer needed.  
 - Implement reliable selection/hit-testing (DOM or WASM hit-test) so mutations target the clicked element.  
 - Add lightweight regression checks to ensure WASM artifacts land in `public/` for dev/build.
+
+## Webmscore rebuild + artifact sync
+
+**Rebuild** (from `webmscore-fork/web`): `source ~/.bashrc` for emsdk/Qt, then `make release`. Artifacts land in `webmscore-fork/web-public/` (`webmscore.lib.wasm`, `.data`, `.mem.wasm`).  
+**Sync for Next.js**: `npm run sync:wasm` copies those three files into `public/` so the app serves the fresh build. Run this after every rebuild before restarting `npm run dev`.
