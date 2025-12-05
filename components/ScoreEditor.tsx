@@ -173,17 +173,20 @@ export default function ScoreEditor() {
 
         let el: Element | null = null;
         if (selectedPoint) {
-            let best: { el: Element, dist: number } | null = null;
+            const targetPage = selectedPoint.page ?? 0;
+            let best: { el: Element, dx: number, dist: number } | null = null;
             for (const cand of candidates) {
                 const rect = cand.getBoundingClientRect();
                 if (rect.width <= 0 || rect.height <= 0) continue;
+                const page = extractPageIndex(cand) ?? 0;
+                if (page !== targetPage) continue;
                 const cx = (rect.left - containerRect.left) / zoom + rect.width / (2 * zoom);
                 const cy = (rect.top - containerRect.top) / zoom + rect.height / (2 * zoom);
                 const dx = cx - selectedPoint.x;
                 const dy = cy - selectedPoint.y;
                 const d2 = dx * dx + dy * dy;
-                if (!best || d2 < best.dist) {
-                    best = { el: cand, dist: d2 };
+                if (!best || Math.abs(dx) < Math.abs(best.dx) || (Math.abs(dx) === Math.abs(best.dx) && d2 < best.dist)) {
+                    best = { el: cand, dx, dist: d2 };
                 }
             }
             el = best?.el ?? null;
