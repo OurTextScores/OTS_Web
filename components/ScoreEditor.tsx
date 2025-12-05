@@ -158,10 +158,12 @@ export default function ScoreEditor() {
     };
 
     const performMutation = async (label: string, action?: (() => Promise<unknown> | unknown)) => {
-        if (!score || !action) {
-            if (!mutationEnabled) {
-                console.warn(`Mutation "${label}" requested but mutation bindings are not available.`);
-            }
+        if (!score) {
+            console.warn(`Mutation "${label}" requested but no score is loaded.`);
+            return;
+        }
+        if (!action) {
+            console.warn(`Mutation "${label}" requested but binding is missing on Score instance.`);
             return;
         }
 
@@ -183,10 +185,22 @@ export default function ScoreEditor() {
     });
     const handleUndo = () => performMutation('undo', score?.undo?.bind(score));
     const handleRedo = () => performMutation('redo', score?.redo?.bind(score));
-    const handlePitchUp = () => performMutation('raise pitch', score?.pitchUp?.bind(score));
-    const handlePitchDown = () => performMutation('lower pitch', score?.pitchDown?.bind(score));
-    const handleDurationLonger = () => performMutation('lengthen duration', score?.doubleDuration?.bind(score));
-    const handleDurationShorter = () => performMutation('shorten duration', score?.halfDuration?.bind(score));
+    const handlePitchUp = () => performMutation('raise pitch', async () => {
+        await ensureSelectionInWasm();
+        return score?.pitchUp?.();
+    });
+    const handlePitchDown = () => performMutation('lower pitch', async () => {
+        await ensureSelectionInWasm();
+        return score?.pitchDown?.();
+    });
+    const handleDurationLonger = () => performMutation('lengthen duration', async () => {
+        await ensureSelectionInWasm();
+        return score?.doubleDuration?.();
+    });
+    const handleDurationShorter = () => performMutation('shorten duration', async () => {
+        await ensureSelectionInWasm();
+        return score?.halfDuration?.();
+    });
 
     const handleZoomIn = () => {
         setZoom(prev => Math.min(prev + 0.1, 3.0));
