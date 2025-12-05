@@ -1,4 +1,5 @@
 webmscore.*
+!webmscore.webpack.mjs
 node_modules
 
 # copied from ../README.md
