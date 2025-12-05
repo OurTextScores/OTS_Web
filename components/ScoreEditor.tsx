@@ -31,6 +31,7 @@ export default function ScoreEditor() {
     const containerRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(false);
     const [selectedElement, setSelectedElement] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
+    const [selectedPoint, setSelectedPoint] = useState<{ page: number, x: number, y: number } | null>(null);
     const [mutationEnabled, setMutationEnabled] = useState(false);
 
     useEffect(() => {
@@ -135,6 +136,19 @@ export default function ScoreEditor() {
         }
     };
 
+    const ensureSelectionInWasm = async () => {
+        if (!score || !score.selectElementAtPoint || !selectedPoint) {
+            return;
+        }
+
+        try {
+            const { page, x, y } = selectedPoint;
+            await score.selectElementAtPoint(page, x, y);
+        } catch (err) {
+            console.warn('Re-select in WASM failed; continuing anyway', err);
+        }
+    };
+
     const performMutation = async (label: string, action?: (() => Promise<unknown> | unknown)) => {
         if (!score || !action) {
             if (!mutationEnabled) {
@@ -152,7 +166,13 @@ export default function ScoreEditor() {
         }
     };
 
-    const handleDeleteSelection = () => performMutation('delete selection', score?.deleteSelection?.bind(score));
+    const handleDeleteSelection = () => performMutation('delete selection', async () => {
+        await ensureSelectionInWasm();
+        const result = await score?.deleteSelection?.();
+        setSelectedElement(null);
+        setSelectedPoint(null);
+        return result;
+    });
     const handleUndo = () => performMutation('undo', score?.undo?.bind(score));
     const handleRedo = () => performMutation('redo', score?.redo?.bind(score));
     const handlePitchUp = () => performMutation('raise pitch', score?.pitchUp?.bind(score));
@@ -231,9 +251,13 @@ export default function ScoreEditor() {
             setSelectedElement({ x, y, w, h });
             score?.selectElementAtPoint?.(pageIndex, centerX, centerY).catch(err => {
                 console.warn('selectElementAtPoint not available or failed:', err);
+                setSelectedElement(null);
+                setSelectedPoint(null);
             });
+            setSelectedPoint({ page: pageIndex, x: centerX, y: centerY });
         } else {
             setSelectedElement(null);
+            setSelectedPoint(null);
         }
     };
 
