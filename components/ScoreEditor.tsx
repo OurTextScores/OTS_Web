@@ -174,6 +174,11 @@ export default function ScoreEditor() {
             el = el.parentElement;
         }
 
+        // Fallback: try to find an element marked as selected in the rendered SVG
+        if (!el || el === containerRef.current) {
+            el = containerRef.current.querySelector('.selected') as Element | null;
+        }
+
         if (!el || el === containerRef.current) {
             return;
         }
@@ -186,6 +191,9 @@ export default function ScoreEditor() {
 
         if (w > 0 && h > 0) {
             setSelectedElement({ x, y, w, h });
+            const centerX = x + w / 2;
+            const centerY = y + h / 2;
+            setSelectedPoint(prev => prev ? { ...prev, x: centerX, y: centerY } : { page: 0, x: centerX, y: centerY });
         }
     };
 
