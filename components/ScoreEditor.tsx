@@ -163,17 +163,34 @@ export default function ScoreEditor() {
         }
 
         const containerRect = containerRef.current.getBoundingClientRect();
-        // Prefer any element that the SVG marks as selected
-        const selectors = ['.selected', '.note-selected', '.ms-selection'];
-        let el: Element | null = null;
-        for (const sel of selectors) {
-            el = containerRef.current.querySelector(sel);
-            if (el) break;
-        }
+        const selectors = [
+            '.selected',
+            '.note-selected',
+            '.ms-selection',
+            '[class*="Note"]',
+            '[class*="note"]',
+            '[class*="Rest"]',
+            '[class*="rest"]',
+            '[class*="Chord"]',
+            '[class*="chord"]'
+        ];
 
-        if (!el || el === containerRef.current) {
+        const candidates: Element[] = [];
+        selectors.forEach(sel => {
+            candidates.push(...Array.from(containerRef.current!.querySelectorAll(sel)));
+        });
+
+        if (!candidates.length) {
             return;
         }
+
+        let el: Element | null = null;
+        // Prefer ones explicitly marked as selected
+        el = candidates.find(c =>
+            c.classList.contains('selected')
+            || c.classList.contains('note-selected')
+            || c.classList.contains('ms-selection')
+        ) || candidates[0];
 
         const rect = el.getBoundingClientRect();
         const x = (rect.left - containerRect.left) / zoom;
