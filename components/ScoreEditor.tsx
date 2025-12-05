@@ -157,6 +157,16 @@ export default function ScoreEditor() {
         }
     };
 
+    const requireMutation = (methodName: keyof MutationMethods) => {
+        const fn = score && (score as MutationMethods)[methodName];
+        if (!fn) {
+            console.warn(`Mutation binding "${methodName}" is missing on Score instance.`);
+            alert(`This build of webmscore does not expose "${methodName}".`);
+            return null;
+        }
+        return fn;
+    };
+
     const performMutation = async (label: string, action?: (() => Promise<unknown> | unknown)) => {
         if (!score) {
             console.warn(`Mutation "${label}" requested but no score is loaded.`);
@@ -178,7 +188,9 @@ export default function ScoreEditor() {
 
     const handleDeleteSelection = () => performMutation('delete selection', async () => {
         await ensureSelectionInWasm();
-        const result = await score?.deleteSelection?.();
+        const del = requireMutation('deleteSelection');
+        if (!del) return;
+        const result = await del.call(score);
         setSelectedElement(null);
         setSelectedPoint(null);
         return result;
@@ -187,19 +199,27 @@ export default function ScoreEditor() {
     const handleRedo = () => performMutation('redo', score?.redo?.bind(score));
     const handlePitchUp = () => performMutation('raise pitch', async () => {
         await ensureSelectionInWasm();
-        return score?.pitchUp?.();
+        const fn = requireMutation('pitchUp');
+        if (!fn) return;
+        return fn.call(score);
     });
     const handlePitchDown = () => performMutation('lower pitch', async () => {
         await ensureSelectionInWasm();
-        return score?.pitchDown?.();
+        const fn = requireMutation('pitchDown');
+        if (!fn) return;
+        return fn.call(score);
     });
     const handleDurationLonger = () => performMutation('lengthen duration', async () => {
         await ensureSelectionInWasm();
-        return score?.doubleDuration?.();
+        const fn = requireMutation('doubleDuration');
+        if (!fn) return;
+        return fn.call(score);
     });
     const handleDurationShorter = () => performMutation('shorten duration', async () => {
         await ensureSelectionInWasm();
-        return score?.halfDuration?.();
+        const fn = requireMutation('halfDuration');
+        if (!fn) return;
+        return fn.call(score);
     });
 
     const handleZoomIn = () => {
