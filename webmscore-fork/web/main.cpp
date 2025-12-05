@@ -649,9 +649,17 @@ bool _pitchDown(uintptr_t score_ptr, int excerptId)
 bool _doubleDuration(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
-    if (score->selection().element() && score->selection().element()->isChordRest()) {
-        auto cr = toChordRest(score->selection().element());
-        score->inputState().setDuration(mu::engraving::TDuration(cr->durationType()));
+    if (auto el = score->selection().element()) {
+        engraving::ChordRest* cr = nullptr;
+        if (el->isChordRest()) {
+            cr = toChordRest(el);
+        } else if (el->isNote()) {
+            cr = toChordRest(el->parentItem());
+        }
+        if (cr) {
+            score->inputState().setDuration(mu::engraving::TDuration(cr->durationType()));
+            score->inputState().setRest(cr->isRest());
+        }
     }
     score->startCmd();
     score->cmdDoubleDuration();
@@ -662,9 +670,17 @@ bool _doubleDuration(uintptr_t score_ptr, int excerptId)
 bool _halfDuration(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
-    if (score->selection().element() && score->selection().element()->isChordRest()) {
-        auto cr = toChordRest(score->selection().element());
-        score->inputState().setDuration(mu::engraving::TDuration(cr->durationType()));
+    if (auto el = score->selection().element()) {
+        engraving::ChordRest* cr = nullptr;
+        if (el->isChordRest()) {
+            cr = toChordRest(el);
+        } else if (el->isNote()) {
+            cr = toChordRest(el->parentItem());
+        }
+        if (cr) {
+            score->inputState().setDuration(mu::engraving::TDuration(cr->durationType()));
+            score->inputState().setRest(cr->isRest());
+        }
     }
     score->startCmd();
     score->cmdHalfDuration();
