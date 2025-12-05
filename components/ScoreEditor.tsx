@@ -178,7 +178,9 @@ export default function ScoreEditor() {
         }
 
         try {
+            console.debug(`Mutation "${label}" start`);
             const result = await action();
+            console.debug(`Mutation "${label}" result:`, result);
             if (result === false) {
                 console.warn(`Mutation "${label}" returned false (no-op).`);
             }
