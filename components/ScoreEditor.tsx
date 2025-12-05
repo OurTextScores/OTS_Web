@@ -163,34 +163,33 @@ export default function ScoreEditor() {
         }
 
         const containerRect = containerRef.current.getBoundingClientRect();
-        const selectors = [
-            '.selected',
-            '.note-selected',
-            '.ms-selection',
-            '[class*="Note"]',
-            '[class*="note"]',
-            '[class*="Rest"]',
-            '[class*="rest"]',
-            '[class*="Chord"]',
-            '[class*="chord"]'
-        ];
-
-        const candidates: Element[] = [];
-        selectors.forEach(sel => {
-            candidates.push(...Array.from(containerRef.current!.querySelectorAll(sel)));
-        });
+        const selectors = ['.selected', '.note-selected', '.ms-selection'];
+        const candidates: Element[] = selectors
+            .flatMap(sel => Array.from(containerRef.current!.querySelectorAll(sel)));
 
         if (!candidates.length) {
             return;
         }
 
         let el: Element | null = null;
-        // Prefer ones explicitly marked as selected
-        el = candidates.find(c =>
-            c.classList.contains('selected')
-            || c.classList.contains('note-selected')
-            || c.classList.contains('ms-selection')
-        ) || candidates[0];
+        if (selectedPoint) {
+            let best: { el: Element, dist: number } | null = null;
+            for (const cand of candidates) {
+                const rect = cand.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                const cx = (rect.left - containerRect.left) / zoom + rect.width / (2 * zoom);
+                const cy = (rect.top - containerRect.top) / zoom + rect.height / (2 * zoom);
+                const dx = cx - selectedPoint.x;
+                const dy = cy - selectedPoint.y;
+                const d2 = dx * dx + dy * dy;
+                if (!best || d2 < best.dist) {
+                    best = { el: cand, dist: d2 };
+                }
+            }
+            el = best?.el ?? null;
+        } else {
+            el = candidates[0];
+        }
 
         const rect = el.getBoundingClientRect();
         const x = (rect.left - containerRect.left) / zoom;
