@@ -155,7 +155,7 @@ The system is designed so that libmscore can be swapped out later without rewrit
     *   [x] Zoom/pan/scroll
     *   [ ] Basic editing tools (pitch change, duration change)
 3.  **AST mutation layer (via WASM bridge):**
-    *   [x] A JS API that issues commands to mutate the score in WASM (selection, delete, pitch up/down, duration up/down, undo/redo, relayout exposed via webmscore fork).
+    *   [ ] A JS API that issues commands to mutate the score in WASM.
 4.  **Undo/redo manager:**
     *   [ ] Command-based
     *   [ ] Replays semantic operations, not SVG diffs
@@ -166,9 +166,10 @@ The system is designed so that libmscore can be swapped out later without rewrit
     *   [x] React/Vue/Svelte state management
     *   [ ] Components for systems, measures, notes
 7.  **Documentation of public APIs for Phase 1 integration:**
-    *   [x] AST access layer & mutation commands (selection/delete/pitch/duration/undo/redo/relayout via webmscore fork)
-    *   [ ] Layout/render triggers (formalized surface)
+    *   [ ] AST access layer
+    *   [ ] Layout/render triggers
     *   [ ] Selection model
+    *   [ ] Mutation commands
 
 ## Guiding Principles for Phase 0
 
@@ -178,18 +179,62 @@ The system is designed so that libmscore can be swapped out later without rewrit
 *   **Focus on UX and workflow correctness.** Rendering can be replaced later; UX cannot.
 *   **Don’t over-engineer the AST format yet.** But prepare a clean bridge layer for future abstraction.
 
-## Phase 0.2: Mutation (Fork Strategy)
+## Current Status (WASM fork)
+- Custom webmscore fork exposes mutation/undo APIs; app wiring calls them when available.
+- WASM glue patched to fix instantiation, provide env imports/exports, and default Qt platform args/ENV to `wasm`; artifacts copied into `public/`.
+- Score loads and renders SVG at `/?score=/test_scores/bach_orig.mscz`; UI shows toolbar/zoom.
 
-Goal  
-Enable score mutation by forking webmscore and exposing libmscore C++ commands to JavaScript/WASM.
+## Next Steps
+1. Rebuild webmscore with platform=`wasm` baked in (remove memory-initializer `offscreen` patch) and automate copying `webmscore.lib.*` artifacts into `public/`.
+2. Implement reliable selection/hit-testing (DOM overlay or WASM hit-test) and wire mutations to the selected element; add visual highlight.
+3. Add a lightweight regression check in the dev/build flow to verify required wasm/data/mem files are present and loadable.
 
-Progress  
-- Forked webmscore locally and exposed mutation/undo hooks via new C exports (selectElementAtPoint/deleteSelection/pitchUp/pitchDown/doubleDuration/halfDuration/undo/redo/relayout).  
-- Built custom WASM artifacts with those bindings and wired the app to use them via `file:./webmscore-fork/web-public`.  
-- Frontend calls the optional mutation APIs for selection, pitch/duration, delete, undo/redo, relayout; re-renders after each mutation.  
-- WASM glue patched to provide correct env imports/exports and default `-platform wasm`/ENV to bypass missing Qt offscreen plugin; artifacts copied to `public/`.
 
-Next steps / risks  
-- Rebuild webmscore with platform=`wasm` so the memory-initializer “offscreen” patch is no longer needed.  
-- Implement reliable selection/hit-testing (DOM or WASM hit-test) so mutations target the clicked element.  
-- Add lightweight regression checks to ensure WASM artifacts land in `public/` for dev/build.
+Phase 0.2: Mutation (Fork Strategy)
+Goal Description
+Enable score modification (mutation) by forking webmscore and exposing the underlying libmscore C++ commands to JavaScript.
+
+Progress (completed)
+- Forked webmscore locally and exposed mutation/undo hooks via new C exports (selectElementAtPoint/deleteSelection/pitchUp/pitchDown/doubleDuration/halfDuration/undo/redo/relayout).
+- Built the custom WASM artifacts with those bindings and wired the app to use them via `file:./webmscore-fork/web-public`.
+- Frontend now calls the optional mutation APIs for selection, pitch, duration, delete, undo/redo; re-renders after each mutation.
+
+User Review Required
+IMPORTANT
+
+Build Environment: Building webmscore requires the Emscripten SDK (emcc). I need to verify if this is available or if we need to set it up. Fork Maintenance: We will be maintaining a custom build of webmscore.
+
+Proposed Changes
+1. Fork & Setup
+Clone webmscore repository (or LibreScore/webmscore).
+Verify build prerequisites.
+2. Expose C++ APIs
+Modify the Emscripten bindings (likely in src/ or mscore/) to expose the following libmscore functions:
+
+Selection: cmdSelectAll, cmdSelectNext, etc. (if not already exposed).
+Mutation:
+cmdDeleteSelection(): Deletes the currently selected elements.
+cmdSetPitch(int pitch): Sets the pitch of the selected note.
+cmdAddInterval(int interval): Adds an interval to the selection.
+cmdChangeDuration(int duration): Changes duration.
+Undo/Redo: cmdUndo(), cmdRedo().
+3. Build & Integrate
+Compile the forked version to WASM (
+webmscore.lib.wasm
+, 
+webmscore.js
+).
+Replace the node_modules/webmscore files with our custom build (or link it).
+
+Current Next Steps
+- Keep tracking the generated `web-public/webmscore.*` artifacts (for install without rebuild); ignore only transient build trees (`web/build.release`, `.cache`).
+- Document/re-run `npm run compile` in `web-public` when bindings change.
+- Expand mutation surface as needed (e.g., duration set, add interval, select by element id) and expose via C/JS bridge following the same pattern.
+4. Frontend Integration
+Update ScoreEditor.tsx to use the new methods.
+Add UI controls (Delete button, Undo/Redo buttons).
+Verification Plan
+Manual Verification
+Delete Test: Select a note, press Delete. Verify it disappears.
+Undo Test: Press Undo. Verify the note reappears.
+Save/Reload: Verify changes persist in the session (AST is updated).

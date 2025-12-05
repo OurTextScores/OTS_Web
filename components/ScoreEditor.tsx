@@ -2,8 +2,27 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { loadWebMscore, Score, InputFileFormat, Positions } from '../lib/webmscore-loader';
+import { loadWebMscore, Score, InputFileFormat } from '../lib/webmscore-loader';
 import { Toolbar } from './Toolbar';
+
+type MutationMethods = Pick<Score, 'selectElementAtPoint' | 'deleteSelection' | 'pitchUp' | 'pitchDown' | 'doubleDuration' | 'halfDuration' | 'undo' | 'redo' | 'relayout'>;
+
+const hasMutationApi = (score: Score | null): score is Score & MutationMethods => {
+    if (!score) {
+        return false;
+    }
+
+    const candidate = score as Record<string, unknown>;
+    return Boolean(
+        candidate.deleteSelection
+        || candidate.undo
+        || candidate.redo
+        || candidate.pitchUp
+        || candidate.pitchDown
+        || candidate.doubleDuration
+        || candidate.halfDuration
+    );
+};
 
 export default function ScoreEditor() {
     const searchParams = useSearchParams();
@@ -11,8 +30,8 @@ export default function ScoreEditor() {
     const [zoom, setZoom] = useState(1.0);
     const containerRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(false);
-    const [positions, setPositions] = useState<Positions | null>(null);
     const [selectedElement, setSelectedElement] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
+    const [mutationEnabled, setMutationEnabled] = useState(false);
 
     useEffect(() => {
         // Initialize webmscore
@@ -27,11 +46,14 @@ export default function ScoreEditor() {
         }).catch(err => {
             console.error('Failed to initialize webmscore', err);
         });
+        // We intentionally avoid re-running when helper functions change; the query param controls this effect.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchParams]);
 
     const handleUrlLoad = async (url: string) => {
         setLoading(true);
         setSelectedElement(null);
+        setMutationEnabled(false);
         try {
             const response = await fetch(url);
             if (!response.ok) throw new Error('Failed to fetch score');
@@ -51,6 +73,7 @@ export default function ScoreEditor() {
 
             const loadedScore = await WebMscore.load(format, data);
             setScore(loadedScore);
+            setMutationEnabled(hasMutationApi(loadedScore));
             await renderScore(loadedScore);
 
             // segmentPositions causes a crash in this version of webmscore/emscripten environment
@@ -66,6 +89,7 @@ export default function ScoreEditor() {
     const handleFileUpload = async (file: File) => {
         setLoading(true);
         setSelectedElement(null);
+        setMutationEnabled(false);
         try {
             const buffer = await file.arrayBuffer();
             const data = new Uint8Array(buffer);
@@ -86,6 +110,7 @@ export default function ScoreEditor() {
             // Re-load with default layout
             const loadedScore = await WebMscore.load(format, data);
             setScore(loadedScore);
+            setMutationEnabled(hasMutationApi(loadedScore));
 
             await renderScore(loadedScore);
 
@@ -110,12 +135,59 @@ export default function ScoreEditor() {
         }
     };
 
+    const performMutation = async (label: string, action?: (() => Promise<unknown> | unknown)) => {
+        if (!score || !action) {
+            if (!mutationEnabled) {
+                console.warn(`Mutation "${label}" requested but mutation bindings are not available.`);
+            }
+            return;
+        }
+
+        try {
+            await action();
+            await renderScore(score);
+        } catch (err) {
+            console.error(`Mutation "${label}" failed:`, err);
+            alert(`Unable to ${label}. Check the console for details.`);
+        }
+    };
+
+    const handleDeleteSelection = () => performMutation('delete selection', score?.deleteSelection?.bind(score));
+    const handleUndo = () => performMutation('undo', score?.undo?.bind(score));
+    const handleRedo = () => performMutation('redo', score?.redo?.bind(score));
+    const handlePitchUp = () => performMutation('raise pitch', score?.pitchUp?.bind(score));
+    const handlePitchDown = () => performMutation('lower pitch', score?.pitchDown?.bind(score));
+    const handleDurationLonger = () => performMutation('lengthen duration', score?.doubleDuration?.bind(score));
+    const handleDurationShorter = () => performMutation('shorten duration', score?.halfDuration?.bind(score));
+
     const handleZoomIn = () => {
         setZoom(prev => Math.min(prev + 0.1, 3.0));
     };
 
     const handleZoomOut = () => {
         setZoom(prev => Math.max(prev - 0.1, 0.5));
+    };
+
+    const extractPageIndex = (element: Element | null): number | null => {
+        let current: Element | null = element;
+        while (current && current !== containerRef.current) {
+            const dataPage = (current as HTMLElement).dataset?.page;
+            if (dataPage && !Number.isNaN(Number(dataPage))) {
+                const parsed = Number(dataPage);
+                return parsed >= 0 ? parsed : null;
+            }
+
+            const idAttr = current.getAttribute('id');
+            if (idAttr) {
+                const match = idAttr.match(/page-?(\d+)/i);
+                if (match) {
+                    const parsed = Number(match[1]);
+                    return Number.isNaN(parsed) ? null : Math.max(parsed - 1, 0);
+                }
+            }
+            current = current.parentElement;
+        }
+        return null;
     };
 
     const handleScoreClick = (e: React.MouseEvent) => {
@@ -145,13 +217,6 @@ export default function ScoreEditor() {
             const rect = element.getBoundingClientRect();
             const containerRect = containerRef.current.getBoundingClientRect();
 
-            // Calculate relative position accounting for zoom
-            // The container is scaled, so we need to be careful.
-            // Actually, if we just want to overlay a box *inside* the scaled container,
-            // we can use the element's offset relative to the container?
-            // SVG elements don't have offsetLeft/Top.
-
-            // Let's calculate relative to the container's top-left
             const x = (rect.left - containerRect.left) / zoom;
             const y = (rect.top - containerRect.top) / zoom;
             const w = rect.width / zoom;
@@ -159,6 +224,10 @@ export default function ScoreEditor() {
 
             console.log('Selected:', element.tagName, element.getAttribute('class'));
             setSelectedElement({ x, y, w, h });
+            const pageIndex = extractPageIndex(element) ?? 0;
+            score?.selectElementAtPoint?.(pageIndex, x, y).catch(err => {
+                console.warn('selectElementAtPoint not available or failed:', err);
+            });
         } else {
             setSelectedElement(null);
         }
@@ -171,6 +240,14 @@ export default function ScoreEditor() {
                 onZoomIn={handleZoomIn}
                 onZoomOut={handleZoomOut}
                 zoomLevel={zoom}
+                onDeleteSelection={handleDeleteSelection}
+                onUndo={handleUndo}
+                onRedo={handleRedo}
+                onPitchUp={handlePitchUp}
+                onPitchDown={handlePitchDown}
+                onDurationLonger={handleDurationLonger}
+                onDurationShorter={handleDurationShorter}
+                mutationsEnabled={mutationEnabled}
             />
 
             <div className="flex-1 overflow-auto bg-gray-50 p-8">

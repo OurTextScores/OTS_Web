@@ -8,13 +8,26 @@ export interface Score {
     saveSvg: (pageNumber?: number, drawPageBackground?: boolean) => Promise<string>;
     savePdf: () => Promise<Uint8Array>;
     setSoundFont: (data: Uint8Array) => Promise<void>;
-    metadata: () => Promise<any>;
+    metadata: () => Promise<Record<string, unknown>>;
     measurePositions: () => Promise<Positions>;
     segmentPositions: () => Promise<Positions>;
+    /**
+     * Optional mutation/undo surface exposed by custom webmscore builds.
+     * These methods may be undefined if the WASM bindings were not compiled with mutation support.
+     */
+    selectElementAtPoint?: (pageNumber: number, x: number, y: number) => Promise<unknown> | unknown;
+    deleteSelection?: () => Promise<unknown> | unknown;
+    pitchUp?: () => Promise<unknown> | unknown;
+    pitchDown?: () => Promise<unknown> | unknown;
+    doubleDuration?: () => Promise<unknown> | unknown;
+    halfDuration?: () => Promise<unknown> | unknown;
+    undo?: () => Promise<unknown> | unknown;
+    redo?: () => Promise<unknown> | unknown;
+    relayout?: () => Promise<unknown> | unknown;
 }
 
 export interface WebMscoreInstance {
-    load: (format: InputFileFormat, data: Uint8Array, fonts?: any[], doLayout?: boolean) => Promise<Score>;
+    load: (format: InputFileFormat, data: Uint8Array, fonts?: Uint8Array[], doLayout?: boolean) => Promise<Score>;
     ready: Promise<void>;
 }
 

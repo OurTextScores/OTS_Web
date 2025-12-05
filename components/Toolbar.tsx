@@ -5,9 +5,30 @@ interface ToolbarProps {
     onZoomIn: () => void;
     onZoomOut: () => void;
     zoomLevel: number;
+    onDeleteSelection?: () => void;
+    onUndo?: () => void;
+    onRedo?: () => void;
+    onPitchUp?: () => void;
+    onPitchDown?: () => void;
+    onDurationLonger?: () => void;
+    onDurationShorter?: () => void;
+    mutationsEnabled?: boolean;
 }
 
-export const Toolbar: React.FC<ToolbarProps> = ({ onFileUpload, onZoomIn, onZoomOut, zoomLevel }) => {
+export const Toolbar: React.FC<ToolbarProps> = ({
+    onFileUpload,
+    onZoomIn,
+    onZoomOut,
+    zoomLevel,
+    onDeleteSelection,
+    onUndo,
+    onRedo,
+    onPitchUp,
+    onPitchDown,
+    onDurationLonger,
+    onDurationShorter,
+    mutationsEnabled = false
+}) => {
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (file) {
@@ -15,8 +36,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({ onFileUpload, onZoomIn, onZoom
         }
     };
 
+    const mutationDisabled = !mutationsEnabled;
+
     return (
-        <div className="flex items-center justify-between p-4 bg-gray-100 border-b border-gray-300">
+        <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-gray-100 border-b border-gray-300">
             <div className="flex items-center space-x-4">
                 <label className="px-4 py-2 bg-blue-600 text-white rounded cursor-pointer hover:bg-blue-700">
                     Open Score
@@ -28,8 +51,77 @@ export const Toolbar: React.FC<ToolbarProps> = ({ onFileUpload, onZoomIn, onZoom
                     />
                 </label>
             </div>
-            <div className="flex items-center space-x-2">
+
+            <div className="flex items-center flex-wrap gap-2 text-sm">
+                <div className="flex items-center space-x-2">
+                    <button
+                        type="button"
+                        onClick={onDeleteSelection}
+                        disabled={mutationDisabled || !onDeleteSelection}
+                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Delete
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onUndo}
+                        disabled={mutationDisabled || !onUndo}
+                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Undo
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onRedo}
+                        disabled={mutationDisabled || !onRedo}
+                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Redo
+                    </button>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                    <button
+                        type="button"
+                        onClick={onPitchDown}
+                        disabled={mutationDisabled || !onPitchDown}
+                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Pitch ↓
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onPitchUp}
+                        disabled={mutationDisabled || !onPitchUp}
+                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Pitch ↑
+                    </button>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                    <button
+                        type="button"
+                        onClick={onDurationShorter}
+                        disabled={mutationDisabled || !onDurationShorter}
+                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Shorter
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onDurationLonger}
+                        disabled={mutationDisabled || !onDurationLonger}
+                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Longer
+                    </button>
+                </div>
+            </div>
+
+            <div className="flex items-center space-x-2 text-sm">
                 <button
+                    type="button"
                     onClick={onZoomOut}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50"
                 >
