@@ -252,6 +252,7 @@ export default function ScoreEditor() {
                 onDurationLonger={handleDurationLonger}
                 onDurationShorter={handleDurationShorter}
                 mutationsEnabled={mutationEnabled}
+                selectionActive={Boolean(selectedElement)}
             />
 
             <div className="flex-1 overflow-auto bg-gray-50 p-8">

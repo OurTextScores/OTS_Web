@@ -13,6 +13,7 @@ interface ToolbarProps {
     onDurationLonger?: () => void;
     onDurationShorter?: () => void;
     mutationsEnabled?: boolean;
+    selectionActive?: boolean;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -27,7 +28,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     onPitchDown,
     onDurationLonger,
     onDurationShorter,
-    mutationsEnabled = false
+    mutationsEnabled = false,
+    selectionActive = false
 }) => {
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -57,7 +59,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     <button
                         type="button"
                         onClick={onDeleteSelection}
-                        disabled={mutationDisabled || !onDeleteSelection}
+                        disabled={mutationDisabled || !onDeleteSelection || !selectionActive}
                         className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         Delete
