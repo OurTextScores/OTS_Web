@@ -157,6 +157,38 @@ export default function ScoreEditor() {
         }
     };
 
+    const refreshSelectionOverlay = () => {
+        if (!containerRef.current || !selectedPoint) {
+            return;
+        }
+
+        const containerRect = containerRef.current.getBoundingClientRect();
+        const clientX = containerRect.left + selectedPoint.x * zoom;
+        const clientY = containerRect.top + selectedPoint.y * zoom;
+        let el = document.elementFromPoint(clientX, clientY) as Element | null;
+
+        while (el && el !== containerRef.current) {
+            if (el.classList && (el.classList.contains('Note') || el.classList.contains('Rest') || el.classList.contains('Chord'))) {
+                break;
+            }
+            el = el.parentElement;
+        }
+
+        if (!el || el === containerRef.current) {
+            return;
+        }
+
+        const rect = el.getBoundingClientRect();
+        const x = (rect.left - containerRect.left) / zoom;
+        const y = (rect.top - containerRect.top) / zoom;
+        const w = rect.width / zoom;
+        const h = rect.height / zoom;
+
+        if (w > 0 && h > 0) {
+            setSelectedElement({ x, y, w, h });
+        }
+    };
+
     const requireMutation = (methodName: keyof MutationMethods) => {
         const fn = score && (score as MutationMethods)[methodName];
         if (!fn) {
@@ -192,6 +224,7 @@ export default function ScoreEditor() {
                 }
             }
             await renderScore(score);
+            refreshSelectionOverlay();
         } catch (err) {
             console.error(`Mutation "${label}" failed:`, err);
             alert(`Unable to ${label}. Check the console for details.`);
