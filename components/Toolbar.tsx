@@ -21,6 +21,7 @@ interface ToolbarProps {
     onExportMscz?: () => void;
     onExportMidi?: () => void;
     onExportAudio?: () => void;
+    onSoundFontUpload?: (file: File) => void;
     exportsEnabled?: boolean;
     pngAvailable?: boolean;
     audioAvailable?: boolean;
@@ -47,6 +48,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     onExportMscz,
     onExportMidi,
     onExportAudio,
+    onSoundFontUpload,
     exportsEnabled = false,
     pngAvailable = false,
     audioAvailable = false
@@ -55,6 +57,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         const file = event.target.files?.[0];
         if (file) {
             onFileUpload(file);
+        }
+    };
+    const handleSoundFontChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file && onSoundFontUpload) {
+            onSoundFontUpload(file);
         }
     };
 
@@ -69,6 +77,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                         type="file"
                         accept=".mscz,.xml,.musicxml"
                         onChange={handleFileChange}
+                        className="hidden"
+                    />
+                </label>
+                <label className="px-4 py-2 bg-indigo-600 text-white rounded cursor-pointer hover:bg-indigo-700">
+                    Load SoundFont
+                    <input
+                        type="file"
+                        accept=".sf2,.sf3"
+                        onChange={handleSoundFontChange}
                         className="hidden"
                     />
                 </label>

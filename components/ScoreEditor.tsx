@@ -34,6 +34,8 @@ export default function ScoreEditor() {
     const [selectedPoint, setSelectedPoint] = useState<{ page: number, x: number, y: number } | null>(null);
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const [mutationEnabled, setMutationEnabled] = useState(false);
+    const [soundFontLoaded, setSoundFontLoaded] = useState(false);
+    const [triedSoundFont, setTriedSoundFont] = useState(false);
 
     const exposeScoreToWindow = (s: Score | null) => {
         // Handy for Playwright/debug sessions to poke at WASM bindings directly
@@ -65,6 +67,8 @@ export default function ScoreEditor() {
         setSelectedElement(null);
         setSelectedIndex(null);
         setMutationEnabled(false);
+        setSoundFontLoaded(false);
+        setTriedSoundFont(false);
         try {
             const response = await fetch(url);
             if (!response.ok) throw new Error('Failed to fetch score');
@@ -108,6 +112,8 @@ export default function ScoreEditor() {
         setSelectedElement(null);
         setSelectedIndex(null);
         setMutationEnabled(false);
+        setSoundFontLoaded(false);
+        setTriedSoundFont(false);
         try {
             const buffer = await file.arrayBuffer();
             const data = new Uint8Array(buffer);
@@ -152,6 +158,24 @@ export default function ScoreEditor() {
             const svgData = await currentScore.saveSvg(0, true); // Page 0, with background
             if (svgData) {
                 containerRef.current.innerHTML = svgData;
+            }
+            // Attempt to load default soundfont once per score render
+            if (!triedSoundFont && currentScore.setSoundFont) {
+                const url = '/soundfonts/default.sf3';
+                try {
+                    const res = await fetch(url);
+                    if (res.ok) {
+                        const buf = new Uint8Array(await res.arrayBuffer());
+                        await currentScore.setSoundFont(buf);
+                        setSoundFontLoaded(true);
+                    } else {
+                        console.warn('Default soundfont not found at', url);
+                    }
+                } catch (sfErr) {
+                    console.warn('Default soundfont load failed; audio export will be disabled', sfErr);
+                } finally {
+                    setTriedSoundFont(true);
+                }
             }
         } catch (err) {
             console.error('Error rendering score:', err);
@@ -472,6 +496,10 @@ export default function ScoreEditor() {
             alert('Audio export is not available in this build.');
             return;
         }
+        if (!soundFontLoaded) {
+            alert('Load a soundfont (.sf2/.sf3) before exporting audio. Place it at /public/soundfonts/default.sf3 for auto-load.');
+            return;
+        }
         try {
             const wav = await score.saveAudio('wav');
             downloadBlob(wav, 'score.wav', 'audio/wav');
@@ -625,7 +653,7 @@ export default function ScoreEditor() {
                 onExportAudio={handleExportAudio}
                 exportsEnabled={Boolean(score)}
                 pngAvailable={Boolean(score?.savePng)}
-                audioAvailable={Boolean(score?.saveAudio)}
+                audioAvailable={Boolean(score?.saveAudio) && soundFontLoaded}
             />
 
             <div className="flex-1 overflow-auto bg-gray-50 p-8">
