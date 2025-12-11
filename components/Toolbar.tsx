@@ -14,6 +14,11 @@ interface ToolbarProps {
     onDurationShorter?: () => void;
     mutationsEnabled?: boolean;
     selectionActive?: boolean;
+    onExportSvg?: () => void;
+    onExportPdf?: () => void;
+    onExportPng?: () => void;
+    exportsEnabled?: boolean;
+    pngAvailable?: boolean;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -29,7 +34,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     onDurationLonger,
     onDurationShorter,
     mutationsEnabled = false,
-    selectionActive = false
+    selectionActive = false,
+    onExportSvg,
+    onExportPdf,
+    onExportPng,
+    exportsEnabled = false,
+    pngAvailable = false
 }) => {
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -119,6 +129,34 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                         Longer
                     </button>
                 </div>
+            </div>
+
+            <div className="flex items-center space-x-2 text-sm">
+                <span className="text-gray-600">Export:</span>
+                <button
+                    type="button"
+                    onClick={onExportSvg}
+                    disabled={!exportsEnabled || !onExportSvg}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    SVG
+                </button>
+                <button
+                    type="button"
+                    onClick={onExportPdf}
+                    disabled={!exportsEnabled || !onExportPdf}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    PDF
+                </button>
+                <button
+                    type="button"
+                    onClick={onExportPng}
+                    disabled={!exportsEnabled || !onExportPng || !pngAvailable}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    PNG
+                </button>
             </div>
 
             <div className="flex items-center space-x-2 text-sm">

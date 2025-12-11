@@ -379,6 +379,52 @@ export default function ScoreEditor() {
         return fn.call(score);
     });
 
+    const downloadBlob = (data: BlobPart, filename: string, mime: string) => {
+        const blob = new Blob([data], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const handleExportSvg = async () => {
+        if (!score) return;
+        try {
+            const svg = await score.saveSvg(0, true);
+            downloadBlob(svg, 'score.svg', 'image/svg+xml');
+        } catch (err) {
+            console.error('Failed to export SVG', err);
+            alert('Unable to export SVG. See console for details.');
+        }
+    };
+
+    const handleExportPdf = async () => {
+        if (!score) return;
+        try {
+            const pdf = await score.savePdf();
+            downloadBlob(pdf, 'score.pdf', 'application/pdf');
+        } catch (err) {
+            console.error('Failed to export PDF', err);
+            alert('Unable to export PDF. See console for details.');
+        }
+    };
+
+    const handleExportPng = async () => {
+        if (!score || !score.savePng) {
+            alert('PNG export is not available in this build.');
+            return;
+        }
+        try {
+            const png = await score.savePng(0, true, true);
+            downloadBlob(png, 'score.png', 'image/png');
+        } catch (err) {
+            console.error('Failed to export PNG', err);
+            alert('Unable to export PNG. See console for details.');
+        }
+    };
+
     const handleZoomIn = () => {
         setZoom(prev => Math.min(prev + 0.1, 3.0));
     };
@@ -514,6 +560,11 @@ export default function ScoreEditor() {
                 onDurationShorter={handleDurationShorter}
                 mutationsEnabled={mutationEnabled}
                 selectionActive={Boolean(selectedElement)}
+                onExportSvg={handleExportSvg}
+                onExportPdf={handleExportPdf}
+                onExportPng={handleExportPng}
+                exportsEnabled={Boolean(score)}
+                pngAvailable={Boolean(score?.savePng)}
             />
 
             <div className="flex-1 overflow-auto bg-gray-50 p-8">
