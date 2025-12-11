@@ -24,6 +24,13 @@ const moduleOptions = IS_NODE
         }
     }
 
+moduleOptions.getArguments = moduleOptions.getArguments || (() => ["-platform", "wasm"])
+moduleOptions.arguments = moduleOptions.arguments || moduleOptions.getArguments()
+moduleOptions.ENV = moduleOptions.ENV || {}
+moduleOptions.ENV.QT_QPA_PLATFORM = moduleOptions.ENV.QT_QPA_PLATFORM || "wasm"
+moduleOptions.__cxa_atexit = moduleOptions.__cxa_atexit || function () { return 0 }
+moduleOptions.___cxa_atexit = moduleOptions.___cxa_atexit || moduleOptions.__cxa_atexit
+
 /** @type {Record<string, any>} */
 let Module = moduleOptions
 /** @type {Promise<any>} */

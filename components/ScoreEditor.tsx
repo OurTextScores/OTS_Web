@@ -32,7 +32,15 @@ export default function ScoreEditor() {
     const [loading, setLoading] = useState(false);
     const [selectedElement, setSelectedElement] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
     const [selectedPoint, setSelectedPoint] = useState<{ page: number, x: number, y: number } | null>(null);
+    const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const [mutationEnabled, setMutationEnabled] = useState(false);
+
+    const exposeScoreToWindow = (s: Score | null) => {
+        // Handy for Playwright/debug sessions to poke at WASM bindings directly
+        if (typeof window !== 'undefined') {
+            (window as any).__webmscore = s;
+        }
+    };
 
     useEffect(() => {
         // Initialize webmscore
@@ -53,7 +61,9 @@ export default function ScoreEditor() {
 
     const handleUrlLoad = async (url: string) => {
         setLoading(true);
+        setLoading(true);
         setSelectedElement(null);
+        setSelectedIndex(null);
         setMutationEnabled(false);
         try {
             const response = await fetch(url);
@@ -74,6 +84,7 @@ export default function ScoreEditor() {
 
             const loadedScore = await WebMscore.load(format, data);
             setScore(loadedScore);
+            exposeScoreToWindow(loadedScore);
             const mutationsAvailable = hasMutationApi(loadedScore);
             if (!mutationsAvailable) {
                 console.warn('Mutation APIs not detected on loaded score; enabling toolbar anyway.');
@@ -93,7 +104,9 @@ export default function ScoreEditor() {
 
     const handleFileUpload = async (file: File) => {
         setLoading(true);
+        setLoading(true);
         setSelectedElement(null);
+        setSelectedIndex(null);
         setMutationEnabled(false);
         try {
             const buffer = await file.arrayBuffer();
@@ -115,6 +128,7 @@ export default function ScoreEditor() {
             // Re-load with default layout
             const loadedScore = await WebMscore.load(format, data);
             setScore(loadedScore);
+            exposeScoreToWindow(loadedScore);
             const mutationsAvailable = hasMutationApi(loadedScore);
             if (!mutationsAvailable) {
                 console.warn('Mutation APIs not detected on loaded score; enabling toolbar anyway.');
@@ -157,41 +171,65 @@ export default function ScoreEditor() {
         }
     };
 
-    const refreshSelectionOverlay = () => {
+    const refreshSelectionOverlay = (fallbackIndex?: number | null, fallbackPoint?: { page: number, x: number, y: number } | null) => {
+        console.log('[refreshSelectionOverlay] Called with fallbackIndex:', fallbackIndex, 'fallbackPoint:', fallbackPoint);
         if (!containerRef.current) {
+            console.log('[refreshSelectionOverlay] No containerRef, returning');
             return;
         }
+
+        const useIndex = fallbackIndex !== undefined ? fallbackIndex : selectedIndex;
+        const usePoint = fallbackPoint !== undefined ? fallbackPoint : selectedPoint;
+        console.log('[refreshSelectionOverlay] useIndex:', useIndex, 'usePoint:', usePoint);
 
         const containerRect = containerRef.current.getBoundingClientRect();
         const selectors = ['.selected', '.note-selected', '.ms-selection'];
         const candidates: Element[] = selectors
             .flatMap(sel => Array.from(containerRef.current!.querySelectorAll(sel)));
 
-        if (!candidates.length) {
-            return;
-        }
+        console.log('[refreshSelectionOverlay] candidates.length:', candidates.length);
 
         let el: Element | null = null;
-        if (selectedPoint) {
-            const targetPage = selectedPoint.page ?? 0;
-            let best: { el: Element, dx: number, dist: number } | null = null;
-            for (const cand of candidates) {
-                const rect = cand.getBoundingClientRect();
-                if (rect.width <= 0 || rect.height <= 0) continue;
-                const page = extractPageIndex(cand) ?? 0;
-                if (page !== targetPage) continue;
-                const cx = (rect.left - containerRect.left) / zoom + rect.width / (2 * zoom);
-                const cy = (rect.top - containerRect.top) / zoom + rect.height / (2 * zoom);
-                const dx = cx - selectedPoint.x;
-                const dy = cy - selectedPoint.y;
-                const d2 = dx * dx + dy * dy;
-                if (!best || Math.abs(dx) < Math.abs(best.dx) || (Math.abs(dx) === Math.abs(best.dx) && d2 < best.dist)) {
-                    best = { el: cand, dx, dist: d2 };
+        if (candidates.length > 0) {
+            // If we have selection markers in the SVG, prefer those over historical position
+            // This handles cases where the element moved (e.g., pitch change)
+            if (usePoint) {
+                const targetPage = usePoint.page ?? 0;
+                // Filter to same page first
+                const samePage = candidates.filter(cand => {
+                    const page = extractPageIndex(cand) ?? 0;
+                    return page === targetPage;
+                });
+
+                // If we have candidates on the same page, use the first one
+                // (MuseScore typically only has one selected element)
+                if (samePage.length > 0) {
+                    el = samePage[0];
+                } else if (candidates.length > 0) {
+                    // Fallback to any selected element
+                    el = candidates[0];
                 }
+            } else {
+                el = candidates[0];
             }
-            el = best?.el ?? null;
-        } else {
-            el = candidates[0];
+        } else if (useIndex !== null) {
+            // Fallback: use index if selection markers are missing in SVG
+            console.log('[refreshSelectionOverlay] Using index fallback');
+            const allAndSome = Array.from(containerRef.current.querySelectorAll('.Note, .Rest, .Chord'));
+            console.log('[refreshSelectionOverlay] Found', allAndSome.length, 'Note/Rest/Chord elements');
+            if (allAndSome[useIndex]) {
+                el = allAndSome[useIndex];
+                console.log('[refreshSelectionOverlay] Selected element at index', useIndex);
+            } else {
+                console.log('[refreshSelectionOverlay] No element at index', useIndex);
+            }
+        }
+
+        console.log('[refreshSelectionOverlay] el:', el);
+        if (!el) {
+            // No element found, keep previous selection visible
+            console.log('[refreshSelectionOverlay] No element found, returning');
+            return;
         }
 
         const rect = el.getBoundingClientRect();
@@ -200,11 +238,23 @@ export default function ScoreEditor() {
         const w = rect.width / zoom;
         const h = rect.height / zoom;
 
+        console.log('[refreshSelectionOverlay] Computed position:', { x, y, w, h });
+
         if (w > 0 && h > 0) {
+            console.log('[refreshSelectionOverlay] Setting selectedElement');
             setSelectedElement({ x, y, w, h });
             const centerX = x + w / 2;
             const centerY = y + h / 2;
             setSelectedPoint({ page: extractPageIndex(el) ?? 0, x: centerX, y: centerY });
+            // Update the index to match the found element
+            const allElements = Array.from(containerRef.current.querySelectorAll('.Note, .Rest, .Chord'));
+            const newIndex = allElements.indexOf(el);
+            if (newIndex >= 0) {
+                setSelectedIndex(newIndex);
+            }
+            console.log('[refreshSelectionOverlay] Done updating selection');
+        } else {
+            console.log('[refreshSelectionOverlay] Invalid dimensions, not updating');
         }
     };
 
@@ -218,7 +268,7 @@ export default function ScoreEditor() {
         return fn;
     };
 
-    const performMutation = async (label: string, action?: (() => Promise<unknown> | unknown)) => {
+    const performMutation = async (label: string, action?: (() => Promise<unknown> | unknown), options?: { clearSelection?: boolean }) => {
         if (!score) {
             console.warn(`Mutation "${label}" requested but no score is loaded.`);
             return;
@@ -228,6 +278,10 @@ export default function ScoreEditor() {
             return;
         }
 
+        // Preserve selection state before mutation for use in fallback
+        const preservedIndex = selectedIndex;
+        const preservedPoint = selectedPoint;
+
         try {
             console.debug(`Mutation "${label}" start`);
             const result = await action();
@@ -235,6 +289,14 @@ export default function ScoreEditor() {
             if (result === false) {
                 console.warn(`Mutation "${label}" returned false (no-op).`);
             }
+
+            // Clear selection if requested (e.g., for delete operations)
+            if (options?.clearSelection) {
+                setSelectedElement(null);
+                setSelectedPoint(null);
+                setSelectedIndex(null);
+            }
+
             if (score.relayout) {
                 try {
                     await score.relayout();
@@ -243,10 +305,31 @@ export default function ScoreEditor() {
                 }
             }
             await renderScore(score);
+
+            // If selection wasn't cleared, restore preserved state for fallback
+            if (!options?.clearSelection) {
+                if (preservedIndex !== null && selectedIndex === null) {
+                    setSelectedIndex(preservedIndex);
+                }
+                if (preservedPoint && !selectedPoint) {
+                    setSelectedPoint(preservedPoint);
+                }
+            }
+
+            // Schedule overlay refresh after the DOM has had time to update
+            // Use a double-RAF to ensure the DOM is fully parsed and rendered
+            // Pass preserved values to handle async state updates
+            console.log('[performMutation] Scheduling refresh with preservedIndex:', preservedIndex, 'preservedPoint:', preservedPoint);
             if (typeof window !== 'undefined') {
-                window.requestAnimationFrame(() => refreshSelectionOverlay());
+                window.requestAnimationFrame(() => {
+                    console.log('[performMutation] RAF 1');
+                    window.requestAnimationFrame(() => {
+                        console.log('[performMutation] RAF 2, calling refreshSelectionOverlay');
+                        refreshSelectionOverlay(preservedIndex, preservedPoint);
+                    });
+                });
             } else {
-                refreshSelectionOverlay();
+                refreshSelectionOverlay(preservedIndex, preservedPoint);
             }
         } catch (err) {
             console.error(`Mutation "${label}" failed:`, err);
@@ -258,11 +341,8 @@ export default function ScoreEditor() {
         await ensureSelectionInWasm();
         const del = requireMutation('deleteSelection');
         if (!del) return;
-        const result = await del.call(score);
-        setSelectedElement(null);
-        setSelectedPoint(null);
-        return result;
-    });
+        return await del.call(score);
+    }, { clearSelection: true });
     const handleUndo = () => performMutation('undo', score?.undo?.bind(score));
     const handleRedo = () => performMutation('redo', score?.redo?.bind(score));
     const handlePitchUp = () => performMutation('raise pitch', async () => {
@@ -331,12 +411,22 @@ export default function ScoreEditor() {
         // Often the target is a <path> or <g> with the class.
 
         // Traverse up to find a relevant class if needed
+        // Note: containerRef.current is a div that contains the SVG, so we need to traverse
+        // up through the SVG structure to find Note/Rest/Chord elements
         let element: Element | null = target;
         let found = false;
 
-        while (element && element !== containerRef.current) {
-            if (element.classList && (element.classList.contains('Note') || element.classList.contains('Rest') || element.classList.contains('Chord'))) {
+        while (element) {
+            // Check using both classList and getAttribute for SVG compatibility
+            const classes = element.getAttribute('class') || '';
+            const hasNoteClass = classes.split(/\s+/).some(c => c === 'Note' || c === 'Rest' || c === 'Chord');
+
+            if (hasNoteClass) {
                 found = true;
+                break;
+            }
+            // Stop if we've reached containerRef or gone past it
+            if (element === containerRef.current || element.parentElement === null) {
                 break;
             }
             element = element.parentElement;
@@ -364,10 +454,38 @@ export default function ScoreEditor() {
                 setSelectedElement(null);
                 setSelectedPoint(null);
             });
+
+            // Find the index by looking for Note/Rest/Chord elements
+            // If we found a specific element, use it; otherwise search from target
+            const allElements = Array.from(containerRef.current.querySelectorAll('.Note, .Rest, .Chord'));
+            let index = -1;
+
+            if (found && element) {
+                // We found a Note/Rest/Chord element, try to find its index
+                index = allElements.indexOf(element);
+            }
+
+            // If still not found, try targetElement
+            if (index < 0) {
+                index = allElements.indexOf(targetElement);
+            }
+
+            // If still not found, try to find closest parent that's in the list
+            if (index < 0 && targetElement) {
+                let current: Element | null = targetElement;
+                while (current && current !== containerRef.current) {
+                    index = allElements.indexOf(current);
+                    if (index >= 0) break;
+                    current = current.parentElement;
+                }
+            }
+
+            setSelectedIndex(index >= 0 ? index : null);
             setSelectedPoint({ page: pageIndex, x: centerX, y: centerY });
         } else {
             setSelectedElement(null);
             setSelectedPoint(null);
+            setSelectedIndex(null);
         }
     };
 

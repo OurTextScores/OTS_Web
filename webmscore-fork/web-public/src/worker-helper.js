@@ -338,6 +338,81 @@ class WebMscoreW {
     }
 
     /**
+     * Select the topmost selectable element near a page-relative point.
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @returns {Promise<boolean>}
+     */
+    selectElementAtPoint(pageNumber, x, y) {
+        return this.rpc('selectElementAtPoint', [pageNumber, x, y])
+    }
+
+    /**
+     * Delete the current selection.
+     * @returns {Promise<boolean>}
+     */
+    deleteSelection() {
+        return this.rpc('deleteSelection')
+    }
+
+    /**
+     * Raise pitch for the current selection.
+     * @returns {Promise<boolean>}
+     */
+    pitchUp() {
+        return this.rpc('pitchUp')
+    }
+
+    /**
+     * Lower pitch for the current selection.
+     * @returns {Promise<boolean>}
+     */
+    pitchDown() {
+        return this.rpc('pitchDown')
+    }
+
+    /**
+     * Double the duration of the current selection.
+     * @returns {Promise<boolean>}
+     */
+    doubleDuration() {
+        return this.rpc('doubleDuration')
+    }
+
+    /**
+     * Halve the duration of the current selection.
+     * @returns {Promise<boolean>}
+     */
+    halfDuration() {
+        return this.rpc('halfDuration')
+    }
+
+    /**
+     * Undo the last command.
+     * @returns {Promise<boolean>}
+     */
+    undo() {
+        return this.rpc('undo')
+    }
+
+    /**
+     * Redo the last undone command.
+     * @returns {Promise<boolean>}
+     */
+    redo() {
+        return this.rpc('redo')
+    }
+
+    /**
+     * Force a relayout and update of the current score.
+     * @returns {Promise<boolean>}
+     */
+    relayout() {
+        return this.rpc('relayout')
+    }
+
+    /**
      * @param {boolean=} soft (default `true`)
      *                 * `true`  destroy the score instance only, or
      *                 * `false` destroy the whole WebMscore webworker context 

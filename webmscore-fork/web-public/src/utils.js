@@ -22,10 +22,20 @@ export const shimDom = () => {
     }
 
     const globalthis = getGlobalThis()
-    globalthis.window = globalthis.window || {
-        addEventListener() { },
-        location: new URL("file:///"),
-        encodeURIComponent,
+    if (!globalthis.window) {
+        if (typeof importScripts === 'function') {
+            globalthis.window = globalthis
+        } else {
+            globalthis.window = {
+                addEventListener() { },
+                location: new URL("file:///"),
+                encodeURIComponent,
+            }
+        }
     }
-    globalthis.navigator = globalthis.navigator || {}
+    if (!globalthis.navigator) {
+        try {
+            globalthis.navigator = {}
+        } catch { }
+    }
 }

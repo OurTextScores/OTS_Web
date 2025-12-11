@@ -58,9 +58,17 @@ int _version() {
  * init libmscore
  */
 void _init(int argc, char** argv) {
-    setenv("QT_QPA_PLATFORM", "offscreen", 1); // https://stackoverflow.com/a/70978934
+    setenv("QT_QPA_PLATFORM", "wasm", 1); // Force wasm platform; offscreen plugin is unavailable in browser
     setenv("QT_QPA_FONTDIR", "/fonts", 1);
-    new QGuiApplication(argc, argv);
+    // Qt inspects argv for the platform choice; make sure it always sees "-platform wasm"
+    static char arg0[] = "webmscore";
+    static char arg1[] = "-platform";
+    static char arg2[] = "wasm";
+    char* forcedArgv[] = { arg0, arg1, arg2, nullptr };
+    int forcedArgc = 3;
+    new QGuiApplication(forcedArgc, forcedArgv);
+    (void)argc;
+    (void)argv;
 
     modularity::ioc()->registerExport<context::IGlobalContext>("", s_globalContext);
     modularity::ioc()->registerExport<notation::INotationConfiguration>("", new notation::NotationConfiguration());

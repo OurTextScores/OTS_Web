@@ -32,6 +32,7 @@
 
 namespace mu::engraving {
 class EngravingItem;
+class Score;
 }
 
 class SvgGeneratorPrivate;
@@ -85,7 +86,7 @@ public:
     void setResolution(int dpi);
     int resolution() const;
 
-    void setElement(const mu::engraving::EngravingItem* e);
+    void setElement(const mu::engraving::EngravingItem* e, const mu::engraving::Score* score = nullptr);
 
 protected:
     QPaintEngine* paintEngine() const;

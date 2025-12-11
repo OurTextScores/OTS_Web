@@ -6,6 +6,8 @@ import { IS_NODE, shimDom } from './utils.js'
 
 if (IS_NODE) {
 
+    try { global.fetch = undefined } catch { }
+
     // cjs require for the native Node.js ES Modules support
     if (typeof require == "undefined") {
         global.require = createRequire(import.meta.url)

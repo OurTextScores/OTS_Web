@@ -28,6 +28,7 @@
 #include <QMimeDatabase>
 #include <QPaintEngine>
 #include <QFile>
+#include <algorithm>
 
 #include "svggenerator.h"
 #include "types/bytearray.h"
@@ -35,8 +36,14 @@
 #include "libmscore/image.h"
 #include "libmscore/imageStore.h"
 #include "libmscore/mscore.h"
+#include "libmscore/score.h"
+#include "libmscore/select.h"
 
 #include "log.h"
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // FOR GRADIENT FUNCTIONALITY THAT IS NOT IMPLEMENTED (YET):
@@ -131,8 +138,14 @@ static void translate_dashPattern(QVector<qreal> pattern, const qreal& width, QS
 }
 
 // Gets the contents of the SVG class attribute, based on element type/name
-static QString getClass(const mu::engraving::EngravingItem* e)
+static QString getClass(const mu::engraving::EngravingItem* e, const mu::engraving::Score* score)
 {
+    static bool hasLoggedEver = false;
+    if (!hasLoggedEver) {
+        hasLoggedEver = true;
+        printf("[WASM DEBUG] getClass() CALLED - this should only appear once\n");
+    }
+
     QString eName;
 
     // Add element type as "class"
@@ -141,7 +154,57 @@ static QString getClass(const mu::engraving::EngravingItem* e)
     }
     eName = e->typeName();
 
-    // Future sub-typing code goes here
+    // DEBUG: Log selection state (only for Note elements to reduce noise)
+    static bool hasLoggedOnce = false;
+    if (!hasLoggedOnce && eName == "Note") {
+        hasLoggedOnce = true;
+        if (!score) {
+            printf("[WASM DEBUG] getClass: score is NULL\n");
+        } else {
+            auto& sel = score->selection();
+            printf("[WASM DEBUG] getClass: score valid, state=%d isNone=%d isRange=%d isSingle=%d isList=%d elements.size=%zu\n",
+                   int(sel.state()), sel.isNone(), sel.isRange(), sel.isSingle(), sel.isList(), sel.elements().size());
+        }
+    }
+
+    // Add "selected" class if element is in the selection
+    if (score && score->selection().isRange()) {
+        // Range selection: check if element is in the selection
+        if (score->selection().canCopy()) {
+            const auto& elements = score->selection().elements();
+            auto* nonConstE = const_cast<mu::engraving::EngravingItem*>(e);
+            if (std::find(elements.begin(), elements.end(), nonConstE) != elements.end()) {
+                eName += " selected";
+                printf("[WASM DEBUG] Added selected to element (range)\n");
+            }
+        }
+    } else if (score && score->selection().isSingle()) {
+        // Single element selection
+        if (score->selection().element() == e) {
+            eName += " selected";
+            printf("[WASM DEBUG] Added selected to element (single)\n");
+        }
+    } else if (score && score->selection().isList()) {
+        // List selection: check if element is in the list
+        const auto& elements = score->selection().elements();
+        auto* nonConstE = const_cast<mu::engraving::EngravingItem*>(e);
+        if (std::find(elements.begin(), elements.end(), nonConstE) != elements.end()) {
+            eName += " selected";
+            printf("[WASM DEBUG] Added selected to element (list)\n");
+        }
+    }
+
+    // Inject the selection state into the first element we touch so we can inspect the SVG output
+    static bool addedSelectionStateOnce = false;
+    if (!addedSelectionStateOnce) {
+        addedSelectionStateOnce = true;
+        if (score) {
+            const auto& sel = score->selection();
+            eName += QString(" selstate-%1-sz-%2").arg(int(sel.state())).arg(sel.elements().size());
+        } else {
+            eName += " selstate-noscore";
+        }
+    }
 
     return eName;
 }
@@ -234,6 +297,8 @@ private:
 protected:
 // The mu::engraving::EngravingItem being generated right now
     const mu::engraving::EngravingItem* _element = NULL;
+// The score context for checking selection state
+    const mu::engraving::Score* _score = NULL;
 
     void writeImage(const QRectF& r, const QByteArray& imageData, const QString& mimeFormat);
 
@@ -1001,12 +1066,14 @@ int SvgGenerator::metric(QPaintDevice::PaintDeviceMetric metric) const
 
 /*!
     setElement() function
-    Sets the _element variable in SvgPaintEngine.
+    Sets the _element and _score variables in SvgPaintEngine.
     Called by saveSVG() in mscore/file.cpp.
 */
-void SvgGenerator::setElement(const mu::engraving::EngravingItem* e)
+void SvgGenerator::setElement(const mu::engraving::EngravingItem* e, const mu::engraving::Score* score)
 {
-    static_cast<SvgPaintEngine*>(paintEngine())->_element = e;
+    auto* engine = static_cast<SvgPaintEngine*>(paintEngine());
+    engine->_element = e;
+    engine->_score = score;
 }
 
 /*****************************************************************************
@@ -1151,13 +1218,19 @@ void SvgPaintEngine::writeImage(const QRectF& r, const QByteArray& imageData, co
 
 void SvgPaintEngine::updateState(const QPaintEngineState& s)
 {
+    static bool hasLoggedUpdateState = false;
+    if (!hasLoggedUpdateState) {
+        hasLoggedUpdateState = true;
+        printf("[WASM DEBUG] updateState() CALLED - SVG rendering happening\n");
+    }
+
     // Always start fresh
     stateString.clear();
 
     // stateString = Attribute Settings
 
     // SVG class attribute, based on mu::engraving::ElementType
-    stateStream << SVG_CLASS << getClass(_element) << SVG_QUOTE;
+    stateStream << SVG_CLASS << getClass(_element, _score) << SVG_QUOTE;
 
     // Brush and Pen attributes
     stateStream << qbrushToSvg(s.brush());

@@ -5,9 +5,9 @@ import { version } from './package.json'
 const MEM_FILE = 'webmscore.lib.mem.wasm'
 
 const WEBPACK_IMPORT = `
-import libWasm from '!!file-loader?name=[name].wasm!./webmscore.lib.wasm-'  // workaround for Webpack 4
-import libData from '!!file-loader?name=[name].[ext].wasm!./webmscore.lib.data'
-import libMem from '!!file-loader?name=${MEM_FILE}!./webmscore.lib.mem-'
+const libWasm = '/webmscore.lib.wasm'
+const libData = '/webmscore.lib.data'
+const libMem = '/webmscore.lib.mem.wasm'
 `
 
 const CDN_IMPORT = `

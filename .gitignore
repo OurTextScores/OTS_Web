@@ -12,6 +12,12 @@
 
 # testing
 /coverage
+/.playwright-mcp/
+
+# Optional webmscore JS artifacts (sync script doesn't copy these)
+/public/webmscore.lib.js
+/public/webmscore.lib.js.mem
+/public/webmscore.lib.js.symbols
 
 # next.js
 /.next/

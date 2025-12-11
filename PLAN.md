@@ -226,10 +226,74 @@ webmscore.js
 ).
 Replace the node_modules/webmscore files with our custom build (or link it).
 
+## Phase 0.3: Selection Tracking via SVG Class Markers
+
+### Problem Statement
+When pitching up/down a note, the blue selection overlay doesn't follow the note to its new position - it disappears completely. This occurs because the SVG is regenerated after mutations, causing element indices to change and making JavaScript-based selection tracking unreliable.
+
+### Implemented Solution (WASM-side)
+Modified the MuseScore SVG generator to add a "selected" class to elements that are currently selected in the score's internal selection state.
+
+**Files Modified:**
+1. `/webmscore-fork/src/importexport/imagesexport/internal/svggenerator.h`
+   - Added forward declaration for `Score` class
+   - Modified `setElement()` signature to accept optional `Score` parameter
+
+2. `/webmscore-fork/src/importexport/imagesexport/internal/svggenerator.cpp`
+   - Added includes: `<algorithm>`, `libmscore/score.h`, `libmscore/select.h`
+   - Modified `getClass()` function to check selection state and append " selected" to class
+   - Added `_score` member to `SvgPaintEngine` class
+   - Updated `setElement()` to store both element and score pointers
+   - Handles three selection modes: `isRange()`, `isSingle()`, `isList()`
+   - Uses `std::find()` for C++17 compatibility (not `vector::contains()`)
+
+3. `/webmscore-fork/src/importexport/imagesexport/internal/svgwriter.cpp`
+   - Updated all three `setElement()` call sites to pass score pointer (lines 147, 163, 221)
+
+**Build Process:**
+```bash
+cd webmscore-fork/web/build.release
+make -j8
+cd ../../..
+npm run sync:wasm  # Copies all WASM artifacts to public/
+```
+
+### Current Status
+- ✅ WASM builds successfully with selection-checking code
+- ✅ SVG elements have proper class attributes (Note, Stem, Beam, etc.)
+- ❌ "selected" class is NOT appearing on clicked elements
+
+### Investigation Needed
+The "selected" class is not being added to SVG elements despite:
+1. The WASM code compiling and running without errors
+2. The score loading and rendering correctly
+3. Element classes being properly set (verified 320 "Note" elements, 160 "Beam" elements, etc.)
+
+**Possible causes:**
+1. Selection state is empty when `getClass()` is called during SVG generation
+2. SVG generation happens before selection is registered in MuseScore's internal state
+3. The score's `selection()` method returns an empty selection during rendering
+4. Timing issue: SVG is cached/rendered before the WASM selection state updates
+
+**Next debugging steps:**
+1. Add C++ debug logging to `getClass()` to verify:
+   - Whether `score` parameter is non-null
+   - What `selection().state()` returns
+   - How many elements `selection().elements()` contains
+2. Verify that clicking actually updates MuseScore's internal selection before SVG regeneration
+3. Check if there's a separate "render with selection" vs "render without selection" code path
+
+### Alternative Approach (if current method fails)
+If the selection state is not available during SVG generation, we may need to:
+1. Export a separate WASM function to mark elements as selected by ID/index
+2. Trigger SVG regeneration after explicitly setting selection markers
+3. Or use a completely JavaScript-based approach with overlays (less ideal but more reliable)
+
 Current Next Steps
 - Keep tracking the generated `web-public/webmscore.*` artifacts (for install without rebuild); ignore only transient build trees (`web/build.release`, `.cache`).
 - Document/re-run `npm run compile` in `web-public` when bindings change.
 - Expand mutation surface as needed (e.g., duration set, add interval, select by element id) and expose via C/JS bridge following the same pattern.
+- **DEBUG:** Add logging to WASM `getClass()` function to understand why "selected" class isn't being applied
 4. Frontend Integration
 Update ScoreEditor.tsx to use the new methods.
 Add UI controls (Delete button, Undo/Redo buttons).
