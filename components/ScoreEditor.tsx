@@ -306,6 +306,15 @@ export default function ScoreEditor() {
             }
             await renderScore(score);
 
+            // Re-establish selection inside WASM if we had a previously known point.
+            if (preservedPoint && score.selectElementAtPoint) {
+                try {
+                    await score.selectElementAtPoint(preservedPoint.page, preservedPoint.x, preservedPoint.y);
+                } catch (reselectErr) {
+                    console.warn('Re-select in WASM after mutation failed; continuing with overlay fallback', reselectErr);
+                }
+            }
+
             // If selection wasn't cleared, restore preserved state for fallback
             if (!options?.clearSelection) {
                 if (preservedIndex !== null && selectedIndex === null) {

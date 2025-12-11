@@ -23,3 +23,9 @@
 2. Harden selection/hit-testing for multi-page scores and confirm coordinate mapping under zoom/pan.
 3. Decide whether to keep the WASM debug logging in release builds.
 4. Optional: add simple assertions to `scripts/debug-select.js` so regressions fail fast.
+
+## Selection/Mutation Contract (Phase 0)
+- WASM is the source of truth for selection; DOM overlay is a visual helper only.
+- UI sends `selectElementAtPoint(page, x, y)` using the center of the clicked element (page-relative coords) to set WASM selection.
+- After any mutation/undo/redo that re-renders, the UI replays `selectElementAtPoint` with the last known point (if present) to keep WASM selection + SVG highlighting in sync.
+- If the SVG lacks `selected` markers, the overlay falls back to the last known element index to keep a visible box.

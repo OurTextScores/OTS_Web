@@ -188,6 +188,7 @@ The system is designed so that libmscore can be swapped out later without rewrit
 1. Rebuild webmscore with platform=`wasm` baked in (remove memory-initializer `offscreen` patch) and automate copying `webmscore.lib.*` artifacts into `public/`.
 2. Implement reliable selection/hit-testing (DOM overlay or WASM hit-test) and wire mutations to the selected element; add visual highlight.
 3. Add a lightweight regression check in the dev/build flow to verify required wasm/data/mem files are present and loadable.
+4. **Next feature to tackle:** stabilize selection persistence (highlight state) across undo/redo and mutations, and document the JS↔WASM selection contract for Phase 0.
 
 
 Phase 0.2: Mutation (Fork Strategy)
