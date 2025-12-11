@@ -566,60 +566,68 @@ export default function ScoreEditor() {
             stopAudio();
 
             // Prefer streaming via synthAudioBatch if available
-            const useStreaming = typeof score.synthAudioBatch === 'function';
+            const useStreaming = typeof (score as any).synthAudioBatch === 'function';
+            let streamed = false;
             if (useStreaming) {
-                const audioCtx = audioCtxRef.current || new AudioContext({ sampleRate: 44100 });
-                audioCtxRef.current = audioCtx;
-                if (audioCtx.state === 'suspended') {
-                    await audioCtx.resume();
-                }
-                const batchFn = await (score as any).synthAudioBatch(0, 16);
-                streamIteratorRef.current = batchFn;
-                const baseTime = audioCtx.currentTime + 0.05;
-                let lastSource: AudioBufferSourceNode | null = null;
-                // Stream chunks until done
-                while (true) {
-                    const batch = await batchFn(false);
-                    if (!Array.isArray(batch) || batch.length === 0) {
-                        break;
+                try {
+                    const audioCtx = audioCtxRef.current || new AudioContext({ sampleRate: 44100 });
+                    audioCtxRef.current = audioCtx;
+                    if (audioCtx.state === 'suspended') {
+                        await audioCtx.resume();
                     }
-                    let hitDone = false;
-                    for (const res of batch) {
-                        if (!res) continue;
-                        if (res.done) {
-                            hitDone = true;
+                    const batchFn = await (score as any).synthAudioBatch(0, 16);
+                    streamIteratorRef.current = batchFn;
+                    const baseTime = audioCtx.currentTime + 0.05;
+                    let lastSource: AudioBufferSourceNode | null = null;
+                    // Stream chunks until done
+                    while (true) {
+                        const batch = await batchFn(false);
+                        if (!Array.isArray(batch) || batch.length === 0) {
+                            break;
                         }
-                        const floats = new Float32Array(res.chunk.buffer, res.chunk.byteOffset, res.chunk.byteLength / 4);
-                        const framesPerChannel = 512; // from synthAudio docs
-                        let channels = Math.floor(floats.length / framesPerChannel);
-                        if (!Number.isInteger(channels) || channels < 1) channels = 1;
-                        if (channels > 2) channels = 2; // cap to stereo
-                        const buffer = audioCtx.createBuffer(channels, framesPerChannel, audioCtx.sampleRate);
-                        for (let ch = 0; ch < channels; ch++) {
-                            const start = ch * framesPerChannel;
-                            const slice = floats.subarray(start, start + framesPerChannel);
-                            buffer.copyToChannel(slice, ch);
+                        let hitDone = false;
+                        for (const res of batch) {
+                            if (!res) continue;
+                            if (res.done) {
+                                hitDone = true;
+                            }
+                            const floats = new Float32Array(res.chunk.buffer, res.chunk.byteOffset, res.chunk.byteLength / 4);
+                            const framesPerChannel = 512; // from synthAudio docs
+                            let channels = Math.floor(floats.length / framesPerChannel);
+                            if (!Number.isInteger(channels) || channels < 1) channels = 1;
+                            if (channels > 2) channels = 2; // cap to stereo
+                            const buffer = audioCtx.createBuffer(channels, framesPerChannel, audioCtx.sampleRate);
+                            for (let ch = 0; ch < channels; ch++) {
+                                const start = ch * framesPerChannel;
+                                const slice = floats.subarray(start, start + framesPerChannel);
+                                buffer.copyToChannel(slice, ch);
+                            }
+                            const source = audioCtx.createBufferSource();
+                            source.buffer = buffer;
+                            source.connect(audioCtx.destination);
+                            const startTime = baseTime + res.startTime;
+                            source.start(startTime);
+                            audioSourcesRef.current.push(source);
+                            lastSource = source;
+                            if (hitDone) break;
                         }
-                        const source = audioCtx.createBufferSource();
-                        source.buffer = buffer;
-                        source.connect(audioCtx.destination);
-                        const startTime = baseTime + res.startTime;
-                        source.start(startTime);
-                        audioSourcesRef.current.push(source);
-                        lastSource = source;
                         if (hitDone) break;
                     }
-                    if (hitDone) break;
+                    if (lastSource) {
+                        lastSource.onended = () => {
+                            setIsPlaying(false);
+                            audioSourcesRef.current = [];
+                            streamIteratorRef.current = null;
+                        };
+                    }
+                    setIsPlaying(true);
+                    streamed = true;
+                } catch (streamErr) {
+                    console.warn('Streaming playback failed; falling back to WAV', streamErr);
+                    stopAudio();
                 }
-                if (lastSource) {
-                    lastSource.onended = () => {
-                        setIsPlaying(false);
-                        audioSourcesRef.current = [];
-                        streamIteratorRef.current = null;
-                    };
-                }
-                setIsPlaying(true);
-            } else {
+            }
+            if (!streamed) {
                 // Fallback to full WAV generation
                 if (audioUrlRef.current) {
                     await playFromUrl(audioUrlRef.current);
