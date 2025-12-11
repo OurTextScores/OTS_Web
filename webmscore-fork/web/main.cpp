@@ -38,6 +38,7 @@
 #include "./importexport/positionjsonwriter.h"
 #include "engraving/libmscore/page.h"
 #include "engraving/libmscore/undo.h"
+#include "engraving/libmscore/factory.h"
 
 #include "./score.h"
 #include "./wasmres.h"
@@ -720,11 +721,44 @@ bool _relayout(uintptr_t score_ptr, int excerptId)
     return true;
 }
 
+bool _toggleDot(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    score->startCmd();
+    // step dotted true, negative to move toward longer (adds dot if applicable)
+    score->cmdIncDecDuration(-1, true);
+    score->endCmd();
+    return true;
+}
+
+bool _toggleDoubleDot(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    score->startCmd();
+    // apply dotted step twice to simulate double-dot toggle
+    score->cmdIncDecDuration(-1, true);
+    score->cmdIncDecDuration(-1, true);
+    score->endCmd();
+    return true;
+}
+
+bool _setVoice(uintptr_t score_ptr, int voiceIndex, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (voiceIndex < 0 || voiceIndex > 3) {
+        LOGW() << "setVoice: invalid voice index " << voiceIndex;
+        return false;
+    }
+    // Use input state to set current voice
+    score->inputState().setVoice(voiceIndex);
+    return true;
+}
+
 bool _setTimeSignature(uintptr_t score_ptr, int numerator, int denominator, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
-    auto measures = score->measures();
-    if (measures.empty()) {
+    auto* measures = score->measures();
+    if (!measures || measures->size() == 0) {
         LOGW() << "setTimeSignature: no measures in score";
         return false;
     }
@@ -733,10 +767,21 @@ bool _setTimeSignature(uintptr_t score_ptr, int numerator, int denominator, int 
         return false;
     }
 
-    engraving::Measure* m = measures.front();
-    auto ts = new engraving::TimeSig(score.get());
-    ts->setSig(mu::Fraction(numerator, denominator));
-    ts->setTimeSigType(engraving::TimeSigType::NORMAL);
+    engraving::MeasureBase* mb = measures->first();
+    engraving::Measure* m = mb ? toMeasure(mb) : nullptr;
+    if (!m) {
+        LOGW() << "setTimeSignature: first measure null";
+        return false;
+    }
+
+    // Use the first time signature segment as parent; if missing, create a stub segment
+    engraving::Segment* seg = m->getSegment(engraving::SegmentType::TimeSig, m->tick());
+    if (!seg) {
+        seg = m->getSegment(engraving::SegmentType::ChordRest, m->tick());
+    }
+
+    auto ts = engraving::Factory::createTimeSig(seg);
+    ts->setSig(engraving::Fraction(numerator, denominator));
 
     score->startCmd();
     score->cmdAddTimeSig(m, 0, ts, /*local*/ false);
@@ -747,7 +792,8 @@ bool _setTimeSignature(uintptr_t score_ptr, int numerator, int denominator, int 
 bool _setClef(uintptr_t score_ptr, int clefType, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
-    if (clefType < (int)engraving::ClefType::MIN || clefType > (int)engraving::ClefType::MAX) {
+    // ClefType enum values start at 0, use simple range check
+    if (clefType < 0 || clefType > static_cast<int>(engraving::ClefType::MAX)) {
         LOGW() << "setClef: invalid clef type " << clefType;
         return false;
     }
@@ -886,6 +932,21 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool relayout(uintptr_t score_ptr, int excerptId = -1) {
         return _relayout(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool toggleDot(uintptr_t score_ptr, int excerptId = -1) {
+        return _toggleDot(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool toggleDoubleDot(uintptr_t score_ptr, int excerptId = -1) {
+        return _toggleDoubleDot(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setVoice(uintptr_t score_ptr, int voiceIndex, int excerptId = -1) {
+        return _setVoice(score_ptr, voiceIndex, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

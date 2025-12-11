@@ -578,6 +578,29 @@ class WebMscore {
     }
 
     /**
+     * Toggle dotted duration on the current selection
+     */
+    async toggleDot() {
+        return Module.ccall('toggleDot', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Toggle double-dotted duration on the current selection
+     */
+    async toggleDoubleDot() {
+        return Module.ccall('toggleDoubleDot', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Set voice index (0-3) for input/selection
+     * @param {number} voiceIndex
+     * @returns {Promise<boolean>}
+     */
+    async setVoice(voiceIndex) {
+        return Module.ccall('setVoice', 'boolean', ['number', 'number', 'number'], [this.scoreptr, voiceIndex, this.excerptId])
+    }
+
+    /**
      * Undo the last command
      */
     async undo() {

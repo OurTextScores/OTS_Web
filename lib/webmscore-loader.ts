@@ -26,6 +26,9 @@ export interface Score {
     pitchDown?: () => Promise<unknown> | unknown;
     doubleDuration?: () => Promise<unknown> | unknown;
     halfDuration?: () => Promise<unknown> | unknown;
+    toggleDot?: () => Promise<unknown> | unknown;
+    toggleDoubleDot?: () => Promise<unknown> | unknown;
+    setVoice?: (voiceIndex: number) => Promise<unknown> | unknown;
     undo?: () => Promise<unknown> | unknown;
     redo?: () => Promise<unknown> | unknown;
     relayout?: () => Promise<unknown> | unknown;

@@ -410,6 +410,27 @@ export default function ScoreEditor() {
         return fn.call(score);
     });
 
+    const handleToggleDot = () => performMutation('toggle dot', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('toggleDot');
+        if (!fn) return;
+        return fn.call(score);
+    });
+
+    const handleToggleDoubleDot = () => performMutation('toggle double dot', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('toggleDoubleDot');
+        if (!fn) return;
+        return fn.call(score);
+    });
+
+    const handleSetVoice = (voiceIndex: number) => performMutation(`set voice ${voiceIndex + 1}`, async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('setVoice');
+        if (!fn) return;
+        return fn.call(score, voiceIndex);
+    });
+
     const handleSetTimeSignature = async (num: number, den: number) => {
         if (!score || !score.setTimeSignature) return;
         setAudioBusy(true);
@@ -835,6 +856,9 @@ export default function ScoreEditor() {
                 onSetTimeSignature34={() => handleSetTimeSignature(3, 4)}
                 onSetClefTreble={() => handleSetClef(0 /* ClefType::G */)}
                 onSetClefBass={() => handleSetClef(5 /* ClefType::F */)}
+                onToggleDot={handleToggleDot}
+                onToggleDoubleDot={handleToggleDoubleDot}
+                onSetVoice={handleSetVoice}
             />
 
             <div className="flex-1 overflow-auto bg-gray-50 p-8">

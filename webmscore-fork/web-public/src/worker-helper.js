@@ -388,6 +388,18 @@ class WebMscoreW {
         return this.rpc('halfDuration')
     }
 
+    toggleDot() {
+        return this.rpc('toggleDot')
+    }
+
+    toggleDoubleDot() {
+        return this.rpc('toggleDoubleDot')
+    }
+
+    setVoice(voiceIndex) {
+        return this.rpc('setVoice', [voiceIndex])
+    }
+
     /**
      * Undo the last command.
      * @returns {Promise<boolean>}
