@@ -36,6 +36,9 @@ interface ToolbarProps {
     onToggleDot?: () => void;
     onToggleDoubleDot?: () => void;
     onSetVoice?: (voiceIndex: number) => void;
+    onAddDynamic?: (dynamicType: number) => void;
+    onAddRehearsalMark?: () => void;
+    onAddTempoText?: (bpm: number) => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -73,7 +76,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     onSetClefBass,
     onToggleDot,
     onToggleDoubleDot,
-    onSetVoice
+    onSetVoice,
+    onAddDynamic,
+    onAddRehearsalMark,
+    onAddTempoText
 }) => {
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -342,6 +348,34 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                         Voice {v}
                     </button>
                 ))}
+            </div>
+
+            <div className="flex items-center space-x-2 text-sm">
+                <span className="text-gray-600">Markings:</span>
+                <button
+                    type="button"
+                    onClick={() => onAddDynamic?.(0 /* DynamicType::P */)}
+                    disabled={!onAddDynamic}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Dynamic (p)
+                </button>
+                <button
+                    type="button"
+                    onClick={onAddRehearsalMark}
+                    disabled={!onAddRehearsalMark}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Rehearsal
+                </button>
+                <button
+                    type="button"
+                    onClick={() => onAddTempoText?.(120)}
+                    disabled={!onAddTempoText}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Tempo 120
+                </button>
             </div>
         </div>
     );
