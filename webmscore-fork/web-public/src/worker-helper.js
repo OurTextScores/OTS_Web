@@ -400,6 +400,18 @@ class WebMscoreW {
         return this.rpc('setVoice', [voiceIndex])
     }
 
+    addDynamic(dynamicType) {
+        return this.rpc('addDynamic', [dynamicType])
+    }
+
+    addRehearsalMark() {
+        return this.rpc('addRehearsalMark')
+    }
+
+    addTempoText(bpm) {
+        return this.rpc('addTempoText', [bpm])
+    }
+
     /**
      * Undo the last command.
      * @returns {Promise<boolean>}

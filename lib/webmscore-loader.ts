@@ -34,6 +34,9 @@ export interface Score {
     relayout?: () => Promise<unknown> | unknown;
     setTimeSignature?: (numerator: number, denominator: number) => Promise<unknown> | unknown;
     setClef?: (clefType: number) => Promise<unknown> | unknown;
+    addDynamic?: (dynamicType: number) => Promise<unknown> | unknown;
+    addRehearsalMark?: () => Promise<unknown> | unknown;
+    addTempoText?: (bpm: number) => Promise<unknown> | unknown;
 }
 
 export interface WebMscoreInstance {

@@ -622,6 +622,32 @@ class WebMscore {
     }
 
     /**
+     * Add a dynamic marking at the current selection
+     * @param {number} dynamicType see engraving::DynamicType enum
+     * @returns {Promise<boolean>}
+     */
+    async addDynamic(dynamicType) {
+        return Module.ccall('addDynamic', 'boolean', ['number', 'number', 'number'], [this.scoreptr, dynamicType, this.excerptId])
+    }
+
+    /**
+     * Add a rehearsal mark at the current selection
+     * @returns {Promise<boolean>}
+     */
+    async addRehearsalMark() {
+        return Module.ccall('addRehearsalMark', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Add tempo text at the current selection
+     * @param {number} bpm
+     * @returns {Promise<boolean>}
+     */
+    async addTempoText(bpm) {
+        return Module.ccall('addTempoText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, bpm, this.excerptId])
+    }
+
+    /**
      * Set the time signature (global) at the start of the score
      * @param {number} numerator
      * @param {number} denominator

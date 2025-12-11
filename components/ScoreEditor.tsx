@@ -431,6 +431,27 @@ export default function ScoreEditor() {
         return fn.call(score, voiceIndex);
     });
 
+    const handleAddDynamic = (dynamicType: number) => performMutation('add dynamic', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addDynamic');
+        if (!fn) return;
+        return fn.call(score, dynamicType);
+    });
+
+    const handleAddRehearsalMark = () => performMutation('add rehearsal mark', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addRehearsalMark');
+        if (!fn) return;
+        return fn.call(score);
+    });
+
+    const handleAddTempoText = (bpm: number) => performMutation('add tempo text', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addTempoText');
+        if (!fn) return;
+        return fn.call(score, bpm);
+    });
+
     const handleSetTimeSignature = async (num: number, den: number) => {
         if (!score || !score.setTimeSignature) return;
         setAudioBusy(true);
@@ -859,6 +880,9 @@ export default function ScoreEditor() {
                 onToggleDot={handleToggleDot}
                 onToggleDoubleDot={handleToggleDoubleDot}
                 onSetVoice={handleSetVoice}
+                onAddDynamic={handleAddDynamic}
+                onAddRehearsalMark={handleAddRehearsalMark}
+                onAddTempoText={handleAddTempoText}
             />
 
             <div className="flex-1 overflow-auto bg-gray-50 p-8">

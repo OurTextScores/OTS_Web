@@ -31,6 +31,7 @@
 #include "engraving/libmscore/undo.h"
 #include "engraving/libmscore/timesig.h"
 #include "engraving/libmscore/clef.h"
+#include "engraving/libmscore/factory.h"
 #include "converter/internal/compat/notationmeta.h"
 #include "notation/internal/notation.h"
 #include "notation/internal/mscnotationwriter.h"
@@ -39,6 +40,9 @@
 #include "engraving/libmscore/page.h"
 #include "engraving/libmscore/undo.h"
 #include "engraving/libmscore/factory.h"
+#include "engraving/libmscore/tempotext.h"
+#include "engraving/libmscore/dynamic.h"
+#include "engraving/libmscore/rehearsalmark.h"
 
 #include "./score.h"
 #include "./wasmres.h"
@@ -754,6 +758,87 @@ bool _setVoice(uintptr_t score_ptr, int voiceIndex, int excerptId)
     return true;
 }
 
+bool _addDynamic(uintptr_t score_ptr, int dynamicType, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    auto cr = score->selection().cr();
+    if (!cr) {
+        LOGW() << "addDynamic: no chord/rest selected";
+        return false;
+    }
+    auto seg = cr->segment();
+    if (!seg) {
+        LOGW() << "addDynamic: no segment on selection";
+        return false;
+    }
+    auto dyn = engraving::Factory::createDynamic(seg);
+    if (!dyn) {
+        LOGW() << "addDynamic: Factory returned null";
+        return false;
+    }
+    dyn->setDynamicType(engraving::DynamicType(dynamicType));
+
+    score->startCmd();
+    score->undo(new engraving::AddElement(dyn));
+    score->endCmd();
+    return true;
+}
+
+bool _addRehearsalMark(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    auto cr = score->selection().cr();
+    if (!cr) {
+        LOGW() << "addRehearsalMark: no chord/rest selected";
+        return false;
+    }
+    auto seg = cr->segment();
+    if (!seg) {
+        LOGW() << "addRehearsalMark: no segment on selection";
+        return false;
+    }
+    auto rm = engraving::Factory::createRehearsalMark(seg);
+    if (!rm) {
+        LOGW() << "addRehearsalMark: Factory returned null";
+        return false;
+    }
+    rm->setXmlText(score->createRehearsalMarkText(rm));
+
+    score->startCmd();
+    score->undo(new engraving::AddElement(rm));
+    score->cmdResequenceRehearsalMarks();
+    score->endCmd();
+    return true;
+}
+
+bool _addTempoText(uintptr_t score_ptr, double bpm, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    auto cr = score->selection().cr();
+    if (!cr) {
+        LOGW() << "addTempoText: no chord/rest selected";
+        return false;
+    }
+    auto seg = cr->segment();
+    if (!seg) {
+        LOGW() << "addTempoText: no segment on selection";
+        return false;
+    }
+
+    auto tt = engraving::Factory::createTempoText(seg);
+    if (!tt) {
+        LOGW() << "addTempoText: Factory returned null";
+        return false;
+    }
+    // TempoText::setTempo expects BeatsPerSecond
+    tt->setTempo(engraving::BeatsPerSecond(bpm / 60.0));
+
+    score->startCmd();
+    score->undo(new engraving::AddElement(tt));
+    score->endCmd();
+    return true;
+}
+
 bool _setTimeSignature(uintptr_t score_ptr, int numerator, int denominator, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
@@ -947,6 +1032,21 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool setVoice(uintptr_t score_ptr, int voiceIndex, int excerptId = -1) {
         return _setVoice(score_ptr, voiceIndex, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addDynamic(uintptr_t score_ptr, int dynamicType, int excerptId = -1) {
+        return _addDynamic(score_ptr, dynamicType, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addRehearsalMark(uintptr_t score_ptr, int excerptId = -1) {
+        return _addRehearsalMark(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addTempoText(uintptr_t score_ptr, double bpm, int excerptId = -1) {
+        return _addTempoText(score_ptr, bpm, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE
