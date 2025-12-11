@@ -413,6 +413,25 @@ class WebMscoreW {
     }
 
     /**
+     * Set the time signature (global) at the start of the score.
+     * @param {number} numerator
+     * @param {number} denominator
+     * @returns {Promise<boolean>}
+     */
+    setTimeSignature(numerator, denominator) {
+        return this.rpc('setTimeSignature', [numerator, denominator])
+    }
+
+    /**
+     * Insert a clef at the current selection/input position.
+     * @param {number} clefType see engraving::ClefType enum
+     * @returns {Promise<boolean>}
+     */
+    setClef(clefType) {
+        return this.rpc('setClef', [clefType])
+    }
+
+    /**
      * @param {boolean=} soft (default `true`)
      *                 * `true`  destroy the score instance only, or
      *                 * `false` destroy the whole WebMscore webworker context 

@@ -410,6 +410,40 @@ export default function ScoreEditor() {
         return fn.call(score);
     });
 
+    const handleSetTimeSignature = async (num: number, den: number) => {
+        if (!score || !score.setTimeSignature) return;
+        setAudioBusy(true);
+        try {
+            await score.setTimeSignature(num, den);
+            if (score.relayout) {
+                await score.relayout();
+            }
+            await renderScore(score);
+        } catch (err) {
+            console.error('Failed to set time signature', err);
+            alert('Unable to set time signature. See console for details.');
+        } finally {
+            setAudioBusy(false);
+        }
+    };
+
+    const handleSetClef = async (clefType: number) => {
+        if (!score || !score.setClef) return;
+        setAudioBusy(true);
+        try {
+            await score.setClef(clefType);
+            if (score.relayout) {
+                await score.relayout();
+            }
+            await renderScore(score);
+        } catch (err) {
+            console.error('Failed to set clef', err);
+            alert('Unable to set clef. See console for details.');
+        } finally {
+            setAudioBusy(false);
+        }
+    };
+
     const downloadBlob = (data: BlobPart, filename: string, mime: string) => {
         const blob = new Blob([data], { type: mime });
         const url = URL.createObjectURL(blob);
@@ -797,6 +831,10 @@ export default function ScoreEditor() {
                 exportsEnabled={Boolean(score)}
                 pngAvailable={Boolean(score?.savePng)}
                 audioAvailable={Boolean(score?.saveAudio) && soundFontLoaded}
+                onSetTimeSignature44={() => handleSetTimeSignature(4, 4)}
+                onSetTimeSignature34={() => handleSetTimeSignature(3, 4)}
+                onSetClefTreble={() => handleSetClef(0 /* ClefType::G */)}
+                onSetClefBass={() => handleSetClef(5 /* ClefType::F */)}
             />
 
             <div className="flex-1 overflow-auto bg-gray-50 p-8">

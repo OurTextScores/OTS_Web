@@ -29,6 +29,8 @@ export interface Score {
     undo?: () => Promise<unknown> | unknown;
     redo?: () => Promise<unknown> | unknown;
     relayout?: () => Promise<unknown> | unknown;
+    setTimeSignature?: (numerator: number, denominator: number) => Promise<unknown> | unknown;
+    setClef?: (clefType: number) => Promise<unknown> | unknown;
 }
 
 export interface WebMscoreInstance {

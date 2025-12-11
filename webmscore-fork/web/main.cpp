@@ -29,6 +29,8 @@
 #include "project/internal/notationwritersregister.h"
 #include "engraving/libmscore/excerpt.h"
 #include "engraving/libmscore/undo.h"
+#include "engraving/libmscore/timesig.h"
+#include "engraving/libmscore/clef.h"
 #include "converter/internal/compat/notationmeta.h"
 #include "notation/internal/notation.h"
 #include "notation/internal/mscnotationwriter.h"
@@ -718,6 +720,44 @@ bool _relayout(uintptr_t score_ptr, int excerptId)
     return true;
 }
 
+bool _setTimeSignature(uintptr_t score_ptr, int numerator, int denominator, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    auto measures = score->measures();
+    if (measures.empty()) {
+        LOGW() << "setTimeSignature: no measures in score";
+        return false;
+    }
+    if (numerator <= 0 || denominator <= 0) {
+        LOGW() << "setTimeSignature: invalid fraction " << numerator << "/" << denominator;
+        return false;
+    }
+
+    engraving::Measure* m = measures.front();
+    auto ts = new engraving::TimeSig(score.get());
+    ts->setSig(mu::Fraction(numerator, denominator));
+    ts->setTimeSigType(engraving::TimeSigType::NORMAL);
+
+    score->startCmd();
+    score->cmdAddTimeSig(m, 0, ts, /*local*/ false);
+    score->endCmd();
+    return true;
+}
+
+bool _setClef(uintptr_t score_ptr, int clefType, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (clefType < (int)engraving::ClefType::MIN || clefType > (int)engraving::ClefType::MAX) {
+        LOGW() << "setClef: invalid clef type " << clefType;
+        return false;
+    }
+
+    score->startCmd();
+    score->cmdInsertClef(static_cast<engraving::ClefType>(clefType));
+    score->endCmd();
+    return true;
+}
+
 /**
  * export functions (can only be C functions)
  */
@@ -846,6 +886,16 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool relayout(uintptr_t score_ptr, int excerptId = -1) {
         return _relayout(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setTimeSignature(uintptr_t score_ptr, int numerator, int denominator, int excerptId = -1) {
+        return _setTimeSignature(score_ptr, numerator, denominator, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setClef(uintptr_t score_ptr, int clefType, int excerptId = -1) {
+        return _setClef(score_ptr, clefType, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

@@ -599,6 +599,25 @@ class WebMscore {
     }
 
     /**
+     * Set the time signature (global) at the start of the score
+     * @param {number} numerator
+     * @param {number} denominator
+     * @returns {Promise<boolean>}
+     */
+    async setTimeSignature(numerator, denominator) {
+        return Module.ccall('setTimeSignature', 'boolean', ['number', 'number', 'number', 'number'], [this.scoreptr, numerator, denominator, this.excerptId])
+    }
+
+    /**
+     * Insert a clef at the current selection/input position
+     * @param {number} clefType see engraving::ClefType enum
+     * @returns {Promise<boolean>}
+     */
+    async setClef(clefType) {
+        return Module.ccall('setClef', 'boolean', ['number', 'number', 'number'], [this.scoreptr, clefType, this.excerptId])
+    }
+
+    /**
      * @param {boolean=} soft (default `true`)
      *                 * `true`  destroy the score instance only, or
      *                 * `false` destroy the whole WebMscore context 

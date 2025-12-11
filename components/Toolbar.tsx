@@ -29,6 +29,10 @@ interface ToolbarProps {
     onStopAudio?: () => void;
     isPlaying?: boolean;
     audioBusy?: boolean;
+    onSetTimeSignature44?: () => void;
+    onSetTimeSignature34?: () => void;
+    onSetClefTreble?: () => void;
+    onSetClefBass?: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -59,7 +63,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     onPlayAudio,
     onStopAudio,
     isPlaying = false,
-    audioBusy = false
+    audioBusy = false,
+    onSetTimeSignature44,
+    onSetTimeSignature34,
+    onSetClefTreble,
+    onSetClefBass
 }) => {
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -260,6 +268,42 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Stop
+                </button>
+            </div>
+
+            <div className="flex items-center space-x-2 text-sm">
+                <span className="text-gray-600">Signature:</span>
+                <button
+                    type="button"
+                    onClick={onSetTimeSignature44}
+                    disabled={!onSetTimeSignature44}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    4/4
+                </button>
+                <button
+                    type="button"
+                    onClick={onSetTimeSignature34}
+                    disabled={!onSetTimeSignature34}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    3/4
+                </button>
+                <button
+                    type="button"
+                    onClick={onSetClefTreble}
+                    disabled={!onSetClefTreble}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Treble
+                </button>
+                <button
+                    type="button"
+                    onClick={onSetClefBass}
+                    disabled={!onSetClefBass}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Bass
                 </button>
             </div>
         </div>
