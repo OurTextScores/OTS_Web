@@ -40,6 +40,10 @@ export default function ScoreEditor() {
     const [isPlaying, setIsPlaying] = useState(false);
     const [audioBusy, setAudioBusy] = useState(false);
     const audioUrlRef = useRef<string | null>(null);
+    const audioCtxRef = useRef<AudioContext | null>(null);
+    const audioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
+    const streamIteratorRef = useRef<((cancel?: boolean) => Promise<any>) | null>(null);
+    const audioUrlRef = useRef<string | null>(null);
 
     const exposeScoreToWindow = (s: Score | null) => {
         // Handy for Playwright/debug sessions to poke at WASM bindings directly
@@ -521,6 +525,19 @@ export default function ScoreEditor() {
             audioRef.current.pause();
             audioRef.current.currentTime = 0;
         }
+        audioSourcesRef.current.forEach(src => {
+            try {
+                src.stop();
+            } catch (_) {
+                // ignore
+            }
+        });
+        audioSourcesRef.current = [];
+        const iter = streamIteratorRef.current;
+        if (iter) {
+            iter(true).catch(() => { /* ignore */ });
+            streamIteratorRef.current = null;
+        }
         setIsPlaying(false);
     };
 
@@ -533,7 +550,6 @@ export default function ScoreEditor() {
         audioRef.current = audio;
         audio.onended = () => setIsPlaying(false);
         await audio.play();
-        setIsPlaying(false);
         setIsPlaying(true);
     };
 
@@ -548,14 +564,73 @@ export default function ScoreEditor() {
         }
         try {
             setAudioBusy(true);
-            if (audioUrlRef.current) {
-                await playFromUrl(audioUrlRef.current);
+            stopAudio();
+
+            // Prefer streaming via synthAudioBatch if available
+            const useStreaming = typeof score.synthAudioBatch === 'function';
+            if (useStreaming) {
+                const audioCtx = audioCtxRef.current || new AudioContext({ sampleRate: 44100 });
+                audioCtxRef.current = audioCtx;
+                if (audioCtx.state === 'suspended') {
+                    await audioCtx.resume();
+                }
+                const batchFn = await (score as any).synthAudioBatch(0, 16);
+                streamIteratorRef.current = batchFn;
+                const baseTime = audioCtx.currentTime + 0.05;
+                let lastSource: AudioBufferSourceNode | null = null;
+                // Stream chunks until done
+                while (true) {
+                    const batch = await batchFn(false);
+                    if (!Array.isArray(batch) || batch.length === 0) {
+                        break;
+                    }
+                    let hitDone = false;
+                    for (const res of batch) {
+                        if (!res) continue;
+                        if (res.done) {
+                            hitDone = true;
+                        }
+                        const floats = new Float32Array(res.chunk.buffer, res.chunk.byteOffset, res.chunk.byteLength / 4);
+                        const framesPerChannel = 512; // from synthAudio docs
+                        let channels = Math.floor(floats.length / framesPerChannel);
+                        if (!Number.isInteger(channels) || channels < 1) channels = 1;
+                        if (channels > 2) channels = 2; // cap to stereo
+                        const buffer = audioCtx.createBuffer(channels, framesPerChannel, audioCtx.sampleRate);
+                        for (let ch = 0; ch < channels; ch++) {
+                            const start = ch * framesPerChannel;
+                            const slice = floats.subarray(start, start + framesPerChannel);
+                            buffer.copyToChannel(slice, ch);
+                        }
+                        const source = audioCtx.createBufferSource();
+                        source.buffer = buffer;
+                        source.connect(audioCtx.destination);
+                        const startTime = baseTime + res.startTime;
+                        source.start(startTime);
+                        audioSourcesRef.current.push(source);
+                        lastSource = source;
+                        if (hitDone) break;
+                    }
+                    if (hitDone) break;
+                }
+                if (lastSource) {
+                    lastSource.onended = () => {
+                        setIsPlaying(false);
+                        audioSourcesRef.current = [];
+                        streamIteratorRef.current = null;
+                    };
+                }
+                setIsPlaying(true);
             } else {
-                const wav = await score.saveAudio('wav');
-                const blob = new Blob([wav], { type: 'audio/wav' });
-                const url = URL.createObjectURL(blob);
-                audioUrlRef.current = url;
-                await playFromUrl(url);
+                // Fallback to full WAV generation
+                if (audioUrlRef.current) {
+                    await playFromUrl(audioUrlRef.current);
+                } else {
+                    const wav = await score.saveAudio('wav');
+                    const blob = new Blob([wav], { type: 'audio/wav' });
+                    const url = URL.createObjectURL(blob);
+                    audioUrlRef.current = url;
+                    await playFromUrl(url);
+                }
             }
         } catch (err) {
             console.error('Failed to play audio', err);
