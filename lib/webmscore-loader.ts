@@ -9,6 +9,8 @@ export interface Score {
     savePdf: () => Promise<Uint8Array>;
     saveMxl?: () => Promise<Uint8Array>;
     saveMsc?: (format?: 'mscz' | 'mscx') => Promise<Uint8Array>;
+    saveMidi?: (midiExpandRepeats?: boolean, exportRPNs?: boolean) => Promise<Uint8Array>;
+    saveAudio?: (format: 'wav' | 'ogg' | 'flac' | 'mp3') => Promise<Uint8Array>;
     savePng?: (pageNumber?: number, drawPageBackground?: boolean, transparent?: boolean) => Promise<Uint8Array>;
     setSoundFont: (data: Uint8Array) => Promise<void>;
     metadata: () => Promise<Record<string, unknown>>;

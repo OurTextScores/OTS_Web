@@ -453,6 +453,34 @@ export default function ScoreEditor() {
         }
     };
 
+    const handleExportMidi = async () => {
+        if (!score || !score.saveMidi) {
+            alert('MIDI export is not available in this build.');
+            return;
+        }
+        try {
+            const midi = await score.saveMidi(true, true);
+            downloadBlob(midi, 'score.mid', 'audio/midi');
+        } catch (err) {
+            console.error('Failed to export MIDI', err);
+            alert('Unable to export MIDI. See console for details.');
+        }
+    };
+
+    const handleExportAudio = async () => {
+        if (!score || !score.saveAudio) {
+            alert('Audio export is not available in this build.');
+            return;
+        }
+        try {
+            const wav = await score.saveAudio('wav');
+            downloadBlob(wav, 'score.wav', 'audio/wav');
+        } catch (err) {
+            console.error('Failed to export audio', err);
+            alert('Unable to export audio. See console for details.');
+        }
+    };
+
     const handleZoomIn = () => {
         setZoom(prev => Math.min(prev + 0.1, 3.0));
     };
@@ -593,8 +621,11 @@ export default function ScoreEditor() {
                 onExportPng={handleExportPng}
                 onExportMxl={handleExportMxl}
                 onExportMscz={handleExportMscz}
+                onExportMidi={handleExportMidi}
+                onExportAudio={handleExportAudio}
                 exportsEnabled={Boolean(score)}
                 pngAvailable={Boolean(score?.savePng)}
+                audioAvailable={Boolean(score?.saveAudio)}
             />
 
             <div className="flex-1 overflow-auto bg-gray-50 p-8">

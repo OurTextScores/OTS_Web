@@ -19,8 +19,11 @@ interface ToolbarProps {
     onExportPng?: () => void;
     onExportMxl?: () => void;
     onExportMscz?: () => void;
+    onExportMidi?: () => void;
+    onExportAudio?: () => void;
     exportsEnabled?: boolean;
     pngAvailable?: boolean;
+    audioAvailable?: boolean;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -42,8 +45,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     onExportPng,
     onExportMxl,
     onExportMscz,
+    onExportMidi,
+    onExportAudio,
     exportsEnabled = false,
-    pngAvailable = false
+    pngAvailable = false,
+    audioAvailable = false
 }) => {
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -176,6 +182,22 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     MSCZ
+                </button>
+                <button
+                    type="button"
+                    onClick={onExportMidi}
+                    disabled={!exportsEnabled || !onExportMidi}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    MIDI
+                </button>
+                <button
+                    type="button"
+                    onClick={onExportAudio}
+                    disabled={!exportsEnabled || !onExportAudio || !audioAvailable}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    WAV
                 </button>
             </div>
 
