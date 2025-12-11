@@ -39,6 +39,7 @@ export default function ScoreEditor() {
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [audioBusy, setAudioBusy] = useState(false);
+    const audioUrlRef = useRef<string | null>(null);
 
     const exposeScoreToWindow = (s: Score | null) => {
         // Handy for Playwright/debug sessions to poke at WASM bindings directly
@@ -523,6 +524,19 @@ export default function ScoreEditor() {
         setIsPlaying(false);
     };
 
+    const playFromUrl = async (url: string) => {
+        if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.src = '';
+        }
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        audio.onended = () => setIsPlaying(false);
+        await audio.play();
+        setIsPlaying(false);
+        setIsPlaying(true);
+    };
+
     const handlePlayAudio = async () => {
         if (!score || !score.saveAudio) {
             alert('Audio playback is not available in this build.');
@@ -534,18 +548,15 @@ export default function ScoreEditor() {
         }
         try {
             setAudioBusy(true);
-            const wav = await score.saveAudio('wav');
-            const blob = new Blob([wav], { type: 'audio/wav' });
-            const url = URL.createObjectURL(blob);
-            if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current.src = '';
+            if (audioUrlRef.current) {
+                await playFromUrl(audioUrlRef.current);
+            } else {
+                const wav = await score.saveAudio('wav');
+                const blob = new Blob([wav], { type: 'audio/wav' });
+                const url = URL.createObjectURL(blob);
+                audioUrlRef.current = url;
+                await playFromUrl(url);
             }
-            const audio = new Audio(url);
-            audioRef.current = audio;
-            audio.onended = () => setIsPlaying(false);
-            await audio.play();
-            setIsPlaying(true);
         } catch (err) {
             console.error('Failed to play audio', err);
             alert('Unable to play audio. See console for details.');
