@@ -425,6 +425,34 @@ export default function ScoreEditor() {
         }
     };
 
+    const handleExportMxl = async () => {
+        if (!score || !score.saveMxl) {
+            alert('MXL export is not available in this build.');
+            return;
+        }
+        try {
+            const mxl = await score.saveMxl();
+            downloadBlob(mxl, 'score.mxl', 'application/vnd.recordare.musicxml');
+        } catch (err) {
+            console.error('Failed to export MXL', err);
+            alert('Unable to export MXL. See console for details.');
+        }
+    };
+
+    const handleExportMscz = async () => {
+        if (!score || !score.saveMsc) {
+            alert('MSCZ export is not available in this build.');
+            return;
+        }
+        try {
+            const mscz = await score.saveMsc('mscz');
+            downloadBlob(mscz, 'score.mscz', 'application/vnd.musescore.mscz');
+        } catch (err) {
+            console.error('Failed to export MSCZ', err);
+            alert('Unable to export MSCZ. See console for details.');
+        }
+    };
+
     const handleZoomIn = () => {
         setZoom(prev => Math.min(prev + 0.1, 3.0));
     };
@@ -563,6 +591,8 @@ export default function ScoreEditor() {
                 onExportSvg={handleExportSvg}
                 onExportPdf={handleExportPdf}
                 onExportPng={handleExportPng}
+                onExportMxl={handleExportMxl}
+                onExportMscz={handleExportMscz}
                 exportsEnabled={Boolean(score)}
                 pngAvailable={Boolean(score?.savePng)}
             />

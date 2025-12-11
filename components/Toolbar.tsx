@@ -17,6 +17,8 @@ interface ToolbarProps {
     onExportSvg?: () => void;
     onExportPdf?: () => void;
     onExportPng?: () => void;
+    onExportMxl?: () => void;
+    onExportMscz?: () => void;
     exportsEnabled?: boolean;
     pngAvailable?: boolean;
 }
@@ -38,6 +40,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     onExportSvg,
     onExportPdf,
     onExportPng,
+    onExportMxl,
+    onExportMscz,
     exportsEnabled = false,
     pngAvailable = false
 }) => {
@@ -156,6 +160,22 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     PNG
+                </button>
+                <button
+                    type="button"
+                    onClick={onExportMxl}
+                    disabled={!exportsEnabled || !onExportMxl}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    MXL
+                </button>
+                <button
+                    type="button"
+                    onClick={onExportMscz}
+                    disabled={!exportsEnabled || !onExportMscz}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    MSCZ
                 </button>
             </div>
 
