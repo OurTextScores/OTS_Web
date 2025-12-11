@@ -190,6 +190,29 @@ The system is designed so that libmscore can be swapped out later without rewrit
 3. Add a lightweight regression check in the dev/build flow to verify required wasm/data/mem files are present and loadable.
 4. **Next feature to tackle:** stabilize selection persistence (highlight state) across undo/redo and mutations, and document the JS↔WASM selection contract for Phase 0.
 
+## WASM Build / Sync (timed commands)
+- Debug rebuild (from `webmscore-fork/web/build.debug`): `/usr/bin/time -v emmake make -j8 webmscore`
+- Copy artifacts to web-public → Next: `npm run sync:wasm` (copies `.wasm/.data/.mem.wasm` to `public/`)
+- Rebundle worker glue (from `webmscore-fork/web-public`): `/usr/bin/time -v npx rollup -c`
+
+## Selection / Mutation Contract (Phase 0)
+- WASM is the source of truth for selection; the DOM overlay is visual only.
+- UI calls `selectElementAtPoint(page, x, y)` using the center of the clicked element (page-relative) to set selection in WASM.
+- After any mutation/undo/redo + re-render, re-run `selectElementAtPoint` with the last known point to keep WASM state and SVG highlights aligned.
+- If the SVG lacks `selected` markers, the overlay falls back to the last known element index.
+
+## Current Status (worker/WASM)
+- Signature mismatch crash fixed via full rebuild; debug flags reduced to avoid finalize OOM.
+- Mutation/selection APIs exposed in both main-thread and worker builds (`selectElementAtPoint`, delete/pitch/duration, undo/redo, relayout).
+- Playwright smoke `scripts/debug-select.js` exercises toolbar mutations end-to-end; selection persists across undo/redo with the reselect hook.
+
+## Wrapper Priorities (available exports to wrap)
+1) Selection + core edit: `selectElementAtPoint`, `deleteSelection`, `pitchUp/Down`, `doubleDuration/halfDuration`, `undo/redo`, `relayout`.
+2) Render/output: `saveSvg`, `savePng`, `savePdf`, `savePositions`, `saveMetadata`.
+3) Score IO: `load`, `saveXml/Mxl/Msc`, `saveMidi`, `saveAudio`, `generateExcerpts`, `addFont`, `init`.
+4) Info/housekeeping: `version`, `setLogLevel`, `title`, `npages`, `destroy`.
+5) Playback (optional): `synthAudio`, `processSynth`, `processSynthBatch`.
+
 
 Phase 0.2: Mutation (Fork Strategy)
 Goal Description
