@@ -38,6 +38,7 @@ export default function ScoreEditor() {
     const [triedSoundFont, setTriedSoundFont] = useState(false);
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
+    const [audioBusy, setAudioBusy] = useState(false);
 
     const exposeScoreToWindow = (s: Score | null) => {
         // Handy for Playwright/debug sessions to poke at WASM bindings directly
@@ -503,11 +504,14 @@ export default function ScoreEditor() {
             return;
         }
         try {
+            setAudioBusy(true);
             const wav = await score.saveAudio('wav');
             downloadBlob(wav, 'score.wav', 'audio/wav');
         } catch (err) {
             console.error('Failed to export audio', err);
             alert('Unable to export audio. See console for details.');
+        } finally {
+            setAudioBusy(false);
         }
     };
 
@@ -529,6 +533,7 @@ export default function ScoreEditor() {
             return;
         }
         try {
+            setAudioBusy(true);
             const wav = await score.saveAudio('wav');
             const blob = new Blob([wav], { type: 'audio/wav' });
             const url = URL.createObjectURL(blob);
@@ -545,6 +550,8 @@ export default function ScoreEditor() {
             console.error('Failed to play audio', err);
             alert('Unable to play audio. See console for details.');
             stopAudio();
+        } finally {
+            setAudioBusy(false);
         }
     };
 
@@ -693,6 +700,7 @@ export default function ScoreEditor() {
                 onPlayAudio={handlePlayAudio}
                 onStopAudio={stopAudio}
                 isPlaying={isPlaying}
+                audioBusy={audioBusy}
                 exportsEnabled={Boolean(score)}
                 pngAvailable={Boolean(score?.savePng)}
                 audioAvailable={Boolean(score?.saveAudio) && soundFontLoaded}

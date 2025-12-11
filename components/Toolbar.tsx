@@ -28,6 +28,7 @@ interface ToolbarProps {
     onPlayAudio?: () => void;
     onStopAudio?: () => void;
     isPlaying?: boolean;
+    audioBusy?: boolean;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -57,7 +58,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     audioAvailable = false,
     onPlayAudio,
     onStopAudio,
-    isPlaying = false
+    isPlaying = false,
+    audioBusy = false
 }) => {
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -217,10 +219,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <button
                     type="button"
                     onClick={onExportAudio}
-                    disabled={!exportsEnabled || !onExportAudio || !audioAvailable}
+                    disabled={!exportsEnabled || !onExportAudio || !audioAvailable || audioBusy}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                    WAV
+                    {audioBusy ? 'Exporting…' : 'WAV'}
                 </button>
             </div>
 
@@ -246,15 +248,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <button
                     type="button"
                     onClick={onPlayAudio}
-                    disabled={!audioAvailable || !onPlayAudio}
+                    disabled={!audioAvailable || !onPlayAudio || audioBusy}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                    {isPlaying ? 'Replay' : 'Play'}
+                    {audioBusy ? 'Working…' : isPlaying ? 'Replay' : 'Play'}
                 </button>
                 <button
                     type="button"
                     onClick={onStopAudio}
-                    disabled={!audioAvailable || !onStopAudio}
+                    disabled={!audioAvailable || !onStopAudio || audioBusy}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Stop
