@@ -18,6 +18,8 @@
 /public/webmscore.lib.js
 /public/webmscore.lib.js.mem
 /public/webmscore.lib.js.symbols
+/public/soundfonts/
+/fluid-soundfont-gm_*.deb
 
 # next.js
 /.next/

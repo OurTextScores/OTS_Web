@@ -159,23 +159,23 @@ export default function ScoreEditor() {
             if (svgData) {
                 containerRef.current.innerHTML = svgData;
             }
-            // Attempt to load default soundfont once per score render
+            // Attempt to load default soundfont once per score render (sf3 preferred, sf2 fallback)
             if (!triedSoundFont && currentScore.setSoundFont) {
-                const url = '/soundfonts/default.sf3';
-                try {
-                    const res = await fetch(url);
-                    if (res.ok) {
-                        const buf = new Uint8Array(await res.arrayBuffer());
-                        await currentScore.setSoundFont(buf);
-                        setSoundFontLoaded(true);
-                    } else {
-                        console.warn('Default soundfont not found at', url);
+                const candidates = ['/soundfonts/default.sf3', '/soundfonts/default.sf2'];
+                for (const url of candidates) {
+                    try {
+                        const res = await fetch(url);
+                        if (res.ok) {
+                            const buf = new Uint8Array(await res.arrayBuffer());
+                            await currentScore.setSoundFont(buf);
+                            setSoundFontLoaded(true);
+                            break;
+                        }
+                    } catch (sfErr) {
+                        console.warn('Soundfont load failed for', url, sfErr);
                     }
-                } catch (sfErr) {
-                    console.warn('Default soundfont load failed; audio export will be disabled', sfErr);
-                } finally {
-                    setTriedSoundFont(true);
                 }
+                setTriedSoundFont(true);
             }
         } catch (err) {
             console.error('Error rendering score:', err);
