@@ -205,6 +205,7 @@ The system is designed so that libmscore can be swapped out later without rewrit
 - Signature mismatch crash fixed via full rebuild; debug flags reduced to avoid finalize OOM.
 - Mutation/selection APIs exposed in both main-thread and worker builds (`selectElementAtPoint`, delete/pitch/duration, undo/redo, relayout).
 - Playwright smoke `scripts/debug-select.js` exercises toolbar mutations end-to-end; selection persists across undo/redo with the reselect hook.
+- Audio playback uses `saveAudio`/WAV and prefers `synthAudioBatch` streaming; streaming occasionally errors (needs investigation).
 
 ## Wrapper Priorities (available exports to wrap)
 1) Selection + core edit: `selectElementAtPoint`, `deleteSelection`, `pitchUp/Down`, `doubleDuration/halfDuration`, `undo/redo`, `relayout`.
