@@ -36,6 +36,8 @@ export default function ScoreEditor() {
     const [mutationEnabled, setMutationEnabled] = useState(false);
     const [soundFontLoaded, setSoundFontLoaded] = useState(false);
     const [triedSoundFont, setTriedSoundFont] = useState(false);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const [isPlaying, setIsPlaying] = useState(false);
 
     const exposeScoreToWindow = (s: Score | null) => {
         // Handy for Playwright/debug sessions to poke at WASM bindings directly
@@ -509,6 +511,43 @@ export default function ScoreEditor() {
         }
     };
 
+    const stopAudio = () => {
+        if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.currentTime = 0;
+        }
+        setIsPlaying(false);
+    };
+
+    const handlePlayAudio = async () => {
+        if (!score || !score.saveAudio) {
+            alert('Audio playback is not available in this build.');
+            return;
+        }
+        if (!soundFontLoaded) {
+            alert('Load a soundfont (.sf2/.sf3) before playback. Place it at /public/soundfonts/default.sf3 for auto-load.');
+            return;
+        }
+        try {
+            const wav = await score.saveAudio('wav');
+            const blob = new Blob([wav], { type: 'audio/wav' });
+            const url = URL.createObjectURL(blob);
+            if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current.src = '';
+            }
+            const audio = new Audio(url);
+            audioRef.current = audio;
+            audio.onended = () => setIsPlaying(false);
+            await audio.play();
+            setIsPlaying(true);
+        } catch (err) {
+            console.error('Failed to play audio', err);
+            alert('Unable to play audio. See console for details.');
+            stopAudio();
+        }
+    };
+
     const handleZoomIn = () => {
         setZoom(prev => Math.min(prev + 0.1, 3.0));
     };
@@ -651,6 +690,9 @@ export default function ScoreEditor() {
                 onExportMscz={handleExportMscz}
                 onExportMidi={handleExportMidi}
                 onExportAudio={handleExportAudio}
+                onPlayAudio={handlePlayAudio}
+                onStopAudio={stopAudio}
+                isPlaying={isPlaying}
                 exportsEnabled={Boolean(score)}
                 pngAvailable={Boolean(score?.savePng)}
                 audioAvailable={Boolean(score?.saveAudio) && soundFontLoaded}

@@ -25,6 +25,9 @@ interface ToolbarProps {
     exportsEnabled?: boolean;
     pngAvailable?: boolean;
     audioAvailable?: boolean;
+    onPlayAudio?: () => void;
+    onStopAudio?: () => void;
+    isPlaying?: boolean;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -51,7 +54,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     onSoundFontUpload,
     exportsEnabled = false,
     pngAvailable = false,
-    audioAvailable = false
+    audioAvailable = false,
+    onPlayAudio,
+    onStopAudio,
+    isPlaying = false
 }) => {
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -232,6 +238,26 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50"
                 >
                     +
+                </button>
+            </div>
+
+            <div className="flex items-center space-x-2 text-sm">
+                <span className="text-gray-600">Playback:</span>
+                <button
+                    type="button"
+                    onClick={onPlayAudio}
+                    disabled={!audioAvailable || !onPlayAudio}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    {isPlaying ? 'Replay' : 'Play'}
+                </button>
+                <button
+                    type="button"
+                    onClick={onStopAudio}
+                    disabled={!audioAvailable || !onStopAudio}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Stop
                 </button>
             </div>
         </div>
