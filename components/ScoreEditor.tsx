@@ -43,7 +43,6 @@ export default function ScoreEditor() {
     const audioCtxRef = useRef<AudioContext | null>(null);
     const audioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
     const streamIteratorRef = useRef<((cancel?: boolean) => Promise<any>) | null>(null);
-    const audioUrlRef = useRef<string | null>(null);
 
     const exposeScoreToWindow = (s: Score | null) => {
         // Handy for Playwright/debug sessions to poke at WASM bindings directly
