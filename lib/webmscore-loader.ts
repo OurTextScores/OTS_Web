@@ -7,6 +7,7 @@ export interface Score {
     destroy: () => void;
     saveSvg: (pageNumber?: number, drawPageBackground?: boolean) => Promise<string>;
     savePdf: () => Promise<Uint8Array>;
+    savePng?: (pageNumber?: number, drawPageBackground?: boolean, transparent?: boolean) => Promise<Uint8Array>;
     setSoundFont: (data: Uint8Array) => Promise<void>;
     metadata: () => Promise<Record<string, unknown>>;
     measurePositions: () => Promise<Positions>;
