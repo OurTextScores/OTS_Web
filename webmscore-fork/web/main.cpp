@@ -36,6 +36,7 @@
 #include "notation/internal/notation.h"
 #include "notation/internal/mscnotationwriter.h"
 #include "engraving/libmscore/chord.h"
+#include "engraving/libmscore/editdata.h"
 #include "importexport/midi/internal/midiexport/exportmidi.h"
 #include "./importexport/positionjsonwriter.h"
 #include "engraving/libmscore/page.h"
@@ -818,27 +819,18 @@ bool _addDynamic(uintptr_t score_ptr, int dynamicType, int excerptId)
         LOGW() << "addDynamic: no chord/rest selected";
         return false;
     }
-    auto seg = cr->segment();
-    if (!seg) {
-        LOGW() << "addDynamic: no segment on selection";
-        return false;
-    }
-    auto dyn = engraving::Factory::createDynamic(seg);
-    if (!dyn) {
-        LOGW() << "addDynamic: Factory returned null";
-        return false;
-    }
     if (dynamicType < 0 || dynamicType >= static_cast<int>(engraving::DynamicType::LAST)) {
         LOGW() << "addDynamic: invalid dynamic type " << dynamicType;
         return false;
     }
     auto dtype = static_cast<engraving::DynamicType>(dynamicType);
+    score->startCmd();
+    auto dyn = new engraving::Dynamic(score->dummy()->segment());
     dyn->setDynamicType(dtype);
     dyn->setXmlText(engraving::Dynamic::dynamicText(dtype));
-    dyn->setTrack(cr->track());
-
-    score->startCmd();
-    score->undo(new engraving::AddElement(dyn));
+    engraving::EditData ed;
+    ed.dropElement = dyn;
+    cr->drop(ed);
     score->endCmd();
     return true;
 }

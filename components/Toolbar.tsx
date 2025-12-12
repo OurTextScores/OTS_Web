@@ -103,7 +103,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         { label: '4/4', numerator: 4, denominator: 4 },
         { label: '3/4', numerator: 3, denominator: 4 },
         { label: '2/4', numerator: 2, denominator: 4 },
+        { label: '2/2', numerator: 2, denominator: 2 },
         { label: '6/8', numerator: 6, denominator: 8 },
+        { label: '3/8', numerator: 3, denominator: 8 },
+        { label: '9/8', numerator: 9, denominator: 8 },
+        { label: '12/8', numerator: 12, denominator: 8 },
         { label: '5/4', numerator: 5, denominator: 4 },
         { label: '7/8', numerator: 7, denominator: 8 },
     ];
