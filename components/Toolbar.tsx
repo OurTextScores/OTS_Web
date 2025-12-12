@@ -112,6 +112,39 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         { label: '7/8', numerator: 7, denominator: 8 },
     ];
 
+    const dynamicOptions = [
+        { label: 'pppppp', value: 1 }, // DynamicType::PPPPPP
+        { label: 'ppppp', value: 2 },  // DynamicType::PPPPP
+        { label: 'pppp', value: 3 },   // DynamicType::PPPP
+        { label: 'ppp', value: 4 },    // DynamicType::PPP
+        { label: 'pp', value: 5 },     // DynamicType::PP
+        { label: 'p', value: 6 },      // DynamicType::P
+        { label: 'mp', value: 7 },     // DynamicType::MP
+        { label: 'mf', value: 8 },     // DynamicType::MF
+        { label: 'f', value: 9 },      // DynamicType::F
+        { label: 'ff', value: 10 },    // DynamicType::FF
+        { label: 'fff', value: 11 },   // DynamicType::FFF
+        { label: 'ffff', value: 12 },  // DynamicType::FFFF
+        { label: 'fffff', value: 13 }, // DynamicType::FFFFF
+        { label: 'ffffff', value: 14 }, // DynamicType::FFFFFF
+        { label: 'fp', value: 15 },    // DynamicType::FP
+        { label: 'pf', value: 16 },    // DynamicType::PF
+        { label: 'sf', value: 17 },    // DynamicType::SF
+        { label: 'sfz', value: 18 },   // DynamicType::SFZ
+        { label: 'sff', value: 19 },   // DynamicType::SFF
+        { label: 'sffz', value: 20 },  // DynamicType::SFFZ
+        { label: 'sfp', value: 21 },   // DynamicType::SFP
+        { label: 'sfpp', value: 22 },  // DynamicType::SFPP
+        { label: 'rfz', value: 23 },   // DynamicType::RFZ
+        { label: 'rf', value: 24 },    // DynamicType::RF
+        { label: 'fz', value: 25 },    // DynamicType::FZ
+        { label: 'm', value: 26 },     // DynamicType::M
+        { label: 'r', value: 27 },     // DynamicType::R
+        { label: 's', value: 28 },     // DynamicType::S
+        { label: 'z', value: 29 },     // DynamicType::Z
+        { label: 'n', value: 30 },     // DynamicType::N
+    ];
+
     const resolveTimeSigHandler = (opt: { label: string; numerator: number; denominator: number }) => {
         if (onSetTimeSignature) {
             return () => onSetTimeSignature(opt.numerator, opt.denominator);
@@ -373,16 +406,19 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 ))}
             </div>
 
-            <div className="flex items-center space-x-2 text-sm">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="text-gray-600">Markings:</span>
-                <button
-                    type="button"
-                    onClick={() => onAddDynamic?.(6 /* DynamicType::P */)}
-                    disabled={mutationDisabled || !selectionActive || !onAddDynamic}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    Dynamic (p)
-                </button>
+                {dynamicOptions.map(opt => (
+                    <button
+                        key={opt.label}
+                        type="button"
+                        onClick={() => onAddDynamic?.(opt.value)}
+                        disabled={mutationDisabled || !selectionActive || !onAddDynamic}
+                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {opt.label}
+                    </button>
+                ))}
                 <button
                     type="button"
                     onClick={onAddRehearsalMark}
