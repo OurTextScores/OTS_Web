@@ -373,7 +373,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <span className="text-gray-600">Markings:</span>
                 <button
                     type="button"
-                    onClick={() => onAddDynamic?.(0 /* DynamicType::P */)}
+                    onClick={() => onAddDynamic?.(6 /* DynamicType::P */)}
                     disabled={mutationDisabled || !selectionActive || !onAddDynamic}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >

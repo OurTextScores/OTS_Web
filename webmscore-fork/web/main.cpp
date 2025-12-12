@@ -828,7 +828,14 @@ bool _addDynamic(uintptr_t score_ptr, int dynamicType, int excerptId)
         LOGW() << "addDynamic: Factory returned null";
         return false;
     }
-    dyn->setDynamicType(engraving::DynamicType(dynamicType));
+    if (dynamicType < 0 || dynamicType >= static_cast<int>(engraving::DynamicType::LAST)) {
+        LOGW() << "addDynamic: invalid dynamic type " << dynamicType;
+        return false;
+    }
+    auto dtype = static_cast<engraving::DynamicType>(dynamicType);
+    dyn->setDynamicType(dtype);
+    dyn->setXmlText(engraving::Dynamic::dynamicText(dtype));
+    dyn->setTrack(cr->track());
 
     score->startCmd();
     score->undo(new engraving::AddElement(dyn));
