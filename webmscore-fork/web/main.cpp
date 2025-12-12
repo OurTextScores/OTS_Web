@@ -728,6 +728,11 @@ bool _relayout(uintptr_t score_ptr, int excerptId)
 bool _toggleDot(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
+    auto cr = score->selection().cr();
+    if (!cr) {
+        LOGW() << "toggleDot: no chord/rest selected";
+        return false;
+    }
     score->startCmd();
     // step dotted true, negative to move toward longer (adds dot if applicable)
     score->cmdIncDecDuration(-1, true);
@@ -738,6 +743,11 @@ bool _toggleDot(uintptr_t score_ptr, int excerptId)
 bool _toggleDoubleDot(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
+    auto cr = score->selection().cr();
+    if (!cr) {
+        LOGW() << "toggleDoubleDot: no chord/rest selected";
+        return false;
+    }
     score->startCmd();
     // apply dotted step twice to simulate double-dot toggle
     score->cmdIncDecDuration(-1, true);
@@ -842,30 +852,25 @@ bool _addTempoText(uintptr_t score_ptr, double bpm, int excerptId)
 bool _setTimeSignature(uintptr_t score_ptr, int numerator, int denominator, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
-    auto* measures = score->measures();
-    if (!measures || measures->size() == 0) {
-        LOGW() << "setTimeSignature: no measures in score";
-        return false;
-    }
     if (numerator <= 0 || denominator <= 0) {
         LOGW() << "setTimeSignature: invalid fraction " << numerator << "/" << denominator;
         return false;
     }
 
-    engraving::MeasureBase* mb = measures->first();
-    engraving::Measure* m = mb ? toMeasure(mb) : nullptr;
+    // Use first real measure (MeasureBase list may start with frames)
+    engraving::Measure* m = score->firstMeasure();
     if (!m) {
-        LOGW() << "setTimeSignature: first measure null";
+        LOGW() << "setTimeSignature: no measures in score";
         return false;
     }
 
-    // Use the first time signature segment as parent; if missing, create a stub segment
-    engraving::Segment* seg = m->getSegment(engraving::SegmentType::TimeSig, m->tick());
-    if (!seg) {
-        seg = m->getSegment(engraving::SegmentType::ChordRest, m->tick());
+    // Create new TimeSig from dummy segment; cmdAddTimeSig will attach/copy it.
+    engraving::Segment* dummySeg = score->dummy()->segment();
+    auto ts = engraving::Factory::createTimeSig(dummySeg);
+    if (!ts) {
+        LOGW() << "setTimeSignature: Factory returned null";
+        return false;
     }
-
-    auto ts = engraving::Factory::createTimeSig(seg);
     ts->setSig(engraving::Fraction(numerator, denominator));
 
     score->startCmd();

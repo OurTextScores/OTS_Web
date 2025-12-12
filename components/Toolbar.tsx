@@ -151,7 +151,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     <button
                         type="button"
                         onClick={onPitchDown}
-                        disabled={mutationDisabled || !onPitchDown}
+                        disabled={mutationDisabled || !onPitchDown || !selectionActive}
                         className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         Pitch ↓
@@ -159,7 +159,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     <button
                         type="button"
                         onClick={onPitchUp}
-                        disabled={mutationDisabled || !onPitchUp}
+                        disabled={mutationDisabled || !onPitchUp || !selectionActive}
                         className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         Pitch ↑
@@ -170,7 +170,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     <button
                         type="button"
                         onClick={onDurationShorter}
-                        disabled={mutationDisabled || !onDurationShorter}
+                        disabled={mutationDisabled || !onDurationShorter || !selectionActive}
                         className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         Shorter
@@ -178,7 +178,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     <button
                         type="button"
                         onClick={onDurationLonger}
-                        disabled={mutationDisabled || !onDurationLonger}
+                        disabled={mutationDisabled || !onDurationLonger || !selectionActive}
                         className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         Longer
@@ -288,7 +288,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <button
                     type="button"
                     onClick={onSetTimeSignature44}
-                    disabled={!onSetTimeSignature44}
+                    disabled={mutationDisabled || !onSetTimeSignature44}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     4/4
@@ -296,7 +296,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <button
                     type="button"
                     onClick={onSetTimeSignature34}
-                    disabled={!onSetTimeSignature34}
+                    disabled={mutationDisabled || !onSetTimeSignature34}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     3/4
@@ -304,7 +304,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <button
                     type="button"
                     onClick={onSetClefTreble}
-                    disabled={!onSetClefTreble}
+                    disabled={mutationDisabled || !onSetClefTreble}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Treble
@@ -312,7 +312,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <button
                     type="button"
                     onClick={onSetClefBass}
-                    disabled={!onSetClefBass}
+                    disabled={mutationDisabled || !onSetClefBass}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Bass
@@ -324,7 +324,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <button
                     type="button"
                     onClick={onToggleDot}
-                    disabled={!onToggleDot}
+                    disabled={mutationDisabled || !selectionActive || !onToggleDot}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Dot
@@ -332,7 +332,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <button
                     type="button"
                     onClick={onToggleDoubleDot}
-                    disabled={!onToggleDoubleDot}
+                    disabled={mutationDisabled || !selectionActive || !onToggleDoubleDot}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Double Dot
@@ -342,7 +342,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                         key={v}
                         type="button"
                         onClick={() => onSetVoice?.(v - 1)}
-                        disabled={!onSetVoice}
+                        disabled={mutationDisabled || !onSetVoice}
                         className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         Voice {v}
@@ -355,7 +355,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <button
                     type="button"
                     onClick={() => onAddDynamic?.(0 /* DynamicType::P */)}
-                    disabled={!onAddDynamic}
+                    disabled={mutationDisabled || !selectionActive || !onAddDynamic}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Dynamic (p)
@@ -363,7 +363,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <button
                     type="button"
                     onClick={onAddRehearsalMark}
-                    disabled={!onAddRehearsalMark}
+                    disabled={mutationDisabled || !selectionActive || !onAddRehearsalMark}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Rehearsal
@@ -371,7 +371,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <button
                     type="button"
                     onClick={() => onAddTempoText?.(120)}
-                    disabled={!onAddTempoText}
+                    disabled={mutationDisabled || !selectionActive || !onAddTempoText}
                     className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Tempo 120
