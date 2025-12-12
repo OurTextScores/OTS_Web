@@ -29,8 +29,10 @@ interface ToolbarProps {
     onStopAudio?: () => void;
     isPlaying?: boolean;
     audioBusy?: boolean;
-    onSetTimeSignature44?: () => void;
-    onSetTimeSignature34?: () => void;
+    onSetTimeSignature?: (numerator: number, denominator: number) => void;
+    timeSignatureOptions?: { label: string; numerator: number; denominator: number }[];
+    onSetTimeSignature44?: () => void; // legacy
+    onSetTimeSignature34?: () => void; // legacy
     onSetClefTreble?: () => void;
     onSetClefBass?: () => void;
     onToggleDot?: () => void;
@@ -70,6 +72,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     onStopAudio,
     isPlaying = false,
     audioBusy = false,
+    onSetTimeSignature,
+    timeSignatureOptions,
     onSetTimeSignature44,
     onSetTimeSignature34,
     onSetClefTreble,
@@ -95,6 +99,23 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     };
 
     const mutationDisabled = !mutationsEnabled;
+    const signatureOptions = timeSignatureOptions ?? [
+        { label: '4/4', numerator: 4, denominator: 4 },
+        { label: '3/4', numerator: 3, denominator: 4 },
+        { label: '2/4', numerator: 2, denominator: 4 },
+        { label: '6/8', numerator: 6, denominator: 8 },
+        { label: '5/4', numerator: 5, denominator: 4 },
+        { label: '7/8', numerator: 7, denominator: 8 },
+    ];
+
+    const resolveTimeSigHandler = (opt: { label: string; numerator: number; denominator: number }) => {
+        if (onSetTimeSignature) {
+            return () => onSetTimeSignature(opt.numerator, opt.denominator);
+        }
+        if (opt.label === '4/4') return onSetTimeSignature44;
+        if (opt.label === '3/4') return onSetTimeSignature34;
+        return undefined;
+    };
 
     return (
         <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-gray-100 border-b border-gray-300">
@@ -285,22 +306,20 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
             <div className="flex items-center space-x-2 text-sm">
                 <span className="text-gray-600">Signature:</span>
-                <button
-                    type="button"
-                    onClick={onSetTimeSignature44}
-                    disabled={mutationDisabled || !onSetTimeSignature44}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    4/4
-                </button>
-                <button
-                    type="button"
-                    onClick={onSetTimeSignature34}
-                    disabled={mutationDisabled || !onSetTimeSignature34}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    3/4
-                </button>
+                {signatureOptions.map(opt => {
+                    const handler = resolveTimeSigHandler(opt);
+                    return (
+                        <button
+                            key={opt.label}
+                            type="button"
+                            onClick={handler}
+                            disabled={mutationDisabled || !handler}
+                            className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {opt.label}
+                        </button>
+                    );
+                })}
                 <button
                     type="button"
                     onClick={onSetClefTreble}

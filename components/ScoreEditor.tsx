@@ -873,8 +873,7 @@ export default function ScoreEditor() {
                 exportsEnabled={Boolean(score)}
                 pngAvailable={Boolean(score?.savePng)}
                 audioAvailable={Boolean(score?.saveAudio) && soundFontLoaded}
-                onSetTimeSignature44={() => handleSetTimeSignature(4, 4)}
-                onSetTimeSignature34={() => handleSetTimeSignature(3, 4)}
+                onSetTimeSignature={handleSetTimeSignature}
                 onSetClefTreble={() => handleSetClef(0 /* ClefType::G */)}
                 onSetClefBass={() => handleSetClef(5 /* ClefType::F */)}
                 onToggleDot={handleToggleDot}

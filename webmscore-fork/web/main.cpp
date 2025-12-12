@@ -35,6 +35,7 @@
 #include "converter/internal/compat/notationmeta.h"
 #include "notation/internal/notation.h"
 #include "notation/internal/mscnotationwriter.h"
+#include "engraving/libmscore/chord.h"
 #include "importexport/midi/internal/midiexport/exportmidi.h"
 #include "./importexport/positionjsonwriter.h"
 #include "engraving/libmscore/page.h"
@@ -728,14 +729,35 @@ bool _relayout(uintptr_t score_ptr, int excerptId)
 bool _toggleDot(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
-    auto cr = score->selection().cr();
-    if (!cr) {
-        LOGW() << "toggleDot: no chord/rest selected";
+    auto* el = score->selection().element();
+    if (!el) {
+        LOGW() << "toggleDot: no element selected";
         return false;
     }
+    if (el->isNote()) {
+        el = el->parentItem();
+    }
+    if (!el || !el->isChordRest()) {
+        LOGW() << "toggleDot: selection is not chord/rest";
+        return false;
+    }
+
+    auto cr = toChordRest(el);
+    engraving::TDuration d = cr->durationType();
+    const int newDots = d.dots() > 0 ? 0 : 1;
+    d.setDots(newDots);
+    if (!d.isValid()) {
+        LOGW() << "toggleDot: resulting duration invalid";
+        return false;
+    }
+
     score->startCmd();
-    // step dotted true, negative to move toward longer (adds dot if applicable)
-    score->cmdIncDecDuration(-1, true);
+    if (cr->isChord() && (toChord(cr)->noteType() != engraving::NoteType::NORMAL)) {
+        score->undoChangeChordRestLen(cr, d);
+    } else {
+        score->changeCRlen(cr, d);
+    }
+    score->inputState().setDuration(d);
     score->endCmd();
     return true;
 }
@@ -743,15 +765,35 @@ bool _toggleDot(uintptr_t score_ptr, int excerptId)
 bool _toggleDoubleDot(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
-    auto cr = score->selection().cr();
-    if (!cr) {
-        LOGW() << "toggleDoubleDot: no chord/rest selected";
+    auto* el = score->selection().element();
+    if (!el) {
+        LOGW() << "toggleDoubleDot: no element selected";
         return false;
     }
+    if (el->isNote()) {
+        el = el->parentItem();
+    }
+    if (!el || !el->isChordRest()) {
+        LOGW() << "toggleDoubleDot: selection is not chord/rest";
+        return false;
+    }
+
+    auto cr = toChordRest(el);
+    engraving::TDuration d = cr->durationType();
+    const int newDots = d.dots() == 2 ? 0 : 2;
+    d.setDots(newDots);
+    if (!d.isValid()) {
+        LOGW() << "toggleDoubleDot: resulting duration invalid";
+        return false;
+    }
+
     score->startCmd();
-    // apply dotted step twice to simulate double-dot toggle
-    score->cmdIncDecDuration(-1, true);
-    score->cmdIncDecDuration(-1, true);
+    if (cr->isChord() && (toChord(cr)->noteType() != engraving::NoteType::NORMAL)) {
+        score->undoChangeChordRestLen(cr, d);
+    } else {
+        score->changeCRlen(cr, d);
+    }
+    score->inputState().setDuration(d);
     score->endCmd();
     return true;
 }
