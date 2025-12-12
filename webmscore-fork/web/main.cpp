@@ -862,6 +862,7 @@ bool _addRehearsalMark(uintptr_t score_ptr, int excerptId)
         return false;
     }
     rm->setXmlText(score->createRehearsalMarkText(rm));
+    rm->setTrack(cr->track());
 
     score->startCmd();
     score->undo(new engraving::AddElement(rm));
@@ -891,6 +892,8 @@ bool _addTempoText(uintptr_t score_ptr, double bpm, int excerptId)
     }
     // TempoText::setTempo expects BeatsPerSecond
     tt->setTempo(engraving::BeatsPerSecond(bpm / 60.0));
+    tt->setXmlText(String(u"<sym>metNoteQuarterUp</sym> = %1").arg(int(bpm)));
+    tt->setTrack(cr->track());
 
     score->startCmd();
     score->undo(new engraving::AddElement(tt));
