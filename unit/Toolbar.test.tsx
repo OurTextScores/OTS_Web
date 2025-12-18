@@ -1,0 +1,133 @@
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { Toolbar } from '../components/Toolbar';
+
+describe('Toolbar', () => {
+  it('uploads score files', async () => {
+    const user = userEvent.setup();
+    const onFileUpload = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={onFileUpload}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+      />,
+    );
+
+    const file = new File([new Uint8Array([1, 2, 3])], 'score.mscz', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('open-score-input'), file);
+
+    expect(onFileUpload).toHaveBeenCalledTimes(1);
+    expect(onFileUpload).toHaveBeenCalledWith(file);
+  });
+
+  it('uploads soundfonts only when handler is provided', async () => {
+    const user = userEvent.setup();
+
+    const onSoundFontUpload = vi.fn();
+    const onFileUpload = vi.fn();
+
+    const { rerender } = render(
+      <Toolbar
+        onFileUpload={onFileUpload}
+        onSoundFontUpload={onSoundFontUpload}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+      />,
+    );
+
+    const sf = new File([new Uint8Array([9, 9, 9])], 'default.sf3', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('soundfont-input'), sf);
+    expect(onSoundFontUpload).toHaveBeenCalledWith(sf);
+
+    onSoundFontUpload.mockClear();
+    rerender(
+      <Toolbar
+        onFileUpload={onFileUpload}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+      />,
+    );
+    await user.upload(screen.getByTestId('soundfont-input'), sf);
+    expect(onSoundFontUpload).not.toHaveBeenCalled();
+  });
+
+  it('wires time signatures and clefs', async () => {
+    const user = userEvent.setup();
+    const onSetTimeSignature = vi.fn();
+    const onSetClef = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        mutationsEnabled
+        onSetTimeSignature={onSetTimeSignature}
+        onSetClef={onSetClef}
+      />,
+    );
+
+    await user.click(screen.getByTestId('btn-timesig-3-4'));
+    expect(onSetTimeSignature).toHaveBeenCalledWith(3, 4);
+
+    await user.click(screen.getByTestId('btn-clef-0'));
+    await user.click(screen.getByTestId('btn-clef-20'));
+    expect(onSetClef).toHaveBeenCalledWith(0);
+    expect(onSetClef).toHaveBeenCalledWith(20);
+  });
+
+  it('supports legacy time signature handlers', async () => {
+    const user = userEvent.setup();
+    const onSetTimeSignature44 = vi.fn();
+    const onSetTimeSignature34 = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        mutationsEnabled
+        onSetTimeSignature44={onSetTimeSignature44}
+        onSetTimeSignature34={onSetTimeSignature34}
+      />,
+    );
+
+    await user.click(screen.getByTestId('btn-timesig-4-4'));
+    await user.click(screen.getByTestId('btn-timesig-3-4'));
+
+    expect(onSetTimeSignature44).toHaveBeenCalledTimes(1);
+    expect(onSetTimeSignature34).toHaveBeenCalledTimes(1);
+
+    expect(screen.getByTestId('btn-timesig-2-2')).toBeDisabled();
+  });
+
+  it('shows busy labels for playback and audio export', () => {
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        exportsEnabled
+        audioAvailable
+        onExportAudio={() => {}}
+        onPlayAudio={() => {}}
+        onStopAudio={() => {}}
+        audioBusy
+      />,
+    );
+
+    expect(screen.getByTestId('btn-play')).toHaveTextContent('Working…');
+    expect(screen.getByTestId('btn-export-audio')).toHaveTextContent('Exporting…');
+  });
+});
+
