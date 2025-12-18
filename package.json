@@ -10,8 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "check:wasm": "node scripts/check-wasm.js",
-    "sync:wasm": "node scripts/sync-wasm.js"
+    "check:wasm": "node scripts/check-wasm-cli.js",
+    "sync:wasm": "node scripts/sync-wasm-cli.js"
   },
   "dependencies": {
     "next": "16.0.7",

@@ -26,7 +26,7 @@ export default defineConfig({
       reportsDirectory: './coverage',
       reporter: ['text', 'html', 'lcov'],
       all: true,
-      include: ['app/**/*.{ts,tsx}', 'components/**/*.{ts,tsx}', 'lib/**/*.{ts,tsx}', 'scripts/**/*.{ts,tsx}'],
+      include: ['app/**/*.{ts,tsx}', 'components/**/*.{ts,tsx}', 'lib/**/*.{ts,tsx}', 'scripts/**/*.{js,ts,tsx}'],
       exclude: [
         '**/*.d.ts',
         '**/*.config.*',
@@ -34,6 +34,8 @@ export default defineConfig({
         '.next/**',
         'public/**',
         'webmscore-fork/**',
+        'scripts/debug-select.js',
+        'scripts/*-cli.js',
         'tests/**',
         'unit/**',
       ],

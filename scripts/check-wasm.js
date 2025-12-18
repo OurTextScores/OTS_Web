@@ -7,29 +7,45 @@
 const fs = require('fs');
 const path = require('path');
 
-const files = [
+const defaultFiles = [
   'public/webmscore.lib.wasm',
   'public/webmscore.lib.data',
   'public/webmscore.lib.mem.wasm',
 ];
 
-let ok = true;
+function checkWasmArtifacts({
+  files = defaultFiles,
+  cwd = process.cwd(),
+  fsModule = fs,
+  log = console.log,
+  error = console.error,
+} = {}) {
+  let ok = true;
 
-files.forEach((f) => {
-  const full = path.resolve(f);
-  const exists = fs.existsSync(full);
-  const size = exists ? fs.statSync(full).size : 0;
-  if (!exists || size === 0) {
-    console.error(`[wasm-check] MISSING or empty: ${f}`);
-    ok = false;
-  } else {
-    console.log(`[wasm-check] OK ${f} (${size} bytes)`);
+  files.forEach((f) => {
+    const full = path.resolve(cwd, f);
+    const exists = fsModule.existsSync(full);
+    const size = exists ? fsModule.statSync(full).size : 0;
+    if (!exists || size === 0) {
+      error(`[wasm-check] MISSING or empty: ${f}`);
+      ok = false;
+    } else {
+      log(`[wasm-check] OK ${f} (${size} bytes)`);
+    }
+  });
+
+  if (!ok) {
+    error(
+      '\nMissing webmscore artifacts. Ensure the webmscore build outputs are copied to /public before running dev/build.',
+    );
+    return false;
   }
-});
 
-if (!ok) {
-  console.error('\nMissing webmscore artifacts. Ensure the webmscore build outputs are copied to /public before running dev/build.');
-  process.exit(1);
+  log('\nAll required webmscore artifacts are present.');
+  return true;
 }
 
-console.log('\nAll required webmscore artifacts are present.');
+module.exports = {
+  defaultFiles,
+  checkWasmArtifacts,
+};
