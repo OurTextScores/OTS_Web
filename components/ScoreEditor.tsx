@@ -896,7 +896,7 @@ export default function ScoreEditor() {
                 audioAvailable={Boolean(score?.saveAudio) && soundFontLoaded}
                 onSetTimeSignature={handleSetTimeSignature}
                 onSetClefTreble={() => handleSetClef(0 /* ClefType::G */)}
-                onSetClefBass={() => handleSetClef(5 /* ClefType::F */)}
+                onSetClefBass={() => handleSetClef(20 /* ClefType::F */)}
                 onToggleDot={handleToggleDot}
                 onToggleDoubleDot={handleToggleDoubleDot}
                 onSetVoice={handleSetVoice}

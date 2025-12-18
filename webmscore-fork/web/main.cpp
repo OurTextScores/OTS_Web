@@ -932,8 +932,28 @@ bool _setClef(uintptr_t score_ptr, int clefType, int excerptId)
         return false;
     }
 
+    engraving::Measure* firstMeasure = score->firstMeasure();
+    if (!firstMeasure) {
+        LOGW() << "setClef: no measures in score";
+        return false;
+    }
+
+    engraving::Staff* targetStaff = nullptr;
+    if (auto cr = score->selection().cr()) {
+        targetStaff = cr->staff();
+    }
+    if (!targetStaff) {
+        targetStaff = score->staff(0);
+    }
+    if (!targetStaff) {
+        LOGW() << "setClef: no staff in score";
+        return false;
+    }
+
     score->startCmd();
-    score->cmdInsertClef(static_cast<engraving::ClefType>(clefType));
+    // Use HeaderClef at the start of the score (pass first measure to target SegmentType::HeaderClef)
+    // to avoid inserting extra mid-score clefs when users click the toolbar.
+    score->undoChangeClef(targetStaff, firstMeasure, static_cast<engraving::ClefType>(clefType));
     score->endCmd();
     return true;
 }

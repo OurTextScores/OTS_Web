@@ -13,6 +13,9 @@
 # testing
 /coverage
 /.playwright-mcp/
+/playwright-report/
+/test-results/
+/blob-report/
 
 # Optional webmscore JS artifacts (sync script doesn't copy these)
 /public/webmscore.lib.js
