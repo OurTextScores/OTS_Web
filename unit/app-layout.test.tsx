@@ -1,4 +1,3 @@
-import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -11,13 +10,15 @@ import RootLayout from '../app/layout';
 
 describe('RootLayout', () => {
   it('renders children', () => {
-    render(
-      <RootLayout>
-        <div>child</div>
-      </RootLayout>,
-    );
+    const child = <div>child</div>;
+    const tree: any = RootLayout({ children: child });
 
-    expect(screen.getByText('child')).toBeInTheDocument();
+    expect(tree.type).toBe('html');
+    expect(tree.props.lang).toBe('en');
+    expect(tree.props.suppressHydrationWarning).toBe(true);
+
+    const body: any = tree.props.children;
+    expect(body.type).toBe('body');
+    expect(body.props.children).toBe(child);
   });
 });
-
