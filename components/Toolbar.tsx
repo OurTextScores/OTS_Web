@@ -495,7 +495,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 	                    data-testid="btn-tempo-120"
 	                    type="button"
 	                    onClick={() => onAddTempoText?.(120)}
-	                    disabled={mutationDisabled || !selectionActive || !onAddTempoText}
+	                    disabled={mutationDisabled || !onAddTempoText}
 	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
 	                >
 	                    Tempo 120

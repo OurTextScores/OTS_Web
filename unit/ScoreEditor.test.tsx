@@ -269,6 +269,45 @@ describe('ScoreEditor', () => {
     await waitFor(() => expect(screen.getByTestId('svg-container').querySelector('svg')).toBeTruthy());
   });
 
+  it('adds tempo text at the start of the score without requiring a selection', async () => {
+    const user = userEvent.setup();
+
+    const score: any = {
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
+      relayout: vi.fn(async () => true),
+      selectElementAtPoint: vi.fn(async () => true),
+      addTempoText: vi.fn(async () => true),
+      metadata: vi.fn(async () => ({})),
+      measurePositions: vi.fn(async () => ({})),
+      segmentPositions: vi.fn(async () => ({})),
+    };
+
+    const webmscore: any = {
+      ready: Promise.resolve(),
+      load: vi.fn(async () => score),
+    };
+
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: false,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+
+    render(<ScoreEditor />);
+
+    const file = new File([new Uint8Array([1])], 'demo.mscz', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('open-score-input'), file);
+
+    await waitFor(() => expect(screen.getByTestId('svg-container').querySelector('svg')).toBeTruthy());
+    expect(screen.queryByTestId('selection-overlay')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('btn-tempo-120'));
+
+    await waitFor(() => expect(score.selectElementAtPoint).toHaveBeenCalledWith(0, 50, 20));
+    await waitFor(() => expect(score.addTempoText).toHaveBeenCalledWith(120));
+  });
+
   it('zooms in/out and clamps zoom limits', async () => {
     const user = userEvent.setup();
     render(<ScoreEditor />);

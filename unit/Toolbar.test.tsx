@@ -142,7 +142,6 @@ describe('Toolbar', () => {
         onZoomOut={() => {}}
         zoomLevel={1}
         mutationsEnabled
-        selectionActive
         onAddTempoText={onAddTempoText}
       />,
     );
