@@ -608,7 +608,7 @@ describe('ScoreEditor', () => {
     await waitFor(() => expect(screen.queryByTestId('selection-overlay')).not.toBeInTheDocument());
   });
 
-  it('alerts when a mutation binding is missing and clears selection on delete', async () => {
+  it('alerts when a mutation binding is missing', async () => {
     const user = userEvent.setup();
 
     const score: any = {
@@ -646,6 +646,43 @@ describe('ScoreEditor', () => {
 
     await user.click(screen.getByTestId('btn-double-dot'));
     expect((globalThis as any).alert).toHaveBeenCalledWith('This build of webmscore does not expose "toggleDoubleDot".');
+  });
+
+  it('clears selection on delete even when the binding is missing', async () => {
+    const user = userEvent.setup();
+
+    const score: any = {
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
+      selectElementAtPoint: vi.fn(async () => true),
+      relayout: vi.fn(async () => true),
+      metadata: vi.fn(async () => ({})),
+      measurePositions: vi.fn(async () => ({})),
+      segmentPositions: vi.fn(async () => ({})),
+    };
+
+    const webmscore: any = {
+      ready: Promise.resolve(),
+      load: vi.fn(async () => score),
+    };
+
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: false,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+
+    render(<ScoreEditor />);
+
+    const file = new File([new Uint8Array([1])], 'demo.mscz', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('open-score-input'), file);
+
+    await waitFor(() => expect(screen.getByTestId('svg-container').querySelector('svg')).toBeTruthy());
+
+    const note = screen.getByTestId('svg-container').querySelector('.Note');
+    expect(note).toBeTruthy();
+    fireEvent.click(note!);
+    await screen.findByTestId('selection-overlay');
 
     await user.click(screen.getByTestId('btn-delete'));
     await waitFor(() => expect(screen.queryByTestId('selection-overlay')).not.toBeInTheDocument());
