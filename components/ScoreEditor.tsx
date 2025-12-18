@@ -783,7 +783,7 @@ export default function ScoreEditor() {
         if (!containerRef.current) return;
 
         // DOM-based hit testing
-        const target = e.target as SVGElement;
+        const target = e.target as Element;
 
         // Check if we clicked on a Note or Rest (or other interesting elements)
         // webmscore SVG classes: Note, Rest, Chord, etc.
@@ -811,8 +811,14 @@ export default function ScoreEditor() {
             element = element.parentElement;
         }
 
-        // Fall back to the clicked element for bounding box if we didn't find a known class
-        const targetElement = (found && element) ? element : target;
+        if (!found || !element) {
+            setSelectedElement(null);
+            setSelectedPoint(null);
+            setSelectedIndex(null);
+            return;
+        }
+
+        const targetElement = element;
         const rect = targetElement.getBoundingClientRect();
         const containerRect = containerRef.current.getBoundingClientRect();
 
@@ -832,6 +838,7 @@ export default function ScoreEditor() {
                 console.warn('selectElementAtPoint not available or failed:', err);
                 setSelectedElement(null);
                 setSelectedPoint(null);
+                setSelectedIndex(null);
             });
 
             // Find the index by looking for Note/Rest/Chord elements

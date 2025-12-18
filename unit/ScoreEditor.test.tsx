@@ -608,15 +608,13 @@ describe('ScoreEditor', () => {
     await waitFor(() => expect(screen.queryByTestId('selection-overlay')).not.toBeInTheDocument());
   });
 
-  it('handles clicks on non-note elements and clears selection when WASM select fails', async () => {
+  it('clears selection when clicking blank space and allows re-selecting notes', async () => {
     const user = userEvent.setup();
 
     const score: any = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
-      selectElementAtPoint: vi.fn(async () => {
-        throw new Error('select failed');
-      }),
+      selectElementAtPoint: vi.fn(async () => true),
       metadata: vi.fn(async () => ({})),
       measurePositions: vi.fn(async () => ({})),
       segmentPositions: vi.fn(async () => ({})),
@@ -642,10 +640,21 @@ describe('ScoreEditor', () => {
     const svg = screen.getByTestId('svg-container').querySelector('svg');
     expect(svg).toBeTruthy();
 
+    const note = screen.getByTestId('svg-container').querySelector('.Note');
+    expect(note).toBeTruthy();
+
+    fireEvent.click(note!);
+    await screen.findByTestId('selection-overlay');
+    expect(score.selectElementAtPoint).toHaveBeenCalledTimes(1);
+
     fireEvent.click(svg!);
 
-    await waitFor(() => expect(score.selectElementAtPoint).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByTestId('selection-overlay')).not.toBeInTheDocument());
+    expect(score.selectElementAtPoint).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(note!);
+    await screen.findByTestId('selection-overlay');
+    expect(score.selectElementAtPoint).toHaveBeenCalledTimes(2);
   });
 
   it('refreshes selection overlay after mutation using SVG selection classes', async () => {
