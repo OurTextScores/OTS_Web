@@ -377,6 +377,20 @@ export default function ScoreEditor() {
         }
     };
 
+    const scheduleSelectionOverlayRefresh = (fallbackIndex?: number | null, fallbackPoint?: { page: number, x: number, y: number } | null) => {
+        // Use a double-RAF to ensure the new SVG is fully parsed and has layout boxes.
+        if (typeof window === 'undefined') {
+            refreshSelectionOverlay(fallbackIndex, fallbackPoint);
+            return;
+        }
+
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+                refreshSelectionOverlay(fallbackIndex, fallbackPoint);
+            });
+        });
+    };
+
     const handleDeleteSelection = () => performMutation('delete selection', async () => {
         await ensureSelectionInWasm();
         const del = requireMutation('deleteSelection');
@@ -454,6 +468,8 @@ export default function ScoreEditor() {
 
     const handleSetTimeSignature = async (num: number, den: number) => {
         if (!score || !score.setTimeSignature) return;
+        const preservedIndex = selectedIndex;
+        const preservedPoint = selectedPoint;
         setAudioBusy(true);
         try {
             await score.setTimeSignature(num, den);
@@ -461,6 +477,7 @@ export default function ScoreEditor() {
                 await score.relayout();
             }
             await renderScore(score);
+            scheduleSelectionOverlayRefresh(preservedIndex, preservedPoint);
         } catch (err) {
             console.error('Failed to set time signature', err);
             alert('Unable to set time signature. See console for details.');
@@ -471,13 +488,17 @@ export default function ScoreEditor() {
 
     const handleSetClef = async (clefType: number) => {
         if (!score || !score.setClef) return;
+        const preservedIndex = selectedIndex;
+        const preservedPoint = selectedPoint;
         setAudioBusy(true);
         try {
+            await ensureSelectionInWasm();
             await score.setClef(clefType);
             if (score.relayout) {
                 await score.relayout();
             }
             await renderScore(score);
+            scheduleSelectionOverlayRefresh(preservedIndex, preservedPoint);
         } catch (err) {
             console.error('Failed to set clef', err);
             alert('Unable to set clef. See console for details.');
