@@ -189,6 +189,13 @@ The system is designed so that libmscore can be swapped out later without rewrit
 2. Implement reliable selection/hit-testing (DOM overlay or WASM hit-test) and wire mutations to the selected element; add visual highlight.
 3. Add a lightweight regression check in the dev/build flow to verify required wasm/data/mem files are present and loadable.
 4. **Next feature to tackle:** stabilize selection persistence (highlight state) across undo/redo and mutations, and document the JS↔WASM selection contract for Phase 0.
+5. **Milestone: comprehensive test coverage**
+   - Add/maintain unit + integration coverage with `npm run coverage` (Vitest).
+   - Add/maintain end-to-end regression coverage with `npx playwright test`.
+   - Define “full coverage” as:
+     - 100% Vitest coverage for `app/`, `components/`, `lib/`, `scripts/` (excluding `.next/`, `public/`, `webmscore-fork/`).
+     - 100% “wrapper surface” coverage: every JS↔WASM mutation/export wrapper has at least one Playwright test asserting a real score change (via MSCX export or SVG assertions).
+   - Prefer stable selectors (`data-testid`) for Playwright to avoid ambiguous button names as the toolbar grows.
 
 ## WASM Build / Sync (timed commands)
 - Debug rebuild (from `webmscore-fork/web/build.debug`): `/usr/bin/time -v emmake make -j8 webmscore`
