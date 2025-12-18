@@ -194,284 +194,312 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
     return (
         <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-gray-100 border-b border-gray-300">
-            <div className="flex items-center space-x-4">
-                <label className="px-4 py-2 bg-blue-600 text-white rounded cursor-pointer hover:bg-blue-700">
-                    Open Score
-                    <input
-                        type="file"
-                        accept=".mscz,.xml,.musicxml"
-                        onChange={handleFileChange}
-                        className="hidden"
-                    />
-                </label>
-                <label className="px-4 py-2 bg-indigo-600 text-white rounded cursor-pointer hover:bg-indigo-700">
-                    Load SoundFont
-                    <input
-                        type="file"
-                        accept=".sf2,.sf3"
-                        onChange={handleSoundFontChange}
-                        className="hidden"
-                    />
-                </label>
-            </div>
+	            <div className="flex items-center space-x-4">
+	                <label className="px-4 py-2 bg-blue-600 text-white rounded cursor-pointer hover:bg-blue-700">
+	                    Open Score
+	                    <input
+	                        data-testid="open-score-input"
+	                        type="file"
+	                        accept=".mscz,.xml,.musicxml"
+	                        onChange={handleFileChange}
+	                        className="hidden"
+	                    />
+	                </label>
+	                <label className="px-4 py-2 bg-indigo-600 text-white rounded cursor-pointer hover:bg-indigo-700">
+	                    Load SoundFont
+	                    <input
+	                        data-testid="soundfont-input"
+	                        type="file"
+	                        accept=".sf2,.sf3"
+	                        onChange={handleSoundFontChange}
+	                        className="hidden"
+	                    />
+	                </label>
+	            </div>
 
             <div className="flex items-center flex-wrap gap-2 text-sm">
-                <div className="flex items-center space-x-2">
-                    <button
-                        type="button"
-                        onClick={onDeleteSelection}
-                        disabled={mutationDisabled || !onDeleteSelection || !selectionActive}
-                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Delete
-                    </button>
-                    <button
-                        type="button"
-                        onClick={onUndo}
-                        disabled={mutationDisabled || !onUndo}
-                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Undo
-                    </button>
-                    <button
-                        type="button"
-                        onClick={onRedo}
-                        disabled={mutationDisabled || !onRedo}
-                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Redo
-                    </button>
-                </div>
+	                <div className="flex items-center space-x-2">
+	                    <button
+	                        data-testid="btn-delete"
+	                        type="button"
+	                        onClick={onDeleteSelection}
+	                        disabled={mutationDisabled || !onDeleteSelection || !selectionActive}
+	                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                    >
+	                        Delete
+	                    </button>
+	                    <button
+	                        data-testid="btn-undo"
+	                        type="button"
+	                        onClick={onUndo}
+	                        disabled={mutationDisabled || !onUndo}
+	                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                    >
+	                        Undo
+	                    </button>
+	                    <button
+	                        data-testid="btn-redo"
+	                        type="button"
+	                        onClick={onRedo}
+	                        disabled={mutationDisabled || !onRedo}
+	                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                    >
+	                        Redo
+	                    </button>
+	                </div>
 
-                <div className="flex items-center space-x-2">
-                    <button
-                        type="button"
-                        onClick={onPitchDown}
-                        disabled={mutationDisabled || !onPitchDown || !selectionActive}
-                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Pitch ↓
-                    </button>
-                    <button
-                        type="button"
-                        onClick={onPitchUp}
-                        disabled={mutationDisabled || !onPitchUp || !selectionActive}
-                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Pitch ↑
-                    </button>
-                </div>
+	                <div className="flex items-center space-x-2">
+	                    <button
+	                        data-testid="btn-pitch-down"
+	                        type="button"
+	                        onClick={onPitchDown}
+	                        disabled={mutationDisabled || !onPitchDown || !selectionActive}
+	                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                    >
+	                        Pitch ↓
+	                    </button>
+	                    <button
+	                        data-testid="btn-pitch-up"
+	                        type="button"
+	                        onClick={onPitchUp}
+	                        disabled={mutationDisabled || !onPitchUp || !selectionActive}
+	                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                    >
+	                        Pitch ↑
+	                    </button>
+	                </div>
 
-                <div className="flex items-center space-x-2">
-                    <button
-                        type="button"
-                        onClick={onDurationShorter}
-                        disabled={mutationDisabled || !onDurationShorter || !selectionActive}
-                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Shorter
-                    </button>
-                    <button
-                        type="button"
-                        onClick={onDurationLonger}
-                        disabled={mutationDisabled || !onDurationLonger || !selectionActive}
-                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Longer
-                    </button>
-                </div>
-            </div>
+	                <div className="flex items-center space-x-2">
+	                    <button
+	                        data-testid="btn-duration-shorter"
+	                        type="button"
+	                        onClick={onDurationShorter}
+	                        disabled={mutationDisabled || !onDurationShorter || !selectionActive}
+	                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                    >
+	                        Shorter
+	                    </button>
+	                    <button
+	                        data-testid="btn-duration-longer"
+	                        type="button"
+	                        onClick={onDurationLonger}
+	                        disabled={mutationDisabled || !onDurationLonger || !selectionActive}
+	                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                    >
+	                        Longer
+	                    </button>
+	                </div>
+	            </div>
 
-            <div className="flex items-center space-x-2 text-sm">
-                <span className="text-gray-600">Export:</span>
-                <button
-                    type="button"
-                    onClick={onExportSvg}
-                    disabled={!exportsEnabled || !onExportSvg}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    SVG
-                </button>
-                <button
-                    type="button"
-                    onClick={onExportPdf}
-                    disabled={!exportsEnabled || !onExportPdf}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    PDF
-                </button>
-                <button
-                    type="button"
-                    onClick={onExportPng}
-                    disabled={!exportsEnabled || !onExportPng || !pngAvailable}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    PNG
-                </button>
-                <button
-                    type="button"
-                    onClick={onExportMxl}
-                    disabled={!exportsEnabled || !onExportMxl}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    MXL
-                </button>
-                <button
-                    type="button"
-                    onClick={onExportMscz}
-                    disabled={!exportsEnabled || !onExportMscz}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    MSCZ
-                </button>
-                <button
-                    type="button"
-                    onClick={onExportMidi}
-                    disabled={!exportsEnabled || !onExportMidi}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    MIDI
-                </button>
-                <button
-                    type="button"
-                    onClick={onExportAudio}
-                    disabled={!exportsEnabled || !onExportAudio || !audioAvailable || audioBusy}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    {audioBusy ? 'Exporting…' : 'WAV'}
-                </button>
-            </div>
+	            <div className="flex items-center space-x-2 text-sm">
+	                <span className="text-gray-600">Export:</span>
+	                <button
+	                    data-testid="btn-export-svg"
+	                    type="button"
+	                    onClick={onExportSvg}
+	                    disabled={!exportsEnabled || !onExportSvg}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    SVG
+	                </button>
+	                <button
+	                    data-testid="btn-export-pdf"
+	                    type="button"
+	                    onClick={onExportPdf}
+	                    disabled={!exportsEnabled || !onExportPdf}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    PDF
+	                </button>
+	                <button
+	                    data-testid="btn-export-png"
+	                    type="button"
+	                    onClick={onExportPng}
+	                    disabled={!exportsEnabled || !onExportPng || !pngAvailable}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    PNG
+	                </button>
+	                <button
+	                    data-testid="btn-export-mxl"
+	                    type="button"
+	                    onClick={onExportMxl}
+	                    disabled={!exportsEnabled || !onExportMxl}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    MXL
+	                </button>
+	                <button
+	                    data-testid="btn-export-mscz"
+	                    type="button"
+	                    onClick={onExportMscz}
+	                    disabled={!exportsEnabled || !onExportMscz}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    MSCZ
+	                </button>
+	                <button
+	                    data-testid="btn-export-midi"
+	                    type="button"
+	                    onClick={onExportMidi}
+	                    disabled={!exportsEnabled || !onExportMidi}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    MIDI
+	                </button>
+	                <button
+	                    data-testid="btn-export-audio"
+	                    type="button"
+	                    onClick={onExportAudio}
+	                    disabled={!exportsEnabled || !onExportAudio || !audioAvailable || audioBusy}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    {audioBusy ? 'Exporting…' : 'WAV'}
+	                </button>
+	            </div>
 
-            <div className="flex items-center space-x-2 text-sm">
-                <button
-                    type="button"
-                    onClick={onZoomOut}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50"
-                >
-                    -
-                </button>
-                <span className="w-16 text-center">{(zoomLevel * 100).toFixed(0)}%</span>
-                <button
-                    onClick={onZoomIn}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50"
-                >
-                    +
-                </button>
-            </div>
+	            <div className="flex items-center space-x-2 text-sm">
+	                <button
+	                    data-testid="btn-zoom-out"
+	                    type="button"
+	                    onClick={onZoomOut}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50"
+	                >
+	                    -
+	                </button>
+	                <span className="w-16 text-center">{(zoomLevel * 100).toFixed(0)}%</span>
+	                <button
+	                    data-testid="btn-zoom-in"
+	                    onClick={onZoomIn}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50"
+	                >
+	                    +
+	                </button>
+	            </div>
 
-            <div className="flex items-center space-x-2 text-sm">
-                <span className="text-gray-600">Playback:</span>
-                <button
-                    type="button"
-                    onClick={onPlayAudio}
-                    disabled={!audioAvailable || !onPlayAudio || audioBusy}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    {audioBusy ? 'Working…' : isPlaying ? 'Replay' : 'Play'}
-                </button>
-                <button
-                    type="button"
-                    onClick={onStopAudio}
-                    disabled={!audioAvailable || !onStopAudio || audioBusy}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    Stop
-                </button>
-            </div>
+	            <div className="flex items-center space-x-2 text-sm">
+	                <span className="text-gray-600">Playback:</span>
+	                <button
+	                    data-testid="btn-play"
+	                    type="button"
+	                    onClick={onPlayAudio}
+	                    disabled={!audioAvailable || !onPlayAudio || audioBusy}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    {audioBusy ? 'Working…' : isPlaying ? 'Replay' : 'Play'}
+	                </button>
+	                <button
+	                    data-testid="btn-stop"
+	                    type="button"
+	                    onClick={onStopAudio}
+	                    disabled={!audioAvailable || !onStopAudio || audioBusy}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    Stop
+	                </button>
+	            </div>
 
             <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="text-gray-600">Signature:</span>
-                {signatureOptions.map(opt => {
-                    const handler = resolveTimeSigHandler(opt);
-                    return (
-                        <button
-                            key={opt.label}
-                            type="button"
-                            onClick={handler}
-                            disabled={mutationDisabled || !handler}
-                            className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
+	                {signatureOptions.map(opt => {
+	                    const handler = resolveTimeSigHandler(opt);
+	                    return (
+	                        <button
+	                            key={opt.label}
+	                            data-testid={`btn-timesig-${opt.numerator}-${opt.denominator}`}
+	                            type="button"
+	                            onClick={handler}
+	                            disabled={mutationDisabled || !handler}
+	                            className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                        >
                             {opt.label}
                         </button>
                     );
                 })}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-gray-600">Clef:</span>
-                {clefButtonOptions.map(opt => (
-                    <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => onSetClef?.(opt.value)}
-                        disabled={mutationDisabled || !onSetClef}
-                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
+	            <div className="flex flex-wrap items-center gap-2 text-sm">
+	                <span className="text-gray-600">Clef:</span>
+	                {clefButtonOptions.map(opt => (
+	                    <button
+	                        key={opt.value}
+	                        data-testid={`btn-clef-${opt.value}`}
+	                        type="button"
+	                        onClick={() => onSetClef?.(opt.value)}
+	                        disabled={mutationDisabled || !onSetClef}
+	                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                    >
                         {opt.label}
                     </button>
                 ))}
             </div>
 
-            <div className="flex items-center space-x-2 text-sm">
-                <span className="text-gray-600">Rhythm/Voice:</span>
-                <button
-                    type="button"
-                    onClick={onToggleDot}
-                    disabled={mutationDisabled || !selectionActive || !onToggleDot}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    Dot
-                </button>
-                <button
-                    type="button"
-                    onClick={onToggleDoubleDot}
-                    disabled={mutationDisabled || !selectionActive || !onToggleDoubleDot}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    Double Dot
-                </button>
-                {[1, 2, 3, 4].map(v => (
-                    <button
-                        key={v}
-                        type="button"
-                        onClick={() => onSetVoice?.(v - 1)}
-                        disabled={mutationDisabled || !onSetVoice}
-                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
+	            <div className="flex items-center space-x-2 text-sm">
+	                <span className="text-gray-600">Rhythm/Voice:</span>
+	                <button
+	                    data-testid="btn-dot"
+	                    type="button"
+	                    onClick={onToggleDot}
+	                    disabled={mutationDisabled || !selectionActive || !onToggleDot}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    Dot
+	                </button>
+	                <button
+	                    data-testid="btn-double-dot"
+	                    type="button"
+	                    onClick={onToggleDoubleDot}
+	                    disabled={mutationDisabled || !selectionActive || !onToggleDoubleDot}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    Double Dot
+	                </button>
+	                {[1, 2, 3, 4].map(v => (
+	                    <button
+	                        key={v}
+	                        data-testid={`btn-voice-${v}`}
+	                        type="button"
+	                        onClick={() => onSetVoice?.(v - 1)}
+	                        disabled={mutationDisabled || !onSetVoice}
+	                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                    >
                         Voice {v}
                     </button>
                 ))}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-gray-600">Markings:</span>
-                {dynamicOptions.map(opt => (
-                    <button
-                        key={opt.label}
-                        type="button"
-                        onClick={() => onAddDynamic?.(opt.value)}
-                        disabled={mutationDisabled || !selectionActive || !onAddDynamic}
-                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {opt.label}
-                    </button>
-                ))}
-                <button
-                    type="button"
-                    onClick={onAddRehearsalMark}
-                    disabled={mutationDisabled || !selectionActive || !onAddRehearsalMark}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    Rehearsal
-                </button>
-                <button
-                    type="button"
-                    onClick={() => onAddTempoText?.(120)}
-                    disabled={mutationDisabled || !selectionActive || !onAddTempoText}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    Tempo 120
-                </button>
+	            <div className="flex flex-wrap items-center gap-2 text-sm">
+	                <span className="text-gray-600">Markings:</span>
+	                {dynamicOptions.map(opt => (
+	                    <button
+	                        key={opt.label}
+	                        data-testid={`btn-dynamic-${opt.value}`}
+	                        type="button"
+	                        onClick={() => onAddDynamic?.(opt.value)}
+	                        disabled={mutationDisabled || !selectionActive || !onAddDynamic}
+	                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                    >
+	                        {opt.label}
+	                    </button>
+	                ))}
+	                <button
+	                    data-testid="btn-rehearsal"
+	                    type="button"
+	                    onClick={onAddRehearsalMark}
+	                    disabled={mutationDisabled || !selectionActive || !onAddRehearsalMark}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    Rehearsal
+	                </button>
+	                <button
+	                    data-testid="btn-tempo-120"
+	                    type="button"
+	                    onClick={() => onAddTempoText?.(120)}
+	                    disabled={mutationDisabled || !selectionActive || !onAddTempoText}
+	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+	                >
+	                    Tempo 120
+	                </button>
             </div>
         </div>
     );

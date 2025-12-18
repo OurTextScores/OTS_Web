@@ -23,11 +23,11 @@ test('clef can toggle and revert', async ({ page }) => {
   expect(initial[0]).toBeTruthy();
 
   await page.locator('svg .Note').nth(5).click();
-  await page.waitForSelector('div.pointer-events-none.border-blue-500', { timeout: 10_000 });
+  await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
 
-  await page.getByRole('button', { name: 'Treble', exact: true }).click();
+  await page.getByTestId('btn-clef-0').click();
   await expect.poll(async () => await readConcertClefTypes(), { timeout: 20_000 }).toEqual([initial[0], 'G']);
 
-  await page.getByRole('button', { name: 'Bass', exact: true }).click();
+  await page.getByTestId('btn-clef-20').click();
   await expect.poll(async () => await readConcertClefTypes(), { timeout: 20_000 }).toEqual([initial[0], initial[0]]);
 });

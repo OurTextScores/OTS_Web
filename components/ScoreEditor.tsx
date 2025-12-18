@@ -917,28 +917,30 @@ export default function ScoreEditor() {
                     </div>
                 )}
 
-                <div
-                    className="relative origin-top-left transition-transform duration-200 ease-out bg-white shadow-lg mx-auto"
-                    style={{
-                        transform: `scale(${zoom})`,
-                        width: 'fit-content'
-                    }}
-                    onClick={handleScoreClick}
-                >
-                    <div ref={containerRef} />
+	            <div
+	                className="relative origin-top-left transition-transform duration-200 ease-out bg-white shadow-lg mx-auto"
+	                data-testid="score-wrapper"
+	                style={{
+	                    transform: `scale(${zoom})`,
+	                    width: 'fit-content'
+	                }}
+	                onClick={handleScoreClick}
+	            >
+	                <div ref={containerRef} data-testid="svg-container" />
 
-                    {selectedElement && (
-                        <div
-                            className="absolute border-2 border-blue-500 bg-blue-200 bg-opacity-30 pointer-events-none"
-                            style={{
-                                left: selectedElement.x,
-                                top: selectedElement.y,
-                                width: selectedElement.w,
-                                height: selectedElement.h
-                            }}
-                        />
-                    )}
-                </div>
+	                {selectedElement && (
+	                    <div
+	                        data-testid="selection-overlay"
+	                        className="absolute border-2 border-blue-500 bg-blue-200 bg-opacity-30 pointer-events-none"
+	                        style={{
+	                            left: selectedElement.x,
+	                            top: selectedElement.y,
+	                            width: selectedElement.w,
+	                            height: selectedElement.h
+	                        }}
+	                    />
+	                )}
+	            </div>
             </div>
         </div>
     );
