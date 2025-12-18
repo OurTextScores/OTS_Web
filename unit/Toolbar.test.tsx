@@ -110,6 +110,26 @@ describe('Toolbar', () => {
     expect(screen.getByTestId('btn-timesig-2-2')).toBeDisabled();
   });
 
+  it('wires tempo markings', async () => {
+    const user = userEvent.setup();
+    const onAddTempoText = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        mutationsEnabled
+        selectionActive
+        onAddTempoText={onAddTempoText}
+      />,
+    );
+
+    await user.click(screen.getByTestId('btn-tempo-120'));
+    expect(onAddTempoText).toHaveBeenCalledWith(120);
+  });
+
   it('shows busy labels for playback and audio export', () => {
     render(
       <Toolbar
@@ -130,4 +150,3 @@ describe('Toolbar', () => {
     expect(screen.getByTestId('btn-export-audio')).toHaveTextContent('Exporting…');
   });
 });
-
