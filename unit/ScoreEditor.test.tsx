@@ -608,6 +608,46 @@ describe('ScoreEditor', () => {
     await waitFor(() => expect(screen.queryByTestId('selection-overlay')).not.toBeInTheDocument());
   });
 
+  it('handles clicks on non-note elements and clears selection when WASM select fails', async () => {
+    const user = userEvent.setup();
+
+    const score: any = {
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
+      selectElementAtPoint: vi.fn(async () => {
+        throw new Error('select failed');
+      }),
+      metadata: vi.fn(async () => ({})),
+      measurePositions: vi.fn(async () => ({})),
+      segmentPositions: vi.fn(async () => ({})),
+    };
+
+    const webmscore: any = {
+      ready: Promise.resolve(),
+      load: vi.fn(async () => score),
+    };
+
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: false,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+
+    render(<ScoreEditor />);
+
+    const file = new File([new Uint8Array([1])], 'demo.mscz', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('open-score-input'), file);
+    await waitFor(() => expect(screen.getByTestId('svg-container').querySelector('svg')).toBeTruthy());
+
+    const svg = screen.getByTestId('svg-container').querySelector('svg');
+    expect(svg).toBeTruthy();
+
+    fireEvent.click(svg!);
+
+    await waitFor(() => expect(score.selectElementAtPoint).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId('selection-overlay')).not.toBeInTheDocument());
+  });
+
   it('alerts when a mutation binding is missing', async () => {
     const user = userEvent.setup();
 

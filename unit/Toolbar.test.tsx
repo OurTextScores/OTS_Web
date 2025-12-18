@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -23,6 +23,27 @@ describe('Toolbar', () => {
 
     expect(onFileUpload).toHaveBeenCalledTimes(1);
     expect(onFileUpload).toHaveBeenCalledWith(file);
+  });
+
+  it('ignores empty file inputs', () => {
+    const onFileUpload = vi.fn();
+    const onSoundFontUpload = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={onFileUpload}
+        onSoundFontUpload={onSoundFontUpload}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('open-score-input'), { target: { files: [] } });
+    fireEvent.change(screen.getByTestId('soundfont-input'), { target: { files: [] } });
+
+    expect(onFileUpload).not.toHaveBeenCalled();
+    expect(onSoundFontUpload).not.toHaveBeenCalled();
   });
 
   it('uploads soundfonts only when handler is provided', async () => {
