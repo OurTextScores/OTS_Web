@@ -648,6 +648,69 @@ describe('ScoreEditor', () => {
     await waitFor(() => expect(screen.queryByTestId('selection-overlay')).not.toBeInTheDocument());
   });
 
+  it('refreshes selection overlay after mutation using SVG selection classes', async () => {
+    const user = userEvent.setup();
+
+    const score: any = {
+      destroy: vi.fn(),
+      saveSvg: vi
+        .fn()
+        .mockResolvedValueOnce('<svg><g class="Note"></g></svg>')
+        .mockResolvedValueOnce('<svg><g class="Note selected"></g></svg>'),
+      relayout: vi.fn(async () => true),
+      selectElementAtPoint: vi.fn(async () => true),
+      pitchUp: vi.fn(async () => true),
+      metadata: vi.fn(async () => ({})),
+      measurePositions: vi.fn(async () => ({})),
+      segmentPositions: vi.fn(async () => ({})),
+    };
+
+    const webmscore: any = {
+      ready: Promise.resolve(),
+      load: vi.fn(async () => score),
+    };
+
+    rectSpy?.mockImplementation(function (this: Element) {
+      const classes = this.getAttribute?.('class') || '';
+      if (classes.includes('selected')) {
+        return {
+          ...boundingRect,
+          left: 20,
+          top: 30,
+          right: 70,
+          bottom: 90,
+          width: 50,
+          height: 60,
+        } as any;
+      }
+      return boundingRect as any;
+    });
+
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: false,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+
+    render(<ScoreEditor />);
+
+    const file = new File([new Uint8Array([1])], 'demo.mscz', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('open-score-input'), file);
+    await waitFor(() => expect(screen.getByTestId('svg-container').querySelector('svg')).toBeTruthy());
+
+    const note = screen.getByTestId('svg-container').querySelector('.Note');
+    expect(note).toBeTruthy();
+    fireEvent.click(note!);
+    await screen.findByTestId('selection-overlay');
+
+    expect(screen.getByTestId('selection-overlay')).toHaveStyle({ left: '0px', top: '0px' });
+
+    await user.click(screen.getByTestId('btn-pitch-up'));
+
+    await waitFor(() => expect(screen.getByTestId('selection-overlay')).toHaveStyle({ left: '20px', top: '30px' }));
+    expect(score.pitchUp).toHaveBeenCalled();
+  });
+
   it('alerts when a mutation binding is missing', async () => {
     const user = userEvent.setup();
 
