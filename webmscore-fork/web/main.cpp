@@ -938,9 +938,24 @@ bool _setClef(uintptr_t score_ptr, int clefType, int excerptId)
         return false;
     }
 
+    engraving::EngravingItem* targetItem = nullptr;
     engraving::Staff* targetStaff = nullptr;
+
+    if (auto selected = score->selection().element()) {
+        targetItem = selected;
+        targetStaff = selected->staff();
+    }
     if (auto cr = score->selection().cr()) {
+        targetItem = cr;
         targetStaff = cr->staff();
+        // If the first chord/rest is selected, prefer changing the header clef to avoid
+        // inserting an extra clef sign at tick 0.
+        if (cr->tick().isZero() && cr->measure() == firstMeasure) {
+            targetItem = firstMeasure;
+        }
+    }
+    if (!targetItem) {
+        targetItem = firstMeasure;
     }
     if (!targetStaff) {
         targetStaff = score->staff(0);
@@ -951,9 +966,7 @@ bool _setClef(uintptr_t score_ptr, int clefType, int excerptId)
     }
 
     score->startCmd();
-    // Use HeaderClef at the start of the score (pass first measure to target SegmentType::HeaderClef)
-    // to avoid inserting extra mid-score clefs when users click the toolbar.
-    score->undoChangeClef(targetStaff, firstMeasure, static_cast<engraving::ClefType>(clefType));
+    score->undoChangeClef(targetStaff, targetItem, static_cast<engraving::ClefType>(clefType));
     score->endCmd();
     return true;
 }
