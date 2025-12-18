@@ -1,15 +1,17 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocked = vi.hoisted(() => ({
   loadWebMscore: vi.fn(),
 }));
 
+const mockedNavigation = vi.hoisted(() => ({
+  useSearchParams: vi.fn(),
+}));
+
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => ({
-    get: () => null,
-  }),
+  useSearchParams: mockedNavigation.useSearchParams,
 }));
 
 vi.mock('../lib/webmscore-loader', () => ({
@@ -19,6 +21,19 @@ vi.mock('../lib/webmscore-loader', () => ({
 import ScoreEditor from '../components/ScoreEditor';
 
 describe('ScoreEditor', () => {
+  const suppressConsole = () => {
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  };
+
+  let scoreParamValue: string | null = null;
+
+  const searchParams = {
+    get: (key: string) => (key === 'score' ? scoreParamValue : null),
+  };
+
   const boundingRect = {
     x: 0,
     y: 0,
@@ -31,17 +46,23 @@ describe('ScoreEditor', () => {
     toJSON: () => ({}),
   };
 
+  let rectSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  beforeAll(() => {
+    suppressConsole();
+  });
+
   beforeEach(() => {
-    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(boundingRect as any);
-    vi.spyOn(console, 'debug').mockImplementation(() => {});
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    scoreParamValue = null;
+    mockedNavigation.useSearchParams.mockReturnValue(searchParams);
+
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(boundingRect as any);
     (globalThis as any).alert = vi.fn();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    suppressConsole();
   });
 
   it('loads a score from file upload, supports selection, and applies clef', async () => {
@@ -217,5 +238,417 @@ describe('ScoreEditor', () => {
     await user.click(screen.getByTestId('btn-export-svg'));
     await waitFor(() => expect(score.saveSvg).toHaveBeenCalled());
     await waitFor(() => expect((globalThis as any).URL.createObjectURL).toHaveBeenCalled());
+  });
+
+  it('auto-loads a score from the URL query param', async () => {
+    scoreParamValue = '/test_scores/demo.musicxml';
+
+    const score: any = {
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg></svg>'),
+    };
+
+    const webmscore: any = {
+      ready: Promise.resolve(),
+      load: vi.fn(async () => score),
+    };
+
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    (globalThis as any).fetch = vi.fn(async (url: string) => {
+      expect(url).toBe('/test_scores/demo.musicxml');
+      return {
+        ok: true,
+        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+      };
+    });
+
+    render(<ScoreEditor />);
+
+    await waitFor(() => expect(webmscore.load).toHaveBeenCalled());
+    expect(webmscore.load).toHaveBeenCalledWith('musicxml', expect.any(Uint8Array));
+    await waitFor(() => expect(screen.getByTestId('svg-container').querySelector('svg')).toBeTruthy());
+  });
+
+  it('zooms in/out and clamps zoom limits', async () => {
+    const user = userEvent.setup();
+    render(<ScoreEditor />);
+
+    const wrapper = screen.getByTestId('score-wrapper');
+    expect(wrapper).toHaveStyle({ transform: 'scale(1)' });
+
+    await user.click(screen.getByTestId('btn-zoom-in'));
+    expect(wrapper).toHaveStyle({ transform: 'scale(1.1)' });
+
+    for (let i = 0; i < 20; i++) {
+      await user.click(screen.getByTestId('btn-zoom-out'));
+    }
+    expect(wrapper).toHaveStyle({ transform: 'scale(0.5)' });
+
+    for (let i = 0; i < 50; i++) {
+      await user.click(screen.getByTestId('btn-zoom-in'));
+    }
+    expect(wrapper).toHaveStyle({ transform: 'scale(3)' });
+  });
+
+  it('exports PDF/PNG/MXL/MSCZ/MIDI via Score methods', async () => {
+    const user = userEvent.setup();
+
+    const score: any = {
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
+      savePdf: vi.fn(async () => new Uint8Array([1])),
+      savePng: vi.fn(async () => new Uint8Array([2])),
+      saveMxl: vi.fn(async () => new Uint8Array([3])),
+      saveMsc: vi.fn(async () => new Uint8Array([4])),
+      saveMidi: vi.fn(async () => new Uint8Array([5])),
+      metadata: vi.fn(async () => ({})),
+      measurePositions: vi.fn(async () => ({})),
+      segmentPositions: vi.fn(async () => ({})),
+    };
+
+    const webmscore: any = {
+      ready: Promise.resolve(),
+      load: vi.fn(async () => score),
+    };
+
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: false,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+
+    (globalThis as any).URL.createObjectURL = vi.fn(() => 'blob:mock');
+    (globalThis as any).URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    render(<ScoreEditor />);
+
+    const file = new File([new Uint8Array([1])], 'demo.mscz', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('open-score-input'), file);
+
+    await waitFor(() => expect(screen.getByTestId('svg-container').querySelector('svg')).toBeTruthy());
+
+    await user.click(screen.getByTestId('btn-export-pdf'));
+    await user.click(screen.getByTestId('btn-export-png'));
+    await user.click(screen.getByTestId('btn-export-mxl'));
+    await user.click(screen.getByTestId('btn-export-mscz'));
+    await user.click(screen.getByTestId('btn-export-midi'));
+
+    await waitFor(() => expect(score.savePdf).toHaveBeenCalled());
+    await waitFor(() => expect(score.savePng).toHaveBeenCalledWith(0, true, true));
+    await waitFor(() => expect(score.saveMxl).toHaveBeenCalled());
+    await waitFor(() => expect(score.saveMsc).toHaveBeenCalledWith('mscz'));
+    await waitFor(() => expect(score.saveMidi).toHaveBeenCalledWith(true, true));
+    await waitFor(() => expect((globalThis as any).URL.createObjectURL).toHaveBeenCalled());
+  });
+
+  it('alerts when optional export bindings are missing', async () => {
+    const user = userEvent.setup();
+
+    const score: any = {
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg></svg>'),
+      savePdf: vi.fn(async () => new Uint8Array([1])),
+      metadata: vi.fn(async () => ({})),
+      measurePositions: vi.fn(async () => ({})),
+      segmentPositions: vi.fn(async () => ({})),
+    };
+
+    const webmscore: any = {
+      ready: Promise.resolve(),
+      load: vi.fn(async () => score),
+    };
+
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: false,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+
+    render(<ScoreEditor />);
+
+    const file = new File([new Uint8Array([1])], 'demo.mscz', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('open-score-input'), file);
+
+    await waitFor(() => expect(screen.getByTestId('svg-container').querySelector('svg')).toBeTruthy());
+
+    await user.click(screen.getByTestId('btn-export-mxl'));
+    expect((globalThis as any).alert).toHaveBeenCalledWith('MXL export is not available in this build.');
+
+    await user.click(screen.getByTestId('btn-export-mscz'));
+    expect((globalThis as any).alert).toHaveBeenCalledWith('MSCZ export is not available in this build.');
+
+    await user.click(screen.getByTestId('btn-export-midi'));
+    expect((globalThis as any).alert).toHaveBeenCalledWith('MIDI export is not available in this build.');
+  });
+
+  it('plays audio from WAV once and replays from cached URL', async () => {
+    const user = userEvent.setup();
+
+    const saveAudioDeferred: { resolve?: (value: Uint8Array) => void } = {};
+    const saveAudio = vi.fn(
+      () =>
+        new Promise<Uint8Array>((resolve) => {
+          saveAudioDeferred.resolve = resolve;
+        }),
+    );
+
+    const score: any = {
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg></svg>'),
+      saveAudio,
+      setSoundFont: vi.fn(async () => {}),
+      metadata: vi.fn(async () => ({})),
+      measurePositions: vi.fn(async () => ({})),
+      segmentPositions: vi.fn(async () => ({})),
+    };
+
+    const webmscore: any = {
+      ready: Promise.resolve(),
+      load: vi.fn(async () => score),
+    };
+
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    }));
+
+    (globalThis as any).URL.createObjectURL = vi.fn(() => 'blob:audio');
+    (globalThis as any).URL.revokeObjectURL = vi.fn();
+
+    const createdAudios: any[] = [];
+    class MockAudio {
+      src = '';
+      currentTime = 0;
+      onended: (() => void) | null = null;
+      pause = vi.fn();
+      play = vi.fn(async () => {});
+
+      constructor(url: string) {
+        this.src = url;
+        createdAudios.push(this);
+      }
+    }
+    (globalThis as any).Audio = MockAudio;
+
+    render(<ScoreEditor />);
+
+    const file = new File([new Uint8Array([1])], 'demo.mscz', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('open-score-input'), file);
+
+    await waitFor(() => expect(score.setSoundFont).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId('btn-play')).toBeEnabled());
+
+    await user.click(screen.getByTestId('btn-play'));
+    await waitFor(() => expect(screen.getByTestId('btn-play')).toHaveTextContent('Working…'));
+
+    saveAudioDeferred.resolve?.(new Uint8Array([0]));
+
+    await waitFor(() => expect(screen.getByTestId('btn-play')).toHaveTextContent('Replay'));
+    expect(saveAudio).toHaveBeenCalledTimes(1);
+    expect(createdAudios.length).toBeGreaterThanOrEqual(1);
+
+    await user.click(screen.getByTestId('btn-play'));
+    await waitFor(() => expect(screen.getByTestId('btn-play')).toHaveTextContent('Replay'));
+    expect(saveAudio).toHaveBeenCalledTimes(1);
+    expect((globalThis as any).URL.createObjectURL).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByTestId('btn-stop'));
+    await waitFor(() => expect(screen.getByTestId('btn-play')).toHaveTextContent('Play'));
+    expect(createdAudios.at(-1).pause).toHaveBeenCalled();
+  });
+
+  it('streams playback when synthAudioBatch is available and cancels on stop', async () => {
+    const user = userEvent.setup();
+
+    const floatChunk = new Float32Array(512);
+    const chunkBytes = new Uint8Array(floatChunk.buffer);
+
+    let batchesReturned = 0;
+    const batchFn = vi.fn(async (cancel?: boolean) => {
+      if (cancel) return [];
+      if (batchesReturned > 0) return [];
+      batchesReturned++;
+      return [
+        {
+          chunk: chunkBytes,
+          startTime: 0,
+          done: true,
+        },
+      ];
+    });
+
+    const score: any = {
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg></svg>'),
+      saveAudio: vi.fn(async () => new Uint8Array([0])),
+      setSoundFont: vi.fn(async () => {}),
+      synthAudioBatch: vi.fn(async () => batchFn),
+      metadata: vi.fn(async () => ({})),
+      measurePositions: vi.fn(async () => ({})),
+      segmentPositions: vi.fn(async () => ({})),
+    };
+
+    const webmscore: any = {
+      ready: Promise.resolve(),
+      load: vi.fn(async () => score),
+    };
+
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    }));
+
+    const createdSources: any[] = [];
+    let lastAudioCtx: any | null = null;
+    class MockAudioContext {
+      state: 'running' | 'suspended' = 'suspended';
+      currentTime = 0;
+      sampleRate = 44100;
+      destination = {};
+
+      constructor(_opts?: any) {
+        lastAudioCtx = this;
+      }
+
+      resume = vi.fn(async () => {
+        this.state = 'running';
+      });
+
+      createBuffer = vi.fn(() => ({
+        copyToChannel: vi.fn(),
+      }));
+
+      createBufferSource = vi.fn(() => {
+        const source = {
+          buffer: null as any,
+          connect: vi.fn(),
+          start: vi.fn(),
+          stop: vi.fn(),
+          onended: null as any,
+        };
+        createdSources.push(source);
+        return source;
+      });
+    }
+
+    (globalThis as any).AudioContext = MockAudioContext;
+
+    render(<ScoreEditor />);
+
+    const file = new File([new Uint8Array([1])], 'demo.mscz', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('open-score-input'), file);
+
+    await waitFor(() => expect(score.setSoundFont).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId('btn-play')).toBeEnabled());
+
+    await user.click(screen.getByTestId('btn-play'));
+    await waitFor(() => expect(screen.getByTestId('btn-play')).toHaveTextContent('Replay'));
+
+    expect(score.synthAudioBatch).toHaveBeenCalled();
+    expect(score.saveAudio).not.toHaveBeenCalled();
+    expect(lastAudioCtx?.resume).toHaveBeenCalled();
+    expect(createdSources.length).toBeGreaterThan(0);
+
+    await user.click(screen.getByTestId('btn-stop'));
+    await waitFor(() => expect(screen.getByTestId('btn-play')).toHaveTextContent('Play'));
+    expect(batchFn).toHaveBeenCalledWith(true);
+    expect(createdSources[0].stop).toHaveBeenCalled();
+  });
+
+  it('extracts page index from SVG ancestry and clears selection on invalid boxes', async () => {
+    const user = userEvent.setup();
+
+    const score: any = {
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg><g id="page-2"><g class="Note"><path id="inner"/></g></g></svg>'),
+      selectElementAtPoint: vi.fn(async () => true),
+      metadata: vi.fn(async () => ({})),
+      measurePositions: vi.fn(async () => ({})),
+      segmentPositions: vi.fn(async () => ({})),
+    };
+
+    const webmscore: any = {
+      ready: Promise.resolve(),
+      load: vi.fn(async () => score),
+    };
+
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: false,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+
+    render(<ScoreEditor />);
+
+    const file = new File([new Uint8Array([1])], 'demo.mscz', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('open-score-input'), file);
+
+    await waitFor(() => expect(screen.getByTestId('svg-container').querySelector('svg')).toBeTruthy());
+
+    const inner = screen.getByTestId('svg-container').querySelector('#inner');
+    expect(inner).toBeTruthy();
+    fireEvent.click(inner!);
+
+    await waitFor(() => expect(score.selectElementAtPoint).toHaveBeenCalledWith(1, expect.any(Number), expect.any(Number)));
+
+    await screen.findByTestId('selection-overlay');
+
+    rectSpy?.mockReturnValue({
+      ...boundingRect,
+      width: 0,
+      height: 0,
+      right: 0,
+      bottom: 0,
+    } as any);
+
+    fireEvent.click(inner!);
+    await waitFor(() => expect(screen.queryByTestId('selection-overlay')).not.toBeInTheDocument());
+  });
+
+  it('alerts when a mutation binding is missing and clears selection on delete', async () => {
+    const user = userEvent.setup();
+
+    const score: any = {
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
+      selectElementAtPoint: vi.fn(async () => true),
+      relayout: vi.fn(async () => true),
+      metadata: vi.fn(async () => ({})),
+      measurePositions: vi.fn(async () => ({})),
+      segmentPositions: vi.fn(async () => ({})),
+    };
+
+    const webmscore: any = {
+      ready: Promise.resolve(),
+      load: vi.fn(async () => score),
+    };
+
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: false,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+
+    render(<ScoreEditor />);
+
+    const file = new File([new Uint8Array([1])], 'demo.mscz', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('open-score-input'), file);
+
+    await waitFor(() => expect(screen.getByTestId('svg-container').querySelector('svg')).toBeTruthy());
+
+    const note = screen.getByTestId('svg-container').querySelector('.Note');
+    expect(note).toBeTruthy();
+    fireEvent.click(note!);
+    await screen.findByTestId('selection-overlay');
+
+    await user.click(screen.getByTestId('btn-double-dot'));
+    expect((globalThis as any).alert).toHaveBeenCalledWith('This build of webmscore does not expose "toggleDoubleDot".');
+
+    await user.click(screen.getByTestId('btn-delete'));
+    await waitFor(() => expect(screen.queryByTestId('selection-overlay')).not.toBeInTheDocument());
+    expect((globalThis as any).alert).toHaveBeenCalledWith('This build of webmscore does not expose "deleteSelection".');
   });
 });

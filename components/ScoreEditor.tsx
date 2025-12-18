@@ -356,6 +356,10 @@ export default function ScoreEditor() {
                 }
             }
 
+            if (options?.clearSelection) {
+                return;
+            }
+
             // Schedule overlay refresh after the DOM has had time to update
             // Use a double-RAF to ensure the DOM is fully parsed and rendered
             // Pass preserved values to handle async state updates
