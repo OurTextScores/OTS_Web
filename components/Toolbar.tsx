@@ -33,8 +33,8 @@ interface ToolbarProps {
     timeSignatureOptions?: { label: string; numerator: number; denominator: number }[];
     onSetTimeSignature44?: () => void; // legacy
     onSetTimeSignature34?: () => void; // legacy
-    onSetClefTreble?: () => void;
-    onSetClefBass?: () => void;
+    onSetClef?: (clefType: number) => void;
+    clefOptions?: { label: string; value: number }[];
     onToggleDot?: () => void;
     onToggleDoubleDot?: () => void;
     onSetVoice?: (voiceIndex: number) => void;
@@ -76,8 +76,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     timeSignatureOptions,
     onSetTimeSignature44,
     onSetTimeSignature34,
-    onSetClefTreble,
-    onSetClefBass,
+    onSetClef,
+    clefOptions,
     onToggleDot,
     onToggleDoubleDot,
     onSetVoice,
@@ -110,6 +110,44 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         { label: '12/8', numerator: 12, denominator: 8 },
         { label: '5/4', numerator: 5, denominator: 4 },
         { label: '7/8', numerator: 7, denominator: 8 },
+    ];
+
+    const clefButtonOptions = clefOptions ?? [
+        { label: 'Treble', value: 0 },          // ClefType::G
+        { label: 'French Violin', value: 7 },   // ClefType::G_1
+        { label: 'Treble 15mb', value: 1 },     // ClefType::G15_MB
+        { label: 'Treble 8vb', value: 2 },      // ClefType::G8_VB
+        { label: 'Treble 8va', value: 3 },      // ClefType::G8_VA
+        { label: 'Treble 15ma', value: 4 },     // ClefType::G15_MA
+        { label: 'Treble 8vb (O)', value: 5 },  // ClefType::G8_VB_O
+        { label: 'Treble 8vb (P)', value: 6 },  // ClefType::G8_VB_P
+        { label: 'Soprano', value: 8 },         // ClefType::C1
+        { label: 'Mezzo', value: 9 },           // ClefType::C2
+        { label: 'Alto', value: 10 },           // ClefType::C3
+        { label: 'Tenor', value: 11 },          // ClefType::C4
+        { label: 'Baritone', value: 12 },       // ClefType::C5
+        { label: 'C (19c)', value: 13 },        // ClefType::C_19C
+        { label: 'C1 (F18c)', value: 14 },      // ClefType::C1_F18C
+        { label: 'C3 (F18c)', value: 15 },      // ClefType::C3_F18C
+        { label: 'C4 (F18c)', value: 16 },      // ClefType::C4_F18C
+        { label: 'C1 (F20c)', value: 17 },      // ClefType::C1_F20C
+        { label: 'C3 (F20c)', value: 18 },      // ClefType::C3_F20C
+        { label: 'C4 (F20c)', value: 19 },      // ClefType::C4_F20C
+        { label: 'Bass', value: 20 },           // ClefType::F
+        { label: 'Bass 15mb', value: 21 },      // ClefType::F15_MB
+        { label: 'Bass 8vb', value: 22 },       // ClefType::F8_VB
+        { label: 'Bass 8va', value: 23 },       // ClefType::F_8VA
+        { label: 'Bass 15ma', value: 24 },      // ClefType::F_15MA
+        { label: 'F (B)', value: 25 },          // ClefType::F_B
+        { label: 'F (C)', value: 26 },          // ClefType::F_C
+        { label: 'F (F18c)', value: 27 },       // ClefType::F_F18C
+        { label: 'F (19c)', value: 28 },        // ClefType::F_19C
+        { label: 'Perc', value: 29 },           // ClefType::PERC
+        { label: 'Perc 2', value: 30 },         // ClefType::PERC2
+        { label: 'TAB', value: 31 },            // ClefType::TAB
+        { label: 'TAB4', value: 32 },           // ClefType::TAB4
+        { label: 'TAB Serif', value: 33 },      // ClefType::TAB_SERIF
+        { label: 'TAB4 Serif', value: 34 },     // ClefType::TAB4_SERIF
     ];
 
     const dynamicOptions = [
@@ -341,7 +379,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 </button>
             </div>
 
-            <div className="flex items-center space-x-2 text-sm">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="text-gray-600">Signature:</span>
                 {signatureOptions.map(opt => {
                     const handler = resolveTimeSigHandler(opt);
@@ -357,22 +395,21 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                         </button>
                     );
                 })}
-                <button
-                    type="button"
-                    onClick={onSetClefTreble}
-                    disabled={mutationDisabled || !onSetClefTreble}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    Treble
-                </button>
-                <button
-                    type="button"
-                    onClick={onSetClefBass}
-                    disabled={mutationDisabled || !onSetClefBass}
-                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    Bass
-                </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-gray-600">Clef:</span>
+                {clefButtonOptions.map(opt => (
+                    <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => onSetClef?.(opt.value)}
+                        disabled={mutationDisabled || !onSetClef}
+                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {opt.label}
+                    </button>
+                ))}
             </div>
 
             <div className="flex items-center space-x-2 text-sm">
