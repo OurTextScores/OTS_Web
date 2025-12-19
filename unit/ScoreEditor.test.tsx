@@ -276,7 +276,6 @@ describe('ScoreEditor', () => {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
       relayout: vi.fn(async () => true),
-      selectElementAtPoint: vi.fn(async () => true),
       addTempoText: vi.fn(async () => true),
       metadata: vi.fn(async () => ({})),
       measurePositions: vi.fn(async () => ({})),
@@ -304,7 +303,6 @@ describe('ScoreEditor', () => {
 
     await user.click(screen.getByTestId('btn-tempo-120'));
 
-    await waitFor(() => expect(score.selectElementAtPoint).toHaveBeenCalledWith(0, 50, 20));
     await waitFor(() => expect(score.addTempoText).toHaveBeenCalledWith(120));
   });
 

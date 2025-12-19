@@ -487,31 +487,6 @@ export default function ScoreEditor() {
         return performMutation('add tempo text', async () => {
             const fn = requireMutation('addTempoText');
             if (!fn) return;
-
-            // Place tempo at the start of the score by selecting the first note/rest/chord in the SVG.
-            // Falls back to the current selection if a suitable element is not found.
-            let selectedStart = false;
-            if (score?.selectElementAtPoint && containerRef.current) {
-                const startEl = containerRef.current.querySelector('.Note, .Rest, .Chord');
-                if (startEl) {
-                    const rect = startEl.getBoundingClientRect();
-                    const containerRect = containerRef.current.getBoundingClientRect();
-                    const x = (rect.left - containerRect.left) / zoom + (rect.width / zoom) / 2;
-                    const y = (rect.top - containerRect.top) / zoom + (rect.height / zoom) / 2;
-                    const page = extractPageIndex(startEl) ?? 0;
-                    try {
-                        await score.selectElementAtPoint(page, x, y);
-                        selectedStart = true;
-                    } catch (selectErr) {
-                        console.warn('Failed to select start element for tempo insertion; falling back to current selection', selectErr);
-                    }
-                }
-            }
-
-            if (!selectedStart) {
-                await ensureSelectionInWasm();
-            }
-
             return fn.call(score, bpm);
         }, hadSelection ? undefined : { clearSelection: true });
     };

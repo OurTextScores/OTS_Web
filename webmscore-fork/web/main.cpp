@@ -866,29 +866,59 @@ bool _addRehearsalMark(uintptr_t score_ptr, int excerptId)
 bool _addTempoText(uintptr_t score_ptr, double bpm, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
-    auto cr = score->selection().cr();
-    if (!cr) {
-        LOGW() << "addTempoText: no chord/rest selected";
-        return false;
-    }
-    auto seg = cr->segment();
-    if (!seg) {
-        LOGW() << "addTempoText: no segment on selection";
+
+    if (bpm <= 0) {
+        LOGW() << "addTempoText: invalid bpm " << bpm;
         return false;
     }
 
-    auto tt = engraving::Factory::createTempoText(seg);
-    if (!tt) {
-        LOGW() << "addTempoText: Factory returned null";
+    engraving::Measure* measure = score->firstMeasure();
+    engraving::Segment* seg = nullptr;
+    while (measure && !seg) {
+        seg = measure->first(engraving::SegmentType::ChordRest);
+        if (!seg) {
+            measure = measure->nextMeasure();
+        }
+    }
+
+    if (!seg) {
+        LOGW() << "addTempoText: no chord/rest segments in score";
         return false;
     }
-    // TempoText::setTempo expects BeatsPerSecond
-    tt->setTempo(engraving::BeatsPerSecond(bpm / 60.0));
-    tt->setXmlText(String(u"<sym>metNoteQuarterUp</sym> = %1").arg(int(bpm)));
-    tt->setTrack(cr->track());
+
+    // Prefer updating an existing tempo marking at the start of the score (common in imported files).
+    // Fall back to inserting a new one if none exists.
+    const engraving::track_idx_t maxTrack
+        = score->ntracks() ? static_cast<engraving::track_idx_t>(score->ntracks() - 1) : 0;
+    auto existing = seg->findAnnotation(engraving::ElementType::TEMPO_TEXT, 0, maxTrack);
+    const double beatsPerSecond = bpm / 60.0;
+    const String tempoTextXml = String(u"<sym>metNoteQuarterUp</sym> = %1").arg(int(bpm));
 
     score->startCmd();
-    score->undo(new engraving::AddElement(tt));
+    if (existing && existing->isTempoText()) {
+        auto tempoText = toTempoText(existing);
+        tempoText->undoSetTempo(beatsPerSecond);
+        tempoText->undoSetFollowText(true);
+        // TempoText overrides `undoChangeProperty(...)` as protected, so call via the public base helper.
+        auto obj = static_cast<engraving::EngravingObject*>(tempoText);
+        obj->undoChangeProperty(engraving::Pid::TEXT, tempoTextXml);
+        obj->undoChangeProperty(engraving::Pid::VISIBLE, true);
+    } else {
+        auto tempoText = engraving::Factory::createTempoText(seg);
+        if (!tempoText) {
+            score->endCmd();
+            LOGW() << "addTempoText: Factory returned null";
+            return false;
+        }
+        tempoText->setParent(seg);
+        tempoText->setTrack(0);
+        tempoText->setTempo(engraving::BeatsPerSecond(beatsPerSecond));
+        tempoText->setXmlText(tempoTextXml);
+        tempoText->setFollowText(true);
+        tempoText->setVisible(true);
+
+        score->undoAddElement(tempoText);
+    }
     score->endCmd();
     return true;
 }
