@@ -5,6 +5,17 @@ import { useSearchParams } from 'next/navigation';
 import { loadWebMscore, Score, InputFileFormat } from '../lib/webmscore-loader';
 import { Toolbar } from './Toolbar';
 
+type SelectionBox = {
+    index: number | null;
+    page: number;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    centerX: number;
+    centerY: number;
+};
+
 type MutationMethods = Pick<
     Score,
     | 'selectElementAtPoint'
@@ -56,6 +67,7 @@ export default function ScoreEditor() {
     const [selectedElement, setSelectedElement] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
     const [selectedPoint, setSelectedPoint] = useState<{ page: number, x: number, y: number } | null>(null);
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+    const [selectionBoxes, setSelectionBoxes] = useState<SelectionBox[]>([]);
     const [dragSelectionRect, setDragSelectionRect] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
     const ignoreNextClickRef = useRef(false);
     const dragKindRef = useRef<'pointer' | 'mouse' | null>(null);
@@ -104,6 +116,8 @@ export default function ScoreEditor() {
         setLoading(true);
         setLoading(true);
         setSelectedElement(null);
+        setSelectionBoxes([]);
+        setSelectedPoint(null);
         setSelectedIndex(null);
         setMutationEnabled(false);
         setSoundFontLoaded(false);
@@ -149,6 +163,8 @@ export default function ScoreEditor() {
         setLoading(true);
         setLoading(true);
         setSelectedElement(null);
+        setSelectionBoxes([]);
+        setSelectedPoint(null);
         setSelectedIndex(null);
         setMutationEnabled(false);
         setSoundFontLoaded(false);
@@ -247,78 +263,124 @@ export default function ScoreEditor() {
 
         const containerRect = containerRef.current.getBoundingClientRect();
         const selectors = ['.selected', '.note-selected', '.ms-selection'];
-        const candidates: Element[] = selectors
-            .flatMap(sel => Array.from(containerRef.current!.querySelectorAll(sel)));
+        const candidates: Element[] = Array.from(
+            new Set(selectors.flatMap(sel => Array.from(containerRef.current!.querySelectorAll(sel)))),
+        );
+        const allElements = Array.from(containerRef.current.querySelectorAll('.Note, .Rest, .Chord'));
 
         console.log('[refreshSelectionOverlay] candidates.length:', candidates.length);
 
-        let el: Element | null = null;
+        let boxes: SelectionBox[] = [];
         if (candidates.length > 0) {
-            // If we have selection markers in the SVG, prefer those over historical position
-            // This handles cases where the element moved (e.g., pitch change)
-            if (usePoint) {
-                const targetPage = usePoint.page ?? 0;
-                // Filter to same page first
-                const samePage = candidates.filter(cand => {
+            boxes = candidates
+                .map(cand => {
+                    const rect = cand.getBoundingClientRect();
+                    const x = (rect.left - containerRect.left) / zoom;
+                    const y = (rect.top - containerRect.top) / zoom;
+                    const w = rect.width / zoom;
+                    const h = rect.height / zoom;
+                    if (!(w > 0 && h > 0)) {
+                        return null;
+                    }
                     const page = extractPageIndex(cand) ?? 0;
-                    return page === targetPage;
-                });
+                    const centerX = x + w / 2;
+                    const centerY = y + h / 2;
 
-                // If we have candidates on the same page, use the first one
-                // (MuseScore typically only has one selected element)
-                if (samePage.length > 0) {
-                    el = samePage[0];
-                } else if (candidates.length > 0) {
-                    // Fallback to any selected element
-                    el = candidates[0];
-                }
-            } else {
-                el = candidates[0];
-            }
+                    let idx = allElements.indexOf(cand);
+                    if (idx < 0) {
+                        let current: Element | null = cand;
+                        while (current && current !== containerRef.current) {
+                            idx = allElements.indexOf(current);
+                            if (idx >= 0) break;
+                            current = current.parentElement;
+                        }
+                    }
+
+                    return {
+                        index: idx >= 0 ? idx : null,
+                        page,
+                        x,
+                        y,
+                        w,
+                        h,
+                        centerX,
+                        centerY,
+                    } satisfies SelectionBox;
+                })
+                .filter((box): box is NonNullable<typeof box> => Boolean(box))
+                .sort((a, b) => (
+                    a.page - b.page
+                    || a.y - b.y
+                    || a.x - b.x
+                    || (a.index ?? Number.MAX_SAFE_INTEGER) - (b.index ?? Number.MAX_SAFE_INTEGER)
+                ));
         } else if (useIndex !== null) {
             // Fallback: use index if selection markers are missing in SVG
             console.log('[refreshSelectionOverlay] Using index fallback');
-            const allAndSome = Array.from(containerRef.current.querySelectorAll('.Note, .Rest, .Chord'));
-            console.log('[refreshSelectionOverlay] Found', allAndSome.length, 'Note/Rest/Chord elements');
-            if (allAndSome[useIndex]) {
-                el = allAndSome[useIndex];
+            console.log('[refreshSelectionOverlay] Found', allElements.length, 'Note/Rest/Chord elements');
+            const el = allElements[useIndex] ?? null;
+            if (el) {
                 console.log('[refreshSelectionOverlay] Selected element at index', useIndex);
+                const rect = el.getBoundingClientRect();
+                const x = (rect.left - containerRect.left) / zoom;
+                const y = (rect.top - containerRect.top) / zoom;
+                const w = rect.width / zoom;
+                const h = rect.height / zoom;
+                if (w > 0 && h > 0) {
+                    const page = extractPageIndex(el) ?? 0;
+                    const centerX = x + w / 2;
+                    const centerY = y + h / 2;
+                    boxes = [{
+                        index: useIndex,
+                        page,
+                        x,
+                        y,
+                        w,
+                        h,
+                        centerX,
+                        centerY,
+                    }];
+                }
             } else {
                 console.log('[refreshSelectionOverlay] No element at index', useIndex);
             }
         }
 
-        console.log('[refreshSelectionOverlay] el:', el);
-        if (!el) {
+        if (boxes.length === 0) {
             // No element found, keep previous selection visible
             console.log('[refreshSelectionOverlay] No element found, returning');
             return;
         }
 
-        const rect = el.getBoundingClientRect();
-        const x = (rect.left - containerRect.left) / zoom;
-        const y = (rect.top - containerRect.top) / zoom;
-        const w = rect.width / zoom;
-        const h = rect.height / zoom;
+        setSelectionBoxes(boxes);
 
-        console.log('[refreshSelectionOverlay] Computed position:', { x, y, w, h });
-
-        if (w > 0 && h > 0) {
-            console.log('[refreshSelectionOverlay] Setting selectedElement');
-            setSelectedElement({ x, y, w, h });
-            const centerX = x + w / 2;
-            const centerY = y + h / 2;
-            setSelectedPoint({ page: extractPageIndex(el) ?? 0, x: centerX, y: centerY });
-            // Update the index to match the found element
-            const allElements = Array.from(containerRef.current.querySelectorAll('.Note, .Rest, .Chord'));
-            const newIndex = allElements.indexOf(el);
-            if (newIndex >= 0) {
-                setSelectedIndex(newIndex);
-            }
-            console.log('[refreshSelectionOverlay] Done updating selection');
+        let primary: SelectionBox | null = null;
+        if (usePoint) {
+            const targetPage = usePoint.page ?? 0;
+            const samePage = boxes.filter(box => box.page === targetPage);
+            const pool = samePage.length > 0 ? samePage : boxes;
+            primary = pool.reduce((best, box) => {
+                if (!best) return box;
+                const bestDist = Math.hypot(best.centerX - usePoint.x, best.centerY - usePoint.y);
+                const dist = Math.hypot(box.centerX - usePoint.x, box.centerY - usePoint.y);
+                return dist < bestDist ? box : best;
+            }, null as SelectionBox | null);
+        } else if (useIndex !== null) {
+            primary = boxes.find(box => box.index === useIndex) ?? boxes[0];
         } else {
-            console.log('[refreshSelectionOverlay] Invalid dimensions, not updating');
+            primary = boxes[0];
         }
+
+        if (!primary) {
+            console.log('[refreshSelectionOverlay] No primary box found, returning');
+            return;
+        }
+
+        console.log('[refreshSelectionOverlay] Setting selectedElement');
+        setSelectedElement({ x: primary.x, y: primary.y, w: primary.w, h: primary.h });
+        setSelectedPoint({ page: primary.page, x: primary.centerX, y: primary.centerY });
+        setSelectedIndex(primary.index);
+        console.log('[refreshSelectionOverlay] Done updating selection');
     };
 
     const requireMutation = (methodName: keyof MutationMethods) => {
@@ -360,6 +422,7 @@ export default function ScoreEditor() {
             // Clear selection if requested (e.g., for delete operations)
             if (options?.clearSelection) {
                 setSelectedElement(null);
+                setSelectionBoxes([]);
                 setSelectedPoint(null);
                 setSelectedIndex(null);
             }
@@ -906,6 +969,7 @@ export default function ScoreEditor() {
         if (hits.length === 0) {
             if (!additive) {
                 setSelectedElement(null);
+                setSelectionBoxes([]);
                 setSelectedPoint(null);
                 setSelectedIndex(null);
                 if (score.clearSelection) {
@@ -918,6 +982,39 @@ export default function ScoreEditor() {
         }
 
         const first = hits[0];
+        const hitBoxes: SelectionBox[] = hits.map(hit => ({
+            index: hit.index,
+            page: hit.pageIndex,
+            x: hit.box.x,
+            y: hit.box.y,
+            w: hit.box.w,
+            h: hit.box.h,
+            centerX: hit.centerX,
+            centerY: hit.centerY,
+        }));
+        if (additive) {
+            setSelectionBoxes(prev => {
+                const seen = new Set<number>();
+                for (const box of prev) {
+                    if (box.index !== null) {
+                        seen.add(box.index);
+                    }
+                }
+                const merged = [...prev];
+                for (const box of hitBoxes) {
+                    if (box.index !== null && seen.has(box.index)) {
+                        continue;
+                    }
+                    if (box.index !== null) {
+                        seen.add(box.index);
+                    }
+                    merged.push(box);
+                }
+                return merged;
+            });
+        } else {
+            setSelectionBoxes(hitBoxes);
+        }
         setSelectedElement(first.box);
         setSelectedPoint({ page: first.pageIndex, x: first.centerX, y: first.centerY });
         setSelectedIndex(first.index);
@@ -1278,6 +1375,7 @@ export default function ScoreEditor() {
 
 	        if (!found || !element) {
 	            setSelectedElement(null);
+                setSelectionBoxes([]);
 	            setSelectedPoint(null);
 	            setSelectedIndex(null);
                 if (score?.clearSelection) {
@@ -1302,18 +1400,6 @@ export default function ScoreEditor() {
 	            // Use center of the box for selection to reduce edge misses
 	            const centerX = x + w / 2;
 	            const centerY = y + h / 2;
-
-	            setSelectedElement({ x, y, w, h });
-                const selectionPromise = additiveSelection && score?.selectElementAtPointWithMode
-                    ? score.selectElementAtPointWithMode(pageIndex, centerX, centerY, 1)
-                    : score?.selectElementAtPoint?.(pageIndex, centerX, centerY);
-
-	            selectionPromise?.catch(err => {
-	                console.warn('selectElementAtPoint not available or failed:', err);
-	                setSelectedElement(null);
-	                setSelectedPoint(null);
-	                setSelectedIndex(null);
-	            });
 
             // Find the index by looking for Note/Rest/Chord elements
             // If we found a specific element, use it; otherwise search from target
@@ -1340,14 +1426,86 @@ export default function ScoreEditor() {
                 }
             }
 
-            setSelectedIndex(index >= 0 ? index : null);
+            const box: SelectionBox = {
+                index: index >= 0 ? index : null,
+                page: pageIndex,
+                x,
+                y,
+                w,
+                h,
+                centerX,
+                centerY,
+            };
+
+            const canModeSelect = Boolean(score?.selectElementAtPointWithMode);
+            const alreadySelected = additiveSelection && box.index !== null && selectionBoxes.some(existing => existing.index === box.index);
+            const mode = canModeSelect
+                ? additiveSelection
+                    ? alreadySelected ? 2 : 1
+                    : 0
+                : null;
+
+            const selectionPromise = canModeSelect
+                ? score!.selectElementAtPointWithMode!(pageIndex, centerX, centerY, mode as number)
+                : score?.selectElementAtPoint?.(pageIndex, centerX, centerY);
+
+            selectionPromise?.catch(err => {
+                console.warn('selectElementAtPoint not available or failed:', err);
+                setSelectedElement(null);
+                setSelectionBoxes([]);
+                setSelectedPoint(null);
+                setSelectedIndex(null);
+            });
+
+            if (!additiveSelection) {
+                setSelectionBoxes([box]);
+                setSelectedElement({ x, y, w, h });
+                setSelectedIndex(box.index);
+                setSelectedPoint({ page: pageIndex, x: centerX, y: centerY });
+                return;
+            }
+
+            if (alreadySelected && box.index !== null) {
+                const next = selectionBoxes.filter(existing => existing.index !== box.index);
+                setSelectionBoxes(next);
+
+                if (selectedIndex === box.index) {
+                    const nextPrimary = next.at(-1) ?? null;
+                    if (!nextPrimary) {
+                        setSelectedElement(null);
+                        setSelectedPoint(null);
+                        setSelectedIndex(null);
+                    } else {
+                        setSelectedElement({ x: nextPrimary.x, y: nextPrimary.y, w: nextPrimary.w, h: nextPrimary.h });
+                        setSelectedPoint({ page: nextPrimary.page, x: nextPrimary.centerX, y: nextPrimary.centerY });
+                        setSelectedIndex(nextPrimary.index);
+                    }
+                }
+                return;
+            }
+
+            // Additive selection: add clicked element as the new primary.
+            setSelectionBoxes([...selectionBoxes, box]);
+            setSelectedElement({ x, y, w, h });
+            setSelectedIndex(box.index);
             setSelectedPoint({ page: pageIndex, x: centerX, y: centerY });
         } else {
             setSelectedElement(null);
+            setSelectionBoxes([]);
             setSelectedPoint(null);
             setSelectedIndex(null);
         }
     };
+
+    const secondarySelectionBoxes = selectionBoxes.filter(box => {
+        if (selectedIndex !== null && box.index === selectedIndex) {
+            return false;
+        }
+        if (selectedElement && box.x === selectedElement.x && box.y === selectedElement.y && box.w === selectedElement.w && box.h === selectedElement.h) {
+            return false;
+        }
+        return true;
+    });
 
     return (
         <div className="flex flex-col h-screen">
@@ -1435,6 +1593,19 @@ export default function ScoreEditor() {
                             }}
                         />
                     )}
+
+                    {secondarySelectionBoxes.map(box => (
+                        <div
+                            key={box.index !== null ? `sel-${box.index}` : `sel-${box.page}-${box.x}-${box.y}-${box.w}-${box.h}`}
+                            className="absolute border border-blue-500 bg-blue-200 bg-opacity-20 pointer-events-none"
+                            style={{
+                                left: box.x,
+                                top: box.y,
+                                width: box.w,
+                                height: box.h
+                            }}
+                        />
+                    ))}
 
 	                {selectedElement && (
 	                    <div
