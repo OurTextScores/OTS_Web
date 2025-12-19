@@ -21,6 +21,13 @@ export interface Score {
      * These methods may be undefined if the WASM bindings were not compiled with mutation support.
      */
     selectElementAtPoint?: (pageNumber: number, x: number, y: number) => Promise<unknown> | unknown;
+    selectElementAtPointWithMode?: (
+        pageNumber: number,
+        x: number,
+        y: number,
+        mode: 0 | 1 | 2,
+    ) => Promise<unknown> | unknown;
+    clearSelection?: () => Promise<unknown> | unknown;
     deleteSelection?: () => Promise<unknown> | unknown;
     pitchUp?: () => Promise<unknown> | unknown;
     pitchDown?: () => Promise<unknown> | unknown;

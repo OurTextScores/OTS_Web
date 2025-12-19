@@ -8,6 +8,8 @@ import { Toolbar } from './Toolbar';
 type MutationMethods = Pick<
     Score,
     | 'selectElementAtPoint'
+    | 'selectElementAtPointWithMode'
+    | 'clearSelection'
     | 'deleteSelection'
     | 'pitchUp'
     | 'pitchDown'
@@ -320,7 +322,11 @@ export default function ScoreEditor() {
         return fn;
     };
 
-    const performMutation = async (label: string, action?: (() => Promise<unknown> | unknown), options?: { clearSelection?: boolean }) => {
+    const performMutation = async (
+        label: string,
+        action?: (() => Promise<unknown> | unknown),
+        options?: { clearSelection?: boolean; skipWasmReselect?: boolean },
+    ) => {
         if (!score) {
             console.warn(`Mutation "${label}" requested but no score is loaded.`);
             return;
@@ -359,7 +365,7 @@ export default function ScoreEditor() {
             await renderScore(score);
 
             // Re-establish selection inside WASM if we had a previously known point.
-            if (preservedPoint && score.selectElementAtPoint) {
+            if (!options?.skipWasmReselect && preservedPoint && score.selectElementAtPoint) {
                 try {
                     await score.selectElementAtPoint(preservedPoint.page, preservedPoint.x, preservedPoint.y);
                 } catch (reselectErr) {
@@ -437,11 +443,10 @@ export default function ScoreEditor() {
         return fn.call(score);
     });
     const handleTranspose = (semitones: number) => performMutation(`transpose ${semitones}`, async () => {
-        await ensureSelectionInWasm();
         const fn = requireMutation('transpose');
         if (!fn) return;
         return fn.call(score, semitones);
-    });
+    }, { skipWasmReselect: true });
     const handleSetAccidental = (accidentalType: number) => performMutation(`set accidental ${accidentalType}`, async () => {
         await ensureSelectionInWasm();
         const fn = requireMutation('setAccidental');
@@ -836,14 +841,15 @@ export default function ScoreEditor() {
         return null;
     };
 
-    const handleScoreClick = (e: React.MouseEvent) => {
-        if (!containerRef.current) return;
+	    const handleScoreClick = (e: React.MouseEvent) => {
+	        if (!containerRef.current) return;
 
-        // DOM-based hit testing
-        const target = e.target as Element;
+            const additiveSelection = e.metaKey || e.ctrlKey;
+	        // DOM-based hit testing
+	        const target = e.target as Element;
 
-        // Check if we clicked on a Note or Rest (or other interesting elements)
-        // webmscore SVG classes: Note, Rest, Chord, etc.
+	        // Check if we clicked on a Note or Rest (or other interesting elements)
+	        // webmscore SVG classes: Note, Rest, Chord, etc.
         // Often the target is a <path> or <g> with the class.
 
         // Traverse up to find a relevant class if needed
@@ -868,12 +874,17 @@ export default function ScoreEditor() {
             element = element.parentElement;
         }
 
-        if (!found || !element) {
-            setSelectedElement(null);
-            setSelectedPoint(null);
-            setSelectedIndex(null);
-            return;
-        }
+	        if (!found || !element) {
+	            setSelectedElement(null);
+	            setSelectedPoint(null);
+	            setSelectedIndex(null);
+                if (score?.clearSelection) {
+                    score.clearSelection().catch(err => {
+                        console.warn('clearSelection not available or failed:', err);
+                    });
+                }
+	            return;
+	        }
 
         const targetElement = element;
         const rect = targetElement.getBoundingClientRect();
@@ -884,19 +895,23 @@ export default function ScoreEditor() {
         const w = rect.width / zoom;
         const h = rect.height / zoom;
 
-        if (w > 0 && h > 0) {
-            const pageIndex = extractPageIndex(targetElement) ?? 0;
-            // Use center of the box for selection to reduce edge misses
-            const centerX = x + w / 2;
-            const centerY = y + h / 2;
+	        if (w > 0 && h > 0) {
+	            const pageIndex = extractPageIndex(targetElement) ?? 0;
+	            // Use center of the box for selection to reduce edge misses
+	            const centerX = x + w / 2;
+	            const centerY = y + h / 2;
 
-            setSelectedElement({ x, y, w, h });
-            score?.selectElementAtPoint?.(pageIndex, centerX, centerY).catch(err => {
-                console.warn('selectElementAtPoint not available or failed:', err);
-                setSelectedElement(null);
-                setSelectedPoint(null);
-                setSelectedIndex(null);
-            });
+	            setSelectedElement({ x, y, w, h });
+                const selectionPromise = additiveSelection && score?.selectElementAtPointWithMode
+                    ? score.selectElementAtPointWithMode(pageIndex, centerX, centerY, 1)
+                    : score?.selectElementAtPoint?.(pageIndex, centerX, centerY);
+
+	            selectionPromise?.catch(err => {
+	                console.warn('selectElementAtPoint not available or failed:', err);
+	                setSelectedElement(null);
+	                setSelectedPoint(null);
+	                setSelectedIndex(null);
+	            });
 
             // Find the index by looking for Note/Rest/Chord elements
             // If we found a specific element, use it; otherwise search from target

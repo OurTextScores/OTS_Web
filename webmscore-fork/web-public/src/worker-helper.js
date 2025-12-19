@@ -349,6 +349,26 @@ class WebMscoreW {
     }
 
     /**
+     * Clear current selection.
+     * @returns {Promise<boolean>}
+     */
+    clearSelection() {
+        return this.rpc('clearSelection')
+    }
+
+    /**
+     * Select element at point with mode.
+     * @param {number} pageNumber
+     * @param {number} x
+     * @param {number} y
+     * @param {0|1|2} mode 0=replace, 1=add, 2=toggle
+     * @returns {Promise<boolean>}
+     */
+    selectElementAtPointWithMode(pageNumber, x, y, mode) {
+        return this.rpc('selectElementAtPointWithMode', [pageNumber, x, y, mode])
+    }
+
+    /**
      * Delete the current selection.
      * @returns {Promise<boolean>}
      */

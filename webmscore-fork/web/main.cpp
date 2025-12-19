@@ -638,6 +638,69 @@ bool _selectElementAtPoint(uintptr_t score_ptr, int pageNumber, double x, double
     return true;
 }
 
+bool _clearSelection(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    score->deselectAll();
+    score->updateSelection();
+    score->setSelectionChanged(true);
+    return true;
+}
+
+bool _selectElementAtPointWithMode(uintptr_t score_ptr, int pageNumber, double x, double y, int mode, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    const auto& pages = score->pages();
+
+    if (pageNumber < 0 || pageNumber >= (int)pages.size()) {
+        LOGW() << "selectElementAtPointWithMode: invalid page index " << pageNumber;
+        return false;
+    }
+
+    // 0 = replace, 1 = add, 2 = toggle
+    if (mode < 0 || mode > 2) {
+        LOGW() << "selectElementAtPointWithMode: invalid selection mode " << mode;
+        return false;
+    }
+
+    engraving::Page* page = pages.at(pageNumber);
+    const mu::PointF pt(x, y);
+
+    auto items = page->items(pt);
+    if (items.empty()) {
+        return false;
+    }
+
+    std::sort(items.begin(), items.end(), elementLower);
+    engraving::EngravingItem* target = items.front();
+
+    // Skip page frames
+    if (target && target->isPage()) {
+        target = items.size() > 1 ? items.at(1) : nullptr;
+    }
+
+    if (!target) {
+        return false;
+    }
+
+    if (mode == 0) {
+        score->deselectAll();
+        score->select(target, engraving::SelectType::SINGLE, target->staffIdx());
+    } else if (mode == 1) {
+        score->select(target, engraving::SelectType::ADD, target->staffIdx());
+    } else {
+        if (target->selected()) {
+            score->deselect(target);
+        } else {
+            score->select(target, engraving::SelectType::ADD, target->staffIdx());
+        }
+    }
+
+    score->updateSelection();
+    score->setSelectionChanged(true);
+    return true;
+}
+
 bool _deleteSelection(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
@@ -1197,6 +1260,16 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool selectElementAtPoint(uintptr_t score_ptr, int pageNumber, double x, double y, int excerptId = -1) {
         return _selectElementAtPoint(score_ptr, pageNumber, x, y, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool clearSelection(uintptr_t score_ptr, int excerptId = -1) {
+        return _clearSelection(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool selectElementAtPointWithMode(uintptr_t score_ptr, int pageNumber, double x, double y, int mode, int excerptId = -1) {
+        return _selectElementAtPointWithMode(score_ptr, pageNumber, x, y, mode, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

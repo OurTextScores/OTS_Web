@@ -542,6 +542,30 @@ class WebMscore {
     }
 
     /**
+     * Clear current selection
+     * @returns {Promise<boolean>}
+     */
+    async clearSelection() {
+        return Module.ccall('clearSelection', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Select the topmost selectable element near a page-relative point with mode
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @param {0|1|2} mode 0=replace, 1=add, 2=toggle
+     * @returns {Promise<boolean>}
+     */
+    async selectElementAtPointWithMode(pageNumber, x, y, mode) {
+        return Module.ccall('selectElementAtPointWithMode',
+            'boolean',
+            ['number', 'number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, pageNumber, x, y, mode, this.excerptId]
+        )
+    }
+
+    /**
      * Delete the current selection
      * @returns {Promise<boolean>}
      */
