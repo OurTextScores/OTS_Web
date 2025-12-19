@@ -238,6 +238,10 @@ export default function ScoreEditor() {
     };
 
     const ensureSelectionInWasm = async () => {
+        // If the UI is tracking multiple selected elements, avoid collapsing the WASM selection back to a single point.
+        if (selectionBoxes.length > 1) {
+            return;
+        }
         if (!score || !score.selectElementAtPoint || !selectedPoint) {
             return;
         }
@@ -410,6 +414,7 @@ export default function ScoreEditor() {
         // Preserve selection state before mutation for use in fallback
         const preservedIndex = selectedIndex;
         const preservedPoint = selectedPoint;
+        const preservedMultiSelection = selectionBoxes.length > 1;
 
         try {
             console.debug(`Mutation "${label}" start`);
@@ -437,7 +442,7 @@ export default function ScoreEditor() {
             await renderScore(score);
 
             // Re-establish selection inside WASM if we had a previously known point.
-            if (!options?.skipWasmReselect && preservedPoint && score.selectElementAtPoint) {
+            if (!options?.skipWasmReselect && !preservedMultiSelection && preservedPoint && score.selectElementAtPoint) {
                 try {
                     await score.selectElementAtPoint(preservedPoint.page, preservedPoint.x, preservedPoint.y);
                 } catch (reselectErr) {
