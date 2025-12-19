@@ -24,6 +24,8 @@ export interface Score {
     deleteSelection?: () => Promise<unknown> | unknown;
     pitchUp?: () => Promise<unknown> | unknown;
     pitchDown?: () => Promise<unknown> | unknown;
+    transpose?: (semitones: number) => Promise<unknown> | unknown;
+    setAccidental?: (accidentalType: number) => Promise<unknown> | unknown;
     doubleDuration?: () => Promise<unknown> | unknown;
     halfDuration?: () => Promise<unknown> | unknown;
     toggleDot?: () => Promise<unknown> | unknown;

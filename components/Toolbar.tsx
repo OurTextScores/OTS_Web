@@ -12,6 +12,8 @@ interface ToolbarProps {
     onPitchDown?: () => void;
     onDurationLonger?: () => void;
     onDurationShorter?: () => void;
+    onTranspose?: (semitones: number) => void;
+    onSetAccidental?: (accidentalType: number) => void;
     mutationsEnabled?: boolean;
     selectionActive?: boolean;
     onExportSvg?: () => void;
@@ -57,6 +59,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     onPitchDown,
     onDurationLonger,
     onDurationShorter,
+    onTranspose,
+    onSetAccidental,
     mutationsEnabled = false,
     selectionActive = false,
     onExportSvg,
@@ -83,7 +87,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 	onSetClef,
 	clefOptions,
 	onToggleDot,
-	onToggleDoubleDot,
+    onToggleDoubleDot,
 	onSetVoice,
     onAddDynamic,
     onAddRehearsalMark,
@@ -214,6 +218,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         return undefined;
     };
 
+    const accidentalOptions = [
+        { label: '♭', value: 1 },  // AccidentalType::FLAT
+        { label: '♮', value: 2 },  // AccidentalType::NATURAL
+        { label: '♯', value: 3 },  // AccidentalType::SHARP
+        { label: 'x', value: 4 },  // AccidentalType::SHARP2
+        { label: '♭♭', value: 5 }, // AccidentalType::FLAT2
+        { label: 'Clear', value: 0 }, // AccidentalType::NONE
+    ];
+
     return (
         <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-gray-100 border-b border-gray-300">
 	            <div className="flex items-center space-x-4">
@@ -239,7 +252,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 	                </label>
 	            </div>
 
-            <div className="flex items-center flex-wrap gap-2 text-sm">
+	            <div className="flex items-center flex-wrap gap-2 text-sm">
 	                <div className="flex items-center space-x-2">
 	                    <button
 	                        data-testid="btn-delete"
@@ -289,7 +302,41 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 	                    >
 	                        Pitch ↑
 	                    </button>
+                        <button
+                            data-testid="btn-transpose--12"
+                            type="button"
+                            onClick={() => onTranspose?.(-12)}
+                            disabled={mutationDisabled || !onTranspose}
+                            className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Octave ↓
+                        </button>
+                        <button
+                            data-testid="btn-transpose-12"
+                            type="button"
+                            onClick={() => onTranspose?.(12)}
+                            disabled={mutationDisabled || !onTranspose}
+                            className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Octave ↑
+                        </button>
 	                </div>
+
+                    <div className="flex items-center space-x-2">
+                        <span className="text-gray-600">Acc:</span>
+                        {accidentalOptions.map(opt => (
+                            <button
+                                key={opt.label}
+                                data-testid={`btn-acc-${opt.value}`}
+                                type="button"
+                                onClick={() => onSetAccidental?.(opt.value)}
+                                disabled={mutationDisabled || !selectionActive || !onSetAccidental}
+                                className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {opt.label}
+                            </button>
+                        ))}
+                    </div>
 
 	                <div className="flex items-center space-x-2">
 	                    <button

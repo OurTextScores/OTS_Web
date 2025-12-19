@@ -564,6 +564,25 @@ class WebMscore {
     }
 
     /**
+     * Transpose the current selection by semitone delta.
+     * If there is no selection, this transposes the whole score.
+     * @param {number} semitones
+     * @returns {Promise<boolean>}
+     */
+    async transpose(semitones) {
+        return Module.ccall('transpose', 'boolean', ['number', 'number', 'number'], [this.scoreptr, semitones, this.excerptId])
+    }
+
+    /**
+     * Set accidental for the current selection.
+     * @param {number} accidentalType see engraving::AccidentalType enum
+     * @returns {Promise<boolean>}
+     */
+    async setAccidental(accidentalType) {
+        return Module.ccall('setAccidental', 'boolean', ['number', 'number', 'number'], [this.scoreptr, accidentalType, this.excerptId])
+    }
+
+    /**
      * Double the duration of the current selection
      */
     async doubleDuration() {

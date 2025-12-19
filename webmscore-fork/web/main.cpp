@@ -46,6 +46,7 @@
 #include "engraving/libmscore/dynamic.h"
 #include "engraving/libmscore/rehearsalmark.h"
 #include "engraving/libmscore/key.h"
+#include "engraving/libmscore/types.h"
 
 #include "./score.h"
 #include "./wasmres.h"
@@ -664,6 +665,52 @@ bool _pitchDown(uintptr_t score_ptr, int excerptId)
     return true;
 }
 
+bool _transpose(uintptr_t score_ptr, int semitones, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (semitones == 0) {
+        return true;
+    }
+
+    const bool hadSelection = !score->selection().isNone();
+    if (!hadSelection) {
+        score->cmdSelectAll();
+        if (score->selection().isNone()) {
+            LOGW() << "transpose: score is empty";
+            return false;
+        }
+    }
+
+    score->startCmd();
+    score->upDownDelta(semitones);
+    score->endCmd();
+
+    if (!hadSelection) {
+        score->deselectAll();
+        score->setSelectionChanged(true);
+    }
+
+    return true;
+}
+
+bool _setAccidental(uintptr_t score_ptr, int accidentalType, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (accidentalType < 0 || accidentalType >= static_cast<int>(engraving::AccidentalType::END)) {
+        LOGW() << "setAccidental: invalid accidental type " << accidentalType;
+        return false;
+    }
+    if (score->selection().isNone()) {
+        LOGW() << "setAccidental: no selection";
+        return false;
+    }
+
+    score->startCmd();
+    score->changeAccidental(static_cast<engraving::AccidentalType>(accidentalType));
+    score->endCmd();
+    return true;
+}
+
 bool _doubleDuration(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
@@ -1165,6 +1212,16 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool pitchDown(uintptr_t score_ptr, int excerptId = -1) {
         return _pitchDown(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool transpose(uintptr_t score_ptr, int semitones, int excerptId = -1) {
+        return _transpose(score_ptr, semitones, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setAccidental(uintptr_t score_ptr, int accidentalType, int excerptId = -1) {
+        return _setAccidental(score_ptr, accidentalType, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

@@ -187,6 +187,8 @@ describe('ScoreEditor', () => {
       relayout: vi.fn(async () => true),
       selectElementAtPoint: vi.fn(async () => true),
       pitchUp: vi.fn(async () => true),
+      transpose: vi.fn(async () => true),
+      setAccidental: vi.fn(async () => true),
       doubleDuration: vi.fn(async () => true),
       toggleDot: vi.fn(async () => true),
       setVoice: vi.fn(async () => true),
@@ -223,14 +225,18 @@ describe('ScoreEditor', () => {
     await screen.findByTestId('selection-overlay');
 
     await user.click(screen.getByTestId('btn-pitch-up'));
+    await user.click(screen.getByTestId('btn-transpose-12'));
     await user.click(screen.getByTestId('btn-duration-longer'));
     await user.click(screen.getByTestId('btn-dot'));
     await user.click(screen.getByTestId('btn-voice-2'));
+    await user.click(screen.getByTestId('btn-acc-3'));
     await user.click(screen.getByTestId('btn-dynamic-6'));
     await user.click(screen.getByTestId('btn-timesig-3-4'));
     await user.click(screen.getByTestId('btn-keysig-0'));
 
     await waitFor(() => expect(score.pitchUp).toHaveBeenCalled());
+    await waitFor(() => expect(score.transpose).toHaveBeenCalledWith(12));
+    await waitFor(() => expect(score.setAccidental).toHaveBeenCalledWith(3));
     await waitFor(() => expect(score.doubleDuration).toHaveBeenCalled());
     await waitFor(() => expect(score.toggleDot).toHaveBeenCalled());
     await waitFor(() => expect(score.setVoice).toHaveBeenCalledWith(1));

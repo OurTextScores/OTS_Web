@@ -112,6 +112,33 @@ describe('Toolbar', () => {
     expect(onSetClef).toHaveBeenCalledWith(20);
   });
 
+  it('wires transpose and accidentals', async () => {
+    const user = userEvent.setup();
+    const onTranspose = vi.fn();
+    const onSetAccidental = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        mutationsEnabled
+        selectionActive
+        onTranspose={onTranspose}
+        onSetAccidental={onSetAccidental}
+      />,
+    );
+
+    await user.click(screen.getByTestId('btn-transpose--12'));
+    await user.click(screen.getByTestId('btn-transpose-12'));
+    expect(onTranspose).toHaveBeenCalledWith(-12);
+    expect(onTranspose).toHaveBeenCalledWith(12);
+
+    await user.click(screen.getByTestId('btn-acc-3'));
+    expect(onSetAccidental).toHaveBeenCalledWith(3);
+  });
+
   it('supports legacy time signature handlers', async () => {
     const user = userEvent.setup();
     const onSetTimeSignature44 = vi.fn();

@@ -11,6 +11,8 @@ type MutationMethods = Pick<
     | 'deleteSelection'
     | 'pitchUp'
     | 'pitchDown'
+    | 'transpose'
+    | 'setAccidental'
     | 'doubleDuration'
     | 'halfDuration'
     | 'toggleDot'
@@ -433,6 +435,18 @@ export default function ScoreEditor() {
         const fn = requireMutation('pitchDown');
         if (!fn) return;
         return fn.call(score);
+    });
+    const handleTranspose = (semitones: number) => performMutation(`transpose ${semitones}`, async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('transpose');
+        if (!fn) return;
+        return fn.call(score, semitones);
+    });
+    const handleSetAccidental = (accidentalType: number) => performMutation(`set accidental ${accidentalType}`, async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('setAccidental');
+        if (!fn) return;
+        return fn.call(score, accidentalType);
     });
     const handleDurationLonger = () => performMutation('lengthen duration', async () => {
         await ensureSelectionInWasm();
@@ -920,20 +934,22 @@ export default function ScoreEditor() {
 
     return (
         <div className="flex flex-col h-screen">
-            <Toolbar
-                onFileUpload={handleFileUpload}
-                onZoomIn={handleZoomIn}
-                onZoomOut={handleZoomOut}
-                zoomLevel={zoom}
+	            <Toolbar
+	                onFileUpload={handleFileUpload}
+	                onZoomIn={handleZoomIn}
+	                onZoomOut={handleZoomOut}
+	                zoomLevel={zoom}
                 onDeleteSelection={handleDeleteSelection}
                 onUndo={handleUndo}
                 onRedo={handleRedo}
-                onPitchUp={handlePitchUp}
-                onPitchDown={handlePitchDown}
-                onDurationLonger={handleDurationLonger}
-                onDurationShorter={handleDurationShorter}
-                mutationsEnabled={mutationEnabled}
-                selectionActive={Boolean(selectedElement)}
+	                onPitchUp={handlePitchUp}
+	                onPitchDown={handlePitchDown}
+                    onTranspose={handleTranspose}
+                    onSetAccidental={handleSetAccidental}
+	                onDurationLonger={handleDurationLonger}
+	                onDurationShorter={handleDurationShorter}
+	                mutationsEnabled={mutationEnabled}
+	                selectionActive={Boolean(selectedElement)}
                 onExportSvg={handleExportSvg}
                 onExportPdf={handleExportPdf}
                 onExportPng={handleExportPng}

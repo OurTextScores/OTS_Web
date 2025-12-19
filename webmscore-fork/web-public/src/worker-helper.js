@@ -373,6 +373,25 @@ class WebMscoreW {
     }
 
     /**
+     * Transpose the current selection by semitone delta.
+     * If there is no selection, this transposes the whole score.
+     * @param {number} semitones
+     * @returns {Promise<boolean>}
+     */
+    transpose(semitones) {
+        return this.rpc('transpose', [semitones])
+    }
+
+    /**
+     * Set accidental for the current selection.
+     * @param {number} accidentalType see engraving::AccidentalType enum
+     * @returns {Promise<boolean>}
+     */
+    setAccidental(accidentalType) {
+        return this.rpc('setAccidental', [accidentalType])
+    }
+
+    /**
      * Double the duration of the current selection.
      * @returns {Promise<boolean>}
      */
