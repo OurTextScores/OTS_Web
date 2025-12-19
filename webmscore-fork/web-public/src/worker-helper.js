@@ -451,6 +451,10 @@ class WebMscoreW {
         return this.rpc('addTempoText', [bpm])
     }
 
+    addArticulation(articulationSymbolName) {
+        return this.rpc('addArticulation', [articulationSymbolName])
+    }
+
     addSlur() {
         return this.rpc('addSlur')
     }

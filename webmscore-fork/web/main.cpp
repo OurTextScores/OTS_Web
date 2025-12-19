@@ -45,9 +45,11 @@
 #include "engraving/libmscore/tempotext.h"
 #include "engraving/libmscore/dynamic.h"
 #include "engraving/libmscore/rehearsalmark.h"
+#include "engraving/libmscore/articulation.h"
 #include "engraving/libmscore/key.h"
 #include "engraving/libmscore/types.h"
 #include "engraving/libmscore/navigate.h"
+#include "engraving/types/symnames.h"
 
 #include "./score.h"
 #include "./wasmres.h"
@@ -1035,6 +1037,74 @@ bool _addTempoText(uintptr_t score_ptr, double bpm, int excerptId)
     return true;
 }
 
+bool _addArticulation(uintptr_t score_ptr, const char* articulationSymbolName, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (!articulationSymbolName || !*articulationSymbolName) {
+        LOGW() << "addArticulation: missing articulation symbol name";
+        return false;
+    }
+
+    auto articulationSymbolId = engraving::SymNames::symIdByName(AsciiStringView(articulationSymbolName), engraving::SymId::noSym);
+    if (articulationSymbolId == engraving::SymId::noSym) {
+        LOGW() << "addArticulation: unknown symbol name " << articulationSymbolName;
+        return false;
+    }
+
+    if (score->selection().isNone()) {
+        LOGW() << "addArticulation: no selection";
+        return false;
+    }
+
+    std::vector<engraving::Note*> notes = score->selection().noteList();
+    if (notes.empty()) {
+        LOGW() << "addArticulation: selection contains no notes";
+        return false;
+    }
+
+    bool allHave = true;
+    for (engraving::Note* note : notes) {
+        if (!note) {
+            allHave = false;
+            break;
+        }
+        engraving::Chord* chord = note->chord();
+        if (!chord) {
+            allHave = false;
+            break;
+        }
+
+        std::set<engraving::SymId> chordArticulations = chord->articulationSymbolIds();
+        chordArticulations = engraving::flipArticulations(chordArticulations, engraving::PlacementV::ABOVE);
+        chordArticulations = engraving::splitArticulations(chordArticulations);
+        if (chordArticulations.find(articulationSymbolId) == chordArticulations.end()) {
+            allHave = false;
+            break;
+        }
+    }
+
+    auto updateMode = allHave ? engraving::ArticulationsUpdateMode::Remove : engraving::ArticulationsUpdateMode::Insert;
+
+    std::set<engraving::Chord*> chords;
+    for (engraving::Note* note : notes) {
+        if (note && note->chord()) {
+            chords.insert(note->chord());
+        }
+    }
+
+    if (chords.empty()) {
+        LOGW() << "addArticulation: no chords found for selected notes";
+        return false;
+    }
+
+    score->startCmd();
+    for (engraving::Chord* chord : chords) {
+        chord->updateArticulations({ articulationSymbolId }, updateMode);
+    }
+    score->endCmd();
+    return true;
+}
+
 bool _addSlur(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
@@ -1449,6 +1519,11 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool addTempoText(uintptr_t score_ptr, double bpm, int excerptId = -1) {
         return _addTempoText(score_ptr, bpm, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addArticulation(uintptr_t score_ptr, const char* articulationSymbolName, int excerptId = -1) {
+        return _addArticulation(score_ptr, articulationSymbolName, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

@@ -48,6 +48,7 @@ export interface Score {
     addDynamic?: (dynamicType: number) => Promise<unknown> | unknown;
     addRehearsalMark?: () => Promise<unknown> | unknown;
     addTempoText?: (bpm: number) => Promise<unknown> | unknown;
+    addArticulation?: (articulationSymbolName: string) => Promise<unknown> | unknown;
     addSlur?: () => Promise<unknown> | unknown;
     addTie?: () => Promise<unknown> | unknown;
 }

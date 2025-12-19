@@ -45,6 +45,7 @@ interface ToolbarProps {
     onAddDynamic?: (dynamicType: number) => void;
     onAddRehearsalMark?: () => void;
     onAddTempoText?: (bpm: number) => void;
+    onAddArticulation?: (articulationSymbolName: string) => void;
     onAddSlur?: () => void;
     onAddTie?: () => void;
 }
@@ -94,6 +95,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     onAddDynamic,
     onAddRehearsalMark,
     onAddTempoText,
+    onAddArticulation,
     onAddSlur,
     onAddTie
 }) => {
@@ -211,6 +213,13 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         { label: 's', value: 28 },     // DynamicType::S
         { label: 'z', value: 29 },     // DynamicType::Z
         { label: 'n', value: 30 },     // DynamicType::N
+    ];
+
+    const articulationOptions = [
+        { label: 'Staccato', symbol: 'articStaccatoAbove' },
+        { label: 'Tenuto', symbol: 'articTenutoAbove' },
+        { label: 'Marcato', symbol: 'articMarcatoAbove' },
+        { label: 'Accent', symbol: 'articAccentAbove' },
     ];
 
     const resolveTimeSigHandler = (opt: { label: string; numerator: number; denominator: number }) => {
@@ -602,15 +611,31 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 	                >
 	                    Rehearsal
 	                </button>
-	                <button
-	                    data-testid="btn-tempo-120"
-	                    type="button"
-	                    onClick={() => onAddTempoText?.(120)}
-	                    disabled={mutationDisabled || !onAddTempoText}
-	                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-	                >
-	                    Tempo 120
-	                </button>
+                <button
+                    data-testid="btn-tempo-120"
+                    type="button"
+                    onClick={() => onAddTempoText?.(120)}
+                    disabled={mutationDisabled || !onAddTempoText}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Tempo 120
+                </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-gray-600">Articulations:</span>
+                {articulationOptions.map(opt => (
+                    <button
+                        key={opt.symbol}
+                        data-testid={`btn-artic-${opt.symbol}`}
+                        type="button"
+                        onClick={() => onAddArticulation?.(opt.symbol)}
+                        disabled={mutationDisabled || !selectionActive || !onAddArticulation}
+                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {opt.label}
+                    </button>
+                ))}
             </div>
         </div>
     );

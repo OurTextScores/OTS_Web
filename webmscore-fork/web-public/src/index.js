@@ -691,6 +691,20 @@ class WebMscore {
     }
 
     /**
+     * Add or remove an articulation on the selected notes/chords.
+     * @param {string} articulationSymbolName e.g. "articStaccatoAbove"
+     * @returns {Promise<boolean>}
+     */
+    async addArticulation(articulationSymbolName) {
+        const strptr = getStrPtr(articulationSymbolName)
+        try {
+            return Module.ccall('addArticulation', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
      * Add a slur spanning the current selection.
      * - With a single selected note, this slurs to the next chord/rest.
      * - With multi-selection, this slurs from the first selected chord/rest to the last.

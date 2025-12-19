@@ -34,6 +34,7 @@ type MutationMethods = Pick<
     | 'addDynamic'
     | 'addRehearsalMark'
     | 'addTempoText'
+    | 'addArticulation'
     | 'addSlur'
     | 'addTie'
     | 'undo'
@@ -98,24 +99,35 @@ export default function ScoreEditor() {
     };
 
     useEffect(() => {
-        // Initialize webmscore
-        loadWebMscore().then(() => {
-            console.log('webmscore initialized');
+        const abortController = new AbortController();
 
-            // Auto-load if query param exists
-            const scoreUrl = searchParams.get('score');
-            if (scoreUrl) {
-                handleUrlLoad(scoreUrl);
+        const boot = async () => {
+            try {
+                await loadWebMscore();
+                if (abortController.signal.aborted) {
+                    return;
+                }
+                console.log('webmscore initialized');
+
+                const scoreUrl = searchParams.get('score');
+                if (scoreUrl) {
+                    await handleUrlLoad(scoreUrl, abortController.signal);
+                }
+            } catch (err) {
+                if (!abortController.signal.aborted) {
+                    console.error('Failed to initialize webmscore', err);
+                }
             }
-        }).catch(err => {
-            console.error('Failed to initialize webmscore', err);
-        });
-        // We intentionally avoid re-running when helper functions change; the query param controls this effect.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        };
+
+        boot();
+        return () => abortController.abort();
     }, [searchParams]);
 
-    const handleUrlLoad = async (url: string) => {
-        setLoading(true);
+    const handleUrlLoad = async (url: string, signal?: AbortSignal) => {
+        if (signal?.aborted) {
+            return;
+        }
         setLoading(true);
         setSelectedElement(null);
         setSelectionBoxes([]);
@@ -125,7 +137,7 @@ export default function ScoreEditor() {
         setSoundFontLoaded(false);
         setTriedSoundFont(false);
         try {
-            const response = await fetch(url);
+            const response = await fetch(url, signal ? { signal } : undefined);
             if (!response.ok) throw new Error('Failed to fetch score');
             const buffer = await response.arrayBuffer();
             const data = new Uint8Array(buffer);
@@ -142,6 +154,10 @@ export default function ScoreEditor() {
             }
 
             const loadedScore = await WebMscore.load(format, data);
+            if (signal?.aborted) {
+                loadedScore.destroy();
+                return;
+            }
             setScore(loadedScore);
             exposeScoreToWindow(loadedScore);
             const mutationsAvailable = hasMutationApi(loadedScore);
@@ -157,12 +173,13 @@ export default function ScoreEditor() {
         } catch (err) {
             console.error('Error auto-loading file:', err);
         } finally {
-            setLoading(false);
+            if (!signal?.aborted) {
+                setLoading(false);
+            }
         }
     };
 
     const handleFileUpload = async (file: File) => {
-        setLoading(true);
         setLoading(true);
         setSelectedElement(null);
         setSelectionBoxes([]);
@@ -216,26 +233,55 @@ export default function ScoreEditor() {
             if (svgData) {
                 containerRef.current.innerHTML = svgData;
             }
-            // Attempt to load default soundfont once per score render (sf3 preferred, sf2 fallback)
-            if (!triedSoundFont && currentScore.setSoundFont) {
-                const candidates = ['/soundfonts/default.sf3', '/soundfonts/default.sf2'];
-                for (const url of candidates) {
-                    try {
-                        const res = await fetch(url);
-                        if (res.ok) {
-                            const buf = new Uint8Array(await res.arrayBuffer());
-                            await currentScore.setSoundFont(buf);
-                            setSoundFontLoaded(true);
-                            break;
-                        }
-                    } catch (sfErr) {
-                        console.warn('Soundfont load failed for', url, sfErr);
-                    }
-                }
-                setTriedSoundFont(true);
-            }
         } catch (err) {
             console.error('Error rendering score:', err);
+        }
+    };
+
+    const ensureSoundFontLoaded = async (): Promise<boolean> => {
+        if (soundFontLoaded) {
+            return true;
+        }
+        if (!score || !score.setSoundFont) {
+            return false;
+        }
+        if (triedSoundFont) {
+            return false;
+        }
+
+        setTriedSoundFont(true);
+        const candidates = ['/soundfonts/default.sf3', '/soundfonts/default.sf2'];
+        for (const url of candidates) {
+            try {
+                const res = await fetch(url);
+                if (!res.ok) {
+                    continue;
+                }
+                const buf = new Uint8Array(await res.arrayBuffer());
+                await score.setSoundFont(buf);
+                setSoundFontLoaded(true);
+                return true;
+            } catch (err) {
+                console.warn('Default soundfont load failed for', url, err);
+            }
+        }
+        return false;
+    };
+
+    const handleSoundFontUpload = async (file: File) => {
+        if (!score || !score.setSoundFont) {
+            alert('SoundFont loading is not available in this build.');
+            return;
+        }
+        try {
+            const buffer = await file.arrayBuffer();
+            const data = new Uint8Array(buffer);
+            await score.setSoundFont(data);
+            setSoundFontLoaded(true);
+            setTriedSoundFont(true);
+        } catch (err) {
+            console.error('Failed to load soundfont', err);
+            alert('Failed to load soundfont. See console for details.');
         }
     };
 
@@ -589,6 +635,13 @@ export default function ScoreEditor() {
         }, hadSelection ? undefined : { clearSelection: true });
     };
 
+    const handleAddArticulation = (articulationSymbolName: string) => performMutation(`add articulation ${articulationSymbolName}`, async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addArticulation');
+        if (!fn) return;
+        return fn.call(score, articulationSymbolName);
+    });
+
     const handleAddSlur = () => performMutation('add slur', async () => {
         await ensureSelectionInWasm();
         const fn = requireMutation('addSlur');
@@ -759,12 +812,13 @@ export default function ScoreEditor() {
             alert('Audio export is not available in this build.');
             return;
         }
-        if (!soundFontLoaded) {
-            alert('Load a soundfont (.sf2/.sf3) before exporting audio. Place it at /public/soundfonts/default.sf3 for auto-load.');
-            return;
-        }
         try {
             setAudioBusy(true);
+            const ok = await ensureSoundFontLoaded();
+            if (!ok) {
+                alert('No default soundfont found. Upload a .sf2/.sf3 soundfont or place one at /public/soundfonts/default.sf3 or /public/soundfonts/default.sf2.');
+                return;
+            }
             const wav = await score.saveAudio('wav');
             downloadBlob(wav, 'score.wav', 'audio/wav');
         } catch (err) {
@@ -813,12 +867,13 @@ export default function ScoreEditor() {
             alert('Audio playback is not available in this build.');
             return;
         }
-        if (!soundFontLoaded) {
-            alert('Load a soundfont (.sf2/.sf3) before playback. Place it at /public/soundfonts/default.sf3 for auto-load.');
-            return;
-        }
         try {
             setAudioBusy(true);
+            const ok = await ensureSoundFontLoaded();
+            if (!ok) {
+                alert('No default soundfont found. Upload a .sf2/.sf3 soundfont or place one at /public/soundfonts/default.sf3 or /public/soundfonts/default.sf2.');
+                return;
+            }
             stopAudio();
 
             // Prefer streaming via synthAudioBatch if available
@@ -1532,6 +1587,7 @@ export default function ScoreEditor() {
         <div className="flex flex-col h-screen">
 	            <Toolbar
 	                onFileUpload={handleFileUpload}
+                    onSoundFontUpload={handleSoundFontUpload}
 	                onZoomIn={handleZoomIn}
 	                onZoomOut={handleZoomOut}
 	                zoomLevel={zoom}
@@ -1559,7 +1615,7 @@ export default function ScoreEditor() {
                 audioBusy={audioBusy}
                 exportsEnabled={Boolean(score)}
                 pngAvailable={Boolean(score?.savePng)}
-                audioAvailable={Boolean(score?.saveAudio) && soundFontLoaded}
+                audioAvailable={Boolean(score?.saveAudio)}
                 onSetTimeSignature={handleSetTimeSignature}
                 onSetKeySignature={handleSetKeySignature}
                 onSetClef={handleSetClef}
@@ -1569,6 +1625,7 @@ export default function ScoreEditor() {
                 onAddDynamic={handleAddDynamic}
                 onAddRehearsalMark={handleAddRehearsalMark}
                 onAddTempoText={handleAddTempoText}
+                onAddArticulation={handleAddArticulation}
                 onAddSlur={handleAddSlur}
                 onAddTie={handleAddTie}
             />
