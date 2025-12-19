@@ -13,6 +13,13 @@ function syncWasmArtifacts({
   fsModule = fs,
   log = console.log,
 } = {}) {
+  const jsMem = path.join(srcDir, 'webmscore.lib.js.mem');
+  const memWasm = path.join(srcDir, 'webmscore.lib.mem.wasm');
+  if (fsModule.existsSync(jsMem)) {
+    fsModule.copyFileSync(jsMem, memWasm);
+    log('[sync-wasm] Synced webmscore.lib.mem.wasm from webmscore.lib.js.mem');
+  }
+
   function copyFile(name) {
     const src = path.join(srcDir, name);
     const dest = path.join(destDir, name);

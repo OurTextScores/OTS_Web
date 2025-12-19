@@ -196,5 +196,6 @@ Next steps / risks
 
 ## Webmscore rebuild + artifact sync
 
-**Rebuild** (from `webmscore-fork/web`): `source ~/.bashrc` for emsdk/Qt, then `make release`. Artifacts land in `webmscore-fork/web-public/` (`webmscore.lib.wasm`, `.data`, `.mem.wasm`).  
-**Sync for Next.js**: `npm run sync:wasm` copies those three files into `public/` so the app serves the fresh build. Run this after every rebuild before restarting `npm run dev`.
+**Rebuild** (preferred, from `webmscore-fork/web-public`): `npm run compile` (runs `make release` and ensures the expected memory initializer naming).  
+**Bundle JS wrappers** (from `webmscore-fork/web-public`): `npm run bundle` (needed after changing `src/*.js` wrappers).  
+**Sync for Next.js**: `npm run sync:wasm` copies artifacts into `public/` so the app serves the fresh build. Run this after every rebuild before restarting `npm run dev`.

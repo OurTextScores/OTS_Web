@@ -45,6 +45,8 @@ interface ToolbarProps {
     onAddDynamic?: (dynamicType: number) => void;
     onAddRehearsalMark?: () => void;
     onAddTempoText?: (bpm: number) => void;
+    onAddSlur?: () => void;
+    onAddTie?: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -91,7 +93,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 	onSetVoice,
     onAddDynamic,
     onAddRehearsalMark,
-    onAddTempoText
+    onAddTempoText,
+    onAddSlur,
+    onAddTie
 }) => {
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -519,8 +523,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 ))}
             </div>
 
-	            <div className="flex items-center space-x-2 text-sm">
-	                <span className="text-gray-600">Rhythm/Voice:</span>
+            <div className="flex items-center space-x-2 text-sm">
+                <span className="text-gray-600">Rhythm/Voice:</span>
 	                <button
 	                    data-testid="btn-dot"
 	                    type="button"
@@ -539,7 +543,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 	                >
 	                    Double Dot
 	                </button>
-	                {[1, 2, 3, 4].map(v => (
+                {[1, 2, 3, 4].map(v => (
 	                    <button
 	                        key={v}
 	                        data-testid={`btn-voice-${v}`}
@@ -553,10 +557,32 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 ))}
             </div>
 
-	            <div className="flex flex-wrap items-center gap-2 text-sm">
-	                <span className="text-gray-600">Markings:</span>
-	                {dynamicOptions.map(opt => (
-	                    <button
+            <div className="flex items-center space-x-2 text-sm">
+                <span className="text-gray-600">Slur/Tie:</span>
+                <button
+                    data-testid="btn-slur"
+                    type="button"
+                    onClick={onAddSlur}
+                    disabled={mutationDisabled || !selectionActive || !onAddSlur}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Slur
+                </button>
+                <button
+                    data-testid="btn-tie"
+                    type="button"
+                    onClick={onAddTie}
+                    disabled={mutationDisabled || !selectionActive || !onAddTie}
+                    className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Tie
+                </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-gray-600">Markings:</span>
+                {dynamicOptions.map(opt => (
+                    <button
 	                        key={opt.label}
 	                        data-testid={`btn-dynamic-${opt.value}`}
 	                        type="button"

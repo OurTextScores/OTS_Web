@@ -47,6 +47,7 @@
 #include "engraving/libmscore/rehearsalmark.h"
 #include "engraving/libmscore/key.h"
 #include "engraving/libmscore/types.h"
+#include "engraving/libmscore/navigate.h"
 
 #include "./score.h"
 #include "./wasmres.h"
@@ -1034,6 +1035,104 @@ bool _addTempoText(uintptr_t score_ptr, double bpm, int excerptId)
     return true;
 }
 
+bool _addSlur(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    const auto& sel = score->selection();
+    auto selected = sel.uniqueElements();
+
+    if (selected.empty()) {
+        LOGW() << "addSlur: no elements selected";
+        return false;
+    }
+
+    bool added = false;
+    score->startCmd();
+
+    if (sel.isRange()) {
+        mu::engraving::track_idx_t startTrack = sel.staffStart() * mu::engraving::VOICES;
+        mu::engraving::track_idx_t endTrack = sel.staffEnd() * mu::engraving::VOICES;
+        for (mu::engraving::track_idx_t track = startTrack; track < endTrack; ++track) {
+            mu::engraving::ChordRest* firstChordRest = nullptr;
+            mu::engraving::ChordRest* secondChordRest = nullptr;
+
+            for (mu::engraving::EngravingItem* e : selected) {
+                if (!e || e->track() != track) {
+                    continue;
+                }
+                if (e->isNote()) {
+                    e = mu::engraving::toNote(e)->chord();
+                }
+                if (!e->isChord()) {
+                    continue;
+                }
+                mu::engraving::ChordRest* cr = mu::engraving::toChordRest(e);
+                if (!firstChordRest || firstChordRest->tick() > cr->tick()) {
+                    firstChordRest = cr;
+                }
+                if (!secondChordRest || secondChordRest->tick() < cr->tick()) {
+                    secondChordRest = cr;
+                }
+            }
+
+            if (firstChordRest && (firstChordRest != secondChordRest)) {
+                score->addSlur(firstChordRest, secondChordRest, nullptr);
+                added = true;
+            }
+        }
+    } else {
+        mu::engraving::ChordRest* firstChordRest = nullptr;
+        mu::engraving::ChordRest* secondChordRest = nullptr;
+
+        for (mu::engraving::EngravingItem* e : selected) {
+            if (!e) {
+                continue;
+            }
+            if (e->isNote()) {
+                e = mu::engraving::toNote(e)->chord();
+            }
+            if (!e->isChord()) {
+                continue;
+            }
+            mu::engraving::ChordRest* cr = mu::engraving::toChordRest(e);
+            if (!firstChordRest || cr->isBefore(firstChordRest)) {
+                firstChordRest = cr;
+            }
+            if (!secondChordRest || secondChordRest->isBefore(cr)) {
+                secondChordRest = cr;
+            }
+        }
+
+        if (firstChordRest == secondChordRest) {
+            secondChordRest = mu::engraving::nextChordRest(firstChordRest);
+        }
+
+        if (firstChordRest && secondChordRest && firstChordRest != secondChordRest) {
+            score->addSlur(firstChordRest, secondChordRest, nullptr);
+            added = true;
+        } else {
+            LOGW() << "addSlur: unable to determine slur endpoints";
+        }
+    }
+
+    score->endCmd();
+    return added;
+}
+
+bool _addTie(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    const auto noteList = engraving::Score::cmdTieNoteList(score->selection(), score->noteEntryMode());
+    if (noteList.empty()) {
+        LOGW() << "addTie: no notes selected";
+        return false;
+    }
+
+    // Score::cmdAddTie manages startCmd/endCmd internally.
+    score->cmdAddTie(false);
+    return true;
+}
+
 bool _setTimeSignature(uintptr_t score_ptr, int numerator, int denominator, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
@@ -1350,6 +1449,16 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool addTempoText(uintptr_t score_ptr, double bpm, int excerptId = -1) {
         return _addTempoText(score_ptr, bpm, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addSlur(uintptr_t score_ptr, int excerptId = -1) {
+        return _addSlur(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addTie(uintptr_t score_ptr, int excerptId = -1) {
+        return _addTie(score_ptr, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

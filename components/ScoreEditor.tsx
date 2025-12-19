@@ -34,6 +34,8 @@ type MutationMethods = Pick<
     | 'addDynamic'
     | 'addRehearsalMark'
     | 'addTempoText'
+    | 'addSlur'
+    | 'addTie'
     | 'undo'
     | 'redo'
     | 'relayout'
@@ -586,6 +588,20 @@ export default function ScoreEditor() {
             return fn.call(score, bpm);
         }, hadSelection ? undefined : { clearSelection: true });
     };
+
+    const handleAddSlur = () => performMutation('add slur', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addSlur');
+        if (!fn) return;
+        return fn.call(score);
+    });
+
+    const handleAddTie = () => performMutation('add tie', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addTie');
+        if (!fn) return;
+        return fn.call(score);
+    });
 
     const handleSetTimeSignature = async (num: number, den: number) => {
         if (!score || !score.setTimeSignature) return;
@@ -1553,6 +1569,8 @@ export default function ScoreEditor() {
                 onAddDynamic={handleAddDynamic}
                 onAddRehearsalMark={handleAddRehearsalMark}
                 onAddTempoText={handleAddTempoText}
+                onAddSlur={handleAddSlur}
+                onAddTie={handleAddTie}
             />
 
             <div className="flex-1 overflow-auto bg-gray-50 p-8">

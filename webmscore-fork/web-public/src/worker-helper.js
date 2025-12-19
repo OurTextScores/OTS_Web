@@ -451,6 +451,14 @@ class WebMscoreW {
         return this.rpc('addTempoText', [bpm])
     }
 
+    addSlur() {
+        return this.rpc('addSlur')
+    }
+
+    addTie() {
+        return this.rpc('addTie')
+    }
+
     /**
      * Undo the last command.
      * @returns {Promise<boolean>}

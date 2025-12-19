@@ -691,6 +691,24 @@ class WebMscore {
     }
 
     /**
+     * Add a slur spanning the current selection.
+     * - With a single selected note, this slurs to the next chord/rest.
+     * - With multi-selection, this slurs from the first selected chord/rest to the last.
+     * @returns {Promise<boolean>}
+     */
+    async addSlur() {
+        return Module.ccall('addSlur', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Add a tie from the selected note(s) to the next matching pitch.
+     * @returns {Promise<boolean>}
+     */
+    async addTie() {
+        return Module.ccall('addTie', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
      * Set the time signature (global) at the start of the score
      * @param {number} numerator
      * @param {number} denominator

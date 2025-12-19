@@ -48,6 +48,8 @@ export interface Score {
     addDynamic?: (dynamicType: number) => Promise<unknown> | unknown;
     addRehearsalMark?: () => Promise<unknown> | unknown;
     addTempoText?: (bpm: number) => Promise<unknown> | unknown;
+    addSlur?: () => Promise<unknown> | unknown;
+    addTie?: () => Promise<unknown> | unknown;
 }
 
 export interface WebMscoreInstance {
