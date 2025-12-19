@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "npm run check:wasm",
     "dev": "next dev --webpack",
+    "prebuild": "npm run check:wasm",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
