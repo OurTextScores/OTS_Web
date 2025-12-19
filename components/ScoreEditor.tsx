@@ -497,6 +497,7 @@ export default function ScoreEditor() {
         const preservedPoint = selectedPoint;
         setAudioBusy(true);
         try {
+            await ensureSelectionInWasm();
             await score.setTimeSignature(num, den);
             if (score.relayout) {
                 await score.relayout();
@@ -517,6 +518,7 @@ export default function ScoreEditor() {
         const preservedPoint = selectedPoint;
         setAudioBusy(true);
         try {
+            await ensureSelectionInWasm();
             await score.setKeySignature(fifths);
             if (score.relayout) {
                 await score.relayout();

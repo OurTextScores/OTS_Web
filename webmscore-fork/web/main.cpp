@@ -932,9 +932,20 @@ bool _setTimeSignature(uintptr_t score_ptr, int numerator, int denominator, int 
         return false;
     }
 
-    // Use first real measure (MeasureBase list may start with frames)
-    engraving::Measure* m = score->firstMeasure();
-    if (!m) {
+    // If a chord/rest is selected, start the change at that measure.
+    // Otherwise, apply globally at the start of the score (current behaviour).
+    engraving::Measure* targetMeasure = nullptr;
+    if (auto cr = score->selection().cr()) {
+        targetMeasure = cr->measure();
+        if (!targetMeasure) {
+            targetMeasure = score->tick2measure(cr->tick());
+        }
+    }
+    if (!targetMeasure) {
+        // Use first real measure (MeasureBase list may start with frames)
+        targetMeasure = score->firstMeasure();
+    }
+    if (!targetMeasure) {
         LOGW() << "setTimeSignature: no measures in score";
         return false;
     }
@@ -949,7 +960,7 @@ bool _setTimeSignature(uintptr_t score_ptr, int numerator, int denominator, int 
     ts->setSig(engraving::Fraction(numerator, denominator));
 
     score->startCmd();
-    score->cmdAddTimeSig(m, 0, ts, /*local*/ false);
+    score->cmdAddTimeSig(targetMeasure, 0, ts, /*local*/ false);
     score->endCmd();
     return true;
 }
@@ -967,12 +978,23 @@ bool _setKeySignature(uintptr_t score_ptr, int fifths, int excerptId)
     k.setKey(static_cast<engraving::Key>(fifths));
     k.setMode(engraving::KeyMode::MAJOR);
 
+    // If a chord/rest is selected, start the change at that tick.
+    // Otherwise, apply globally at the start of the score (current behaviour).
+    engraving::Fraction tick(0, 1);
+    if (auto cr = score->selection().cr()) {
+        if (auto m = cr->measure()) {
+            tick = m->tick();
+        } else {
+            tick = cr->tick();
+        }
+    }
+
     score->startCmd();
     for (engraving::Staff* staff : score->staves()) {
         if (!staff) {
             continue;
         }
-        score->undoChangeKeySig(staff, engraving::Fraction(0, 1), k);
+        score->undoChangeKeySig(staff, tick, k);
     }
     score->endCmd();
     return true;

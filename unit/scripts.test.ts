@@ -9,9 +9,22 @@ describe('scripts', () => {
   it('check-wasm reports success when all artifacts exist', async () => {
     const mod: any = await loadCjs('../scripts/check-wasm.js');
 
+    const files = new Map<string, Buffer>([
+      ['/repo/public/a.wasm', Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00])],
+      ['/repo/public/a.data', Buffer.from('not-lfs')],
+    ]);
+
     const fsModule = {
       existsSync: vi.fn(() => true),
       statSync: vi.fn(() => ({ size: 123 })),
+      openSync: vi.fn((p: string) => p),
+      readSync: vi.fn((fd: string, buf: Buffer, offset: number, length: number) => {
+        const data = files.get(fd) ?? Buffer.alloc(0);
+        const slice = data.subarray(0, length);
+        slice.copy(buf, offset);
+        return slice.length;
+      }),
+      closeSync: vi.fn(),
     };
 
     const ok = mod.checkWasmArtifacts({
