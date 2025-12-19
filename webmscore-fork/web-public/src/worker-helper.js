@@ -180,6 +180,24 @@ class WebMscoreW {
     }
 
     /**
+     * Set the score title in the first title frame (VBox)
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    setTitleText(text) {
+        return this.rpc('setTitleText', [text])
+    }
+
+    /**
+     * Set the score composer in the first title frame (VBox)
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    setComposerText(text) {
+        return this.rpc('setComposerText', [text])
+    }
+
+    /**
      * Get the number of pages in the score (or the excerpt if `excerptId` is set)
      * @returns {Promise<number>}
      */

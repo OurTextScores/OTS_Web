@@ -46,6 +46,7 @@
 #include "engraving/libmscore/dynamic.h"
 #include "engraving/libmscore/rehearsalmark.h"
 #include "engraving/libmscore/articulation.h"
+#include "engraving/libmscore/textbase.h"
 #include "engraving/libmscore/key.h"
 #include "engraving/libmscore/types.h"
 #include "engraving/libmscore/navigate.h"
@@ -320,6 +321,37 @@ WasmRes _title(uintptr_t score_ptr) {
     // https://github.com/LibreScore/webmscore/blob/v4.0/src/converter/internal/compat/notationmeta.cpp#L89-L107
     String title = converter::NotationMeta::title(score);
     return WasmRes(title);
+}
+
+bool _setHeaderText(uintptr_t score_ptr, engraving::TextStyleType style, const char* plainText, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    const String text = plainText ? String::fromUtf8(plainText) : String();
+
+    score->startCmd();
+    engraving::TextBase* header = score->getText(style);
+    if (!header) {
+        header = score->addText(style, nullptr, /*addToAllScores*/ false);
+    }
+    if (!header) {
+        score->endCmd();
+        LOGW() << "setHeaderText: failed to locate or create header text";
+        return false;
+    }
+
+    header->undoChangeProperty(engraving::Pid::TEXT, engraving::TextBase::plainToXmlText(text));
+    score->endCmd();
+    return true;
+}
+
+bool _setTitleText(uintptr_t score_ptr, const char* plainText, int excerptId)
+{
+    return _setHeaderText(score_ptr, engraving::TextStyleType::TITLE, plainText, excerptId);
+}
+
+bool _setComposerText(uintptr_t score_ptr, const char* plainText, int excerptId)
+{
+    return _setHeaderText(score_ptr, engraving::TextStyleType::COMPOSER, plainText, excerptId);
 }
 
 /**
@@ -1379,6 +1411,16 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     WasmResBytes title(uintptr_t score_ptr) {
         return _title(score_ptr);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setTitleText(uintptr_t score_ptr, const char* plainText, int excerptId = -1) {
+        return _setTitleText(score_ptr, plainText, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setComposerText(uintptr_t score_ptr, const char* plainText, int excerptId = -1) {
+        return _setComposerText(score_ptr, plainText, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

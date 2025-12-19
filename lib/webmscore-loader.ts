@@ -51,6 +51,8 @@ export interface Score {
     addArticulation?: (articulationSymbolName: string) => Promise<unknown> | unknown;
     addSlur?: () => Promise<unknown> | unknown;
     addTie?: () => Promise<unknown> | unknown;
+    setTitleText?: (text: string) => Promise<unknown> | unknown;
+    setComposerText?: (text: string) => Promise<unknown> | unknown;
 }
 
 export interface WebMscoreInstance {

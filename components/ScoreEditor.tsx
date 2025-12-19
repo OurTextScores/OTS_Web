@@ -37,6 +37,8 @@ type MutationMethods = Pick<
     | 'addArticulation'
     | 'addSlur'
     | 'addTie'
+    | 'setTitleText'
+    | 'setComposerText'
     | 'undo'
     | 'redo'
     | 'relayout'
@@ -83,6 +85,8 @@ export default function ScoreEditor() {
     const [mutationEnabled, setMutationEnabled] = useState(false);
     const [soundFontLoaded, setSoundFontLoaded] = useState(false);
     const [triedSoundFont, setTriedSoundFont] = useState(false);
+    const [scoreTitle, setScoreTitle] = useState('');
+    const [scoreComposer, setScoreComposer] = useState('');
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [audioBusy, setAudioBusy] = useState(false);
@@ -136,6 +140,8 @@ export default function ScoreEditor() {
         setMutationEnabled(false);
         setSoundFontLoaded(false);
         setTriedSoundFont(false);
+        setScoreTitle('');
+        setScoreComposer('');
         try {
             const response = await fetch(url, signal ? { signal } : undefined);
             if (!response.ok) throw new Error('Failed to fetch score');
@@ -166,6 +172,7 @@ export default function ScoreEditor() {
             }
             setMutationEnabled(true);
             await renderScore(loadedScore);
+            await refreshHeaderFields(loadedScore);
 
             // segmentPositions causes a crash in this version of webmscore/emscripten environment
             // We will use DOM-based hit testing on the SVG elements instead.
@@ -188,6 +195,8 @@ export default function ScoreEditor() {
         setMutationEnabled(false);
         setSoundFontLoaded(false);
         setTriedSoundFont(false);
+        setScoreTitle('');
+        setScoreComposer('');
         try {
             const buffer = await file.arrayBuffer();
             const data = new Uint8Array(buffer);
@@ -216,6 +225,7 @@ export default function ScoreEditor() {
             setMutationEnabled(true);
 
             await renderScore(loadedScore);
+            await refreshHeaderFields(loadedScore);
 
         } catch (err) {
             console.error('Error loading file:', err);
@@ -235,6 +245,16 @@ export default function ScoreEditor() {
             }
         } catch (err) {
             console.error('Error rendering score:', err);
+        }
+    };
+
+    const refreshHeaderFields = async (currentScore: Score) => {
+        try {
+            const metadata = await currentScore.metadata();
+            setScoreTitle(typeof metadata.title === 'string' ? metadata.title : '');
+            setScoreComposer(typeof metadata.composer === 'string' ? metadata.composer : '');
+        } catch (err) {
+            console.warn('Failed to read score metadata', err);
         }
     };
 
@@ -655,6 +675,32 @@ export default function ScoreEditor() {
         if (!fn) return;
         return fn.call(score);
     });
+
+    const handleSetTitleText = async () => {
+        if (!score) {
+            return;
+        }
+
+        await performMutation('set title', async () => {
+            const fn = requireMutation('setTitleText');
+            if (!fn) return;
+            return fn.call(score, scoreTitle);
+        }, { skipWasmReselect: true });
+        await refreshHeaderFields(score);
+    };
+
+    const handleSetComposerText = async () => {
+        if (!score) {
+            return;
+        }
+
+        await performMutation('set composer', async () => {
+            const fn = requireMutation('setComposerText');
+            if (!fn) return;
+            return fn.call(score, scoreComposer);
+        }, { skipWasmReselect: true });
+        await refreshHeaderFields(score);
+    };
 
     const handleSetTimeSignature = async (num: number, den: number) => {
         if (!score || !score.setTimeSignature) return;
@@ -1588,6 +1634,13 @@ export default function ScoreEditor() {
 	            <Toolbar
 	                onFileUpload={handleFileUpload}
                     onSoundFontUpload={handleSoundFontUpload}
+                    scoreTitle={scoreTitle}
+                    scoreComposer={scoreComposer}
+                    onScoreTitleChange={setScoreTitle}
+                    onScoreComposerChange={setScoreComposer}
+                    onSetTitleText={handleSetTitleText}
+                    onSetComposerText={handleSetComposerText}
+                    headerTextAvailable={Boolean(score?.setTitleText && score?.setComposerText)}
 	                onZoomIn={handleZoomIn}
 	                onZoomOut={handleZoomOut}
 	                zoomLevel={zoom}

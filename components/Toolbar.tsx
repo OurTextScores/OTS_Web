@@ -2,6 +2,13 @@ import React from 'react';
 
 interface ToolbarProps {
     onFileUpload: (file: File) => void;
+    scoreTitle?: string;
+    scoreComposer?: string;
+    onScoreTitleChange?: (title: string) => void;
+    onScoreComposerChange?: (composer: string) => void;
+    onSetTitleText?: () => void;
+    onSetComposerText?: () => void;
+    headerTextAvailable?: boolean;
     onZoomIn: () => void;
     onZoomOut: () => void;
     zoomLevel: number;
@@ -52,6 +59,13 @@ interface ToolbarProps {
 
 export const Toolbar: React.FC<ToolbarProps> = ({
     onFileUpload,
+    scoreTitle,
+    scoreComposer,
+    onScoreTitleChange,
+    onScoreComposerChange,
+    onSetTitleText,
+    onSetComposerText,
+    headerTextAvailable = false,
     onZoomIn,
     onZoomOut,
     zoomLevel,
@@ -113,6 +127,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     };
 
     const mutationDisabled = !mutationsEnabled;
+    const headerTextDisabled = mutationDisabled || !exportsEnabled || !headerTextAvailable;
 	const signatureOptions = timeSignatureOptions ?? [
 		{ label: '4/4', numerator: 4, denominator: 4 },
 		{ label: '3/4', numerator: 3, denominator: 4 },
@@ -263,6 +278,57 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 	                        className="hidden"
 	                    />
 	                </label>
+
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <input
+                            data-testid="input-title"
+                            type="text"
+                            value={scoreTitle ?? ''}
+                            onChange={(e) => onScoreTitleChange?.(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && onSetTitleText && !headerTextDisabled) {
+                                    e.preventDefault();
+                                    onSetTitleText();
+                                }
+                            }}
+                            placeholder="Title"
+                            disabled={headerTextDisabled || !onScoreTitleChange}
+                            className="px-2 py-1 bg-white border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                        <button
+                            data-testid="btn-set-title"
+                            type="button"
+                            onClick={onSetTitleText}
+                            disabled={headerTextDisabled || !onSetTitleText}
+                            className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Set Title
+                        </button>
+                        <input
+                            data-testid="input-composer"
+                            type="text"
+                            value={scoreComposer ?? ''}
+                            onChange={(e) => onScoreComposerChange?.(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && onSetComposerText && !headerTextDisabled) {
+                                    e.preventDefault();
+                                    onSetComposerText();
+                                }
+                            }}
+                            placeholder="Composer"
+                            disabled={headerTextDisabled || !onScoreComposerChange}
+                            className="px-2 py-1 bg-white border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                        <button
+                            data-testid="btn-set-composer"
+                            type="button"
+                            onClick={onSetComposerText}
+                            disabled={headerTextDisabled || !onSetComposerText}
+                            className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Set Composer
+                        </button>
+                    </div>
 	            </div>
 
 	            <div className="flex items-center flex-wrap gap-2 text-sm">
