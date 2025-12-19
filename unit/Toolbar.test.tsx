@@ -79,9 +79,10 @@ describe('Toolbar', () => {
     expect(onSoundFontUpload).not.toHaveBeenCalled();
   });
 
-  it('wires time signatures and clefs', async () => {
+  it('wires time signatures, key signatures, and clefs', async () => {
     const user = userEvent.setup();
     const onSetTimeSignature = vi.fn();
+    const onSetKeySignature = vi.fn();
     const onSetClef = vi.fn();
 
     render(
@@ -92,12 +93,18 @@ describe('Toolbar', () => {
         zoomLevel={1}
         mutationsEnabled
         onSetTimeSignature={onSetTimeSignature}
+        onSetKeySignature={onSetKeySignature}
         onSetClef={onSetClef}
       />,
     );
 
     await user.click(screen.getByTestId('btn-timesig-3-4'));
     expect(onSetTimeSignature).toHaveBeenCalledWith(3, 4);
+
+    await user.click(screen.getByTestId('btn-keysig-0'));
+    await user.click(screen.getByTestId('btn-keysig--1'));
+    expect(onSetKeySignature).toHaveBeenCalledWith(0);
+    expect(onSetKeySignature).toHaveBeenCalledWith(-1);
 
     await user.click(screen.getByTestId('btn-clef-0'));
     await user.click(screen.getByTestId('btn-clef-20'));

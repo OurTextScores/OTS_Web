@@ -658,6 +658,23 @@ class WebMscore {
     }
 
     /**
+     * Set the key signature (global) at the start of the score.
+     * @param {number} fifths -7..+7 (Cb..C#)
+     * @returns {Promise<boolean>}
+     */
+    async setKeySignature(fifths) {
+        return Module.ccall('setKeySignature', 'boolean', ['number', 'number', 'number'], [this.scoreptr, fifths, this.excerptId])
+    }
+
+    /**
+     * Get the key signature (global) at the start of the score.
+     * @returns {Promise<number>} fifths -7..+7 (Cb..C#)
+     */
+    async getKeySignature() {
+        return Module.ccall('getKeySignature', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
      * Insert a clef at the current selection/input position
      * @param {number} clefType see engraving::ClefType enum
      * @returns {Promise<boolean>}

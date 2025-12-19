@@ -28,16 +28,18 @@ interface ToolbarProps {
     onPlayAudio?: () => void;
     onStopAudio?: () => void;
     isPlaying?: boolean;
-    audioBusy?: boolean;
-    onSetTimeSignature?: (numerator: number, denominator: number) => void;
-    timeSignatureOptions?: { label: string; numerator: number; denominator: number }[];
-    onSetTimeSignature44?: () => void; // legacy
-    onSetTimeSignature34?: () => void; // legacy
-    onSetClef?: (clefType: number) => void;
-    clefOptions?: { label: string; value: number }[];
-    onToggleDot?: () => void;
-    onToggleDoubleDot?: () => void;
-    onSetVoice?: (voiceIndex: number) => void;
+	audioBusy?: boolean;
+	onSetTimeSignature?: (numerator: number, denominator: number) => void;
+	timeSignatureOptions?: { label: string; numerator: number; denominator: number }[];
+	onSetTimeSignature44?: () => void; // legacy
+	onSetTimeSignature34?: () => void; // legacy
+	onSetKeySignature?: (fifths: number) => void;
+	keySignatureOptions?: { label: string; fifths: number }[];
+	onSetClef?: (clefType: number) => void;
+	clefOptions?: { label: string; value: number }[];
+	onToggleDot?: () => void;
+	onToggleDoubleDot?: () => void;
+	onSetVoice?: (voiceIndex: number) => void;
     onAddDynamic?: (dynamicType: number) => void;
     onAddRehearsalMark?: () => void;
     onAddTempoText?: (bpm: number) => void;
@@ -71,16 +73,18 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     onPlayAudio,
     onStopAudio,
     isPlaying = false,
-    audioBusy = false,
-    onSetTimeSignature,
-    timeSignatureOptions,
-    onSetTimeSignature44,
-    onSetTimeSignature34,
-    onSetClef,
-    clefOptions,
-    onToggleDot,
-    onToggleDoubleDot,
-    onSetVoice,
+	audioBusy = false,
+	onSetTimeSignature,
+	timeSignatureOptions,
+	onSetTimeSignature44,
+	onSetTimeSignature34,
+	onSetKeySignature,
+	keySignatureOptions,
+	onSetClef,
+	clefOptions,
+	onToggleDot,
+	onToggleDoubleDot,
+	onSetVoice,
     onAddDynamic,
     onAddRehearsalMark,
     onAddTempoText
@@ -99,23 +103,41 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     };
 
     const mutationDisabled = !mutationsEnabled;
-    const signatureOptions = timeSignatureOptions ?? [
-        { label: '4/4', numerator: 4, denominator: 4 },
-        { label: '3/4', numerator: 3, denominator: 4 },
-        { label: '2/4', numerator: 2, denominator: 4 },
+	const signatureOptions = timeSignatureOptions ?? [
+		{ label: '4/4', numerator: 4, denominator: 4 },
+		{ label: '3/4', numerator: 3, denominator: 4 },
+		{ label: '2/4', numerator: 2, denominator: 4 },
         { label: '2/2', numerator: 2, denominator: 2 },
         { label: '6/8', numerator: 6, denominator: 8 },
         { label: '3/8', numerator: 3, denominator: 8 },
         { label: '9/8', numerator: 9, denominator: 8 },
         { label: '12/8', numerator: 12, denominator: 8 },
         { label: '5/4', numerator: 5, denominator: 4 },
-        { label: '7/8', numerator: 7, denominator: 8 },
-    ];
+		{ label: '7/8', numerator: 7, denominator: 8 },
+	];
 
-    const clefButtonOptions = clefOptions ?? [
-        { label: 'Treble', value: 0 },          // ClefType::G
-        { label: 'French Violin', value: 7 },   // ClefType::G_1
-        { label: 'Treble 15mb', value: 1 },     // ClefType::G15_MB
+	const keySignatureButtonOptions = keySignatureOptions ?? [
+		{ label: 'Cb', fifths: -7 },
+		{ label: 'Gb', fifths: -6 },
+		{ label: 'Db', fifths: -5 },
+		{ label: 'Ab', fifths: -4 },
+		{ label: 'Eb', fifths: -3 },
+		{ label: 'Bb', fifths: -2 },
+		{ label: 'F', fifths: -1 },
+		{ label: 'C', fifths: 0 },
+		{ label: 'G', fifths: 1 },
+		{ label: 'D', fifths: 2 },
+		{ label: 'A', fifths: 3 },
+		{ label: 'E', fifths: 4 },
+		{ label: 'B', fifths: 5 },
+		{ label: 'F#', fifths: 6 },
+		{ label: 'C#', fifths: 7 },
+	];
+
+	const clefButtonOptions = clefOptions ?? [
+		{ label: 'Treble', value: 0 },          // ClefType::G
+		{ label: 'French Violin', value: 7 },   // ClefType::G_1
+		{ label: 'Treble 15mb', value: 1 },     // ClefType::G15_MB
         { label: 'Treble 8vb', value: 2 },      // ClefType::G8_VB
         { label: 'Treble 8va', value: 3 },      // ClefType::G8_VA
         { label: 'Treble 15ma', value: 4 },     // ClefType::G15_MA
@@ -399,11 +421,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 	                </button>
 	            </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-gray-600">Signature:</span>
-	                {signatureOptions.map(opt => {
-	                    const handler = resolveTimeSigHandler(opt);
-	                    return (
+		            <div className="flex flex-wrap items-center gap-2 text-sm">
+		                <span className="text-gray-600">Signature:</span>
+		                {signatureOptions.map(opt => {
+		                    const handler = resolveTimeSigHandler(opt);
+		                    return (
 	                        <button
 	                            key={opt.label}
 	                            data-testid={`btn-timesig-${opt.numerator}-${opt.denominator}`}
@@ -415,13 +437,29 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                             {opt.label}
                         </button>
                     );
-                })}
-            </div>
+		                })}
+		            </div>
 
-	            <div className="flex flex-wrap items-center gap-2 text-sm">
-	                <span className="text-gray-600">Clef:</span>
-	                {clefButtonOptions.map(opt => (
-	                    <button
+		            <div className="flex flex-wrap items-center gap-2 text-sm">
+		                <span className="text-gray-600">Key:</span>
+		                {keySignatureButtonOptions.map(opt => (
+		                    <button
+		                        key={opt.fifths}
+		                        data-testid={`btn-keysig-${opt.fifths}`}
+		                        type="button"
+		                        onClick={() => onSetKeySignature?.(opt.fifths)}
+		                        disabled={mutationDisabled || !onSetKeySignature}
+		                        className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+		                    >
+		                        {opt.label}
+		                    </button>
+		                ))}
+		            </div>
+
+		            <div className="flex flex-wrap items-center gap-2 text-sm">
+		                <span className="text-gray-600">Clef:</span>
+		                {clefButtonOptions.map(opt => (
+		                    <button
 	                        key={opt.value}
 	                        data-testid={`btn-clef-${opt.value}`}
 	                        type="button"

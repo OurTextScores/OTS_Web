@@ -511,6 +511,26 @@ export default function ScoreEditor() {
         }
     };
 
+    const handleSetKeySignature = async (fifths: number) => {
+        if (!score || !score.setKeySignature) return;
+        const preservedIndex = selectedIndex;
+        const preservedPoint = selectedPoint;
+        setAudioBusy(true);
+        try {
+            await score.setKeySignature(fifths);
+            if (score.relayout) {
+                await score.relayout();
+            }
+            await renderScore(score);
+            scheduleSelectionOverlayRefresh(preservedIndex, preservedPoint);
+        } catch (err) {
+            console.error('Failed to set key signature', err);
+            alert('Unable to set key signature. See console for details.');
+        } finally {
+            setAudioBusy(false);
+        }
+    };
+
     const handleSetClef = async (clefType: number) => {
         if (!score || !score.setClef) return;
         const preservedIndex = selectedIndex;
@@ -927,6 +947,7 @@ export default function ScoreEditor() {
                 pngAvailable={Boolean(score?.savePng)}
                 audioAvailable={Boolean(score?.saveAudio) && soundFontLoaded}
                 onSetTimeSignature={handleSetTimeSignature}
+                onSetKeySignature={handleSetKeySignature}
                 onSetClef={handleSetClef}
                 onToggleDot={handleToggleDot}
                 onToggleDoubleDot={handleToggleDoubleDot}

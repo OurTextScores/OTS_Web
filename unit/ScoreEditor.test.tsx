@@ -192,6 +192,7 @@ describe('ScoreEditor', () => {
       setVoice: vi.fn(async () => true),
       addDynamic: vi.fn(async () => true),
       setTimeSignature: vi.fn(async () => true),
+      setKeySignature: vi.fn(async () => true),
     };
 
     const webmscore: any = {
@@ -227,6 +228,7 @@ describe('ScoreEditor', () => {
     await user.click(screen.getByTestId('btn-voice-2'));
     await user.click(screen.getByTestId('btn-dynamic-6'));
     await user.click(screen.getByTestId('btn-timesig-3-4'));
+    await user.click(screen.getByTestId('btn-keysig-0'));
 
     await waitFor(() => expect(score.pitchUp).toHaveBeenCalled());
     await waitFor(() => expect(score.doubleDuration).toHaveBeenCalled());
@@ -234,6 +236,7 @@ describe('ScoreEditor', () => {
     await waitFor(() => expect(score.setVoice).toHaveBeenCalledWith(1));
     await waitFor(() => expect(score.addDynamic).toHaveBeenCalledWith(6));
     await waitFor(() => expect(score.setTimeSignature).toHaveBeenCalledWith(3, 4));
+    await waitFor(() => expect(score.setKeySignature).toHaveBeenCalledWith(0));
 
     await user.click(screen.getByTestId('btn-export-svg'));
     await waitFor(() => expect(score.saveSvg).toHaveBeenCalled());

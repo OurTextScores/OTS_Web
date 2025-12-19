@@ -45,6 +45,7 @@
 #include "engraving/libmscore/tempotext.h"
 #include "engraving/libmscore/dynamic.h"
 #include "engraving/libmscore/rehearsalmark.h"
+#include "engraving/libmscore/key.h"
 
 #include "./score.h"
 #include "./wasmres.h"
@@ -953,6 +954,44 @@ bool _setTimeSignature(uintptr_t score_ptr, int numerator, int denominator, int 
     return true;
 }
 
+bool _setKeySignature(uintptr_t score_ptr, int fifths, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+
+    if (fifths < static_cast<int>(engraving::Key::MIN) || fifths > static_cast<int>(engraving::Key::MAX)) {
+        LOGW() << "setKeySignature: invalid fifths " << fifths;
+        return false;
+    }
+
+    engraving::KeySigEvent k;
+    k.setKey(static_cast<engraving::Key>(fifths));
+    k.setMode(engraving::KeyMode::MAJOR);
+
+    score->startCmd();
+    for (engraving::Staff* staff : score->staves()) {
+        if (!staff) {
+            continue;
+        }
+        score->undoChangeKeySig(staff, engraving::Fraction(0, 1), k);
+    }
+    score->endCmd();
+    return true;
+}
+
+int _getKeySignature(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+
+    engraving::Staff* staff = score->staff(0);
+    if (!staff) {
+        LOGW() << "getKeySignature: no staff in score";
+        return 0;
+    }
+
+    const engraving::KeySigEvent k = staff->keySigEvent(engraving::Fraction(0, 1));
+    return static_cast<int>(k.key());
+}
+
 bool _setClef(uintptr_t score_ptr, int clefType, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
@@ -1164,6 +1203,16 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool setTimeSignature(uintptr_t score_ptr, int numerator, int denominator, int excerptId = -1) {
         return _setTimeSignature(score_ptr, numerator, denominator, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setKeySignature(uintptr_t score_ptr, int fifths, int excerptId = -1) {
+        return _setKeySignature(score_ptr, fifths, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    int getKeySignature(uintptr_t score_ptr, int excerptId = -1) {
+        return _getKeySignature(score_ptr, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE
