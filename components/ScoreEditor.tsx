@@ -56,6 +56,15 @@ export default function ScoreEditor() {
     const [selectedElement, setSelectedElement] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
     const [selectedPoint, setSelectedPoint] = useState<{ page: number, x: number, y: number } | null>(null);
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+    const [dragSelectionRect, setDragSelectionRect] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
+    const ignoreNextClickRef = useRef(false);
+    const dragKindRef = useRef<'pointer' | 'mouse' | null>(null);
+    const dragPointerIdRef = useRef<number | null>(null);
+    const dragStartClientRef = useRef<{ x: number, y: number } | null>(null);
+    const dragStartScoreRef = useRef<{ x: number, y: number } | null>(null);
+    const dragAdditiveRef = useRef(false);
+    const dragActiveRef = useRef(false);
+    const sawPointerMoveRef = useRef(false);
     const [mutationEnabled, setMutationEnabled] = useState(false);
     const [soundFontLoaded, setSoundFontLoaded] = useState(false);
     const [triedSoundFont, setTriedSoundFont] = useState(false);
@@ -841,7 +850,400 @@ export default function ScoreEditor() {
         return null;
     };
 
+    const clientToScorePoint = (clientX: number, clientY: number) => {
+        if (!containerRef.current) {
+            return null;
+        }
+
+        const containerRect = containerRef.current.getBoundingClientRect();
+        return {
+            x: (clientX - containerRect.left) / zoom,
+            y: (clientY - containerRect.top) / zoom,
+        };
+    };
+
+    const boxesIntersect = (
+        a: { x: number, y: number, w: number, h: number },
+        b: { x: number, y: number, w: number, h: number },
+    ) => a.x + a.w >= b.x && b.x + b.w >= a.x && a.y + a.h >= b.y && b.y + b.h >= a.y;
+
+    const performDragSelection = async (rect: { x: number, y: number, w: number, h: number }, additive: boolean) => {
+        if (!containerRef.current || !score) {
+            return;
+        }
+
+        const containerRect = containerRef.current.getBoundingClientRect();
+        const allElements = Array.from(containerRef.current.querySelectorAll('.Note, .Rest, .Chord'));
+
+        const hits = allElements
+            .map((el, index) => {
+                const elRect = el.getBoundingClientRect();
+                const box = {
+                    x: (elRect.left - containerRect.left) / zoom,
+                    y: (elRect.top - containerRect.top) / zoom,
+                    w: elRect.width / zoom,
+                    h: elRect.height / zoom,
+                };
+                if (!(box.w > 0 && box.h > 0)) {
+                    return null;
+                }
+                if (!boxesIntersect(rect, box)) {
+                    return null;
+                }
+                const pageIndex = extractPageIndex(el) ?? 0;
+                const centerX = box.x + box.w / 2;
+                const centerY = box.y + box.h / 2;
+                return { el, index, pageIndex, box, centerX, centerY };
+            })
+            .filter((hit): hit is NonNullable<typeof hit> => Boolean(hit))
+            .sort((a, b) => (
+                a.pageIndex - b.pageIndex
+                || a.box.y - b.box.y
+                || a.box.x - b.box.x
+                || a.index - b.index
+            ));
+
+        if (hits.length === 0) {
+            if (!additive) {
+                setSelectedElement(null);
+                setSelectedPoint(null);
+                setSelectedIndex(null);
+                if (score.clearSelection) {
+                    await score.clearSelection().catch(err => {
+                        console.warn('clearSelection not available or failed:', err);
+                    });
+                }
+            }
+            return;
+        }
+
+        const first = hits[0];
+        setSelectedElement(first.box);
+        setSelectedPoint({ page: first.pageIndex, x: first.centerX, y: first.centerY });
+        setSelectedIndex(first.index);
+
+        if (score.selectElementAtPointWithMode) {
+            const firstMode = additive ? 1 : 0;
+            const selectionPromises = [
+                score.selectElementAtPointWithMode(first.pageIndex, first.centerX, first.centerY, firstMode),
+                ...hits.slice(1).map(hit => score.selectElementAtPointWithMode!(hit.pageIndex, hit.centerX, hit.centerY, 1)),
+            ];
+            for (const promise of selectionPromises) {
+                await promise;
+            }
+            return;
+        }
+
+        if (!score.selectElementAtPoint) {
+            console.warn('selectElementAtPoint is not available; cannot update selection in WASM');
+            return;
+        }
+
+        if (!additive && score.clearSelection) {
+            await score.clearSelection().catch(err => {
+                console.warn('clearSelection not available or failed:', err);
+            });
+        }
+
+        await score.selectElementAtPoint(first.pageIndex, first.centerX, first.centerY);
+    };
+
+    const handleScorePointerDown = (e: React.PointerEvent) => {
+        if (e.button !== 0) {
+            return;
+        }
+        if (dragKindRef.current && dragKindRef.current !== 'pointer') {
+            return;
+        }
+        if (dragPointerIdRef.current !== null) {
+            return;
+        }
+        if (!containerRef.current || !score) {
+            return;
+        }
+
+        const start = clientToScorePoint(e.clientX, e.clientY);
+        if (!start) {
+            return;
+        }
+
+        dragPointerIdRef.current = e.pointerId;
+        dragKindRef.current = 'pointer';
+        sawPointerMoveRef.current = false;
+        dragStartClientRef.current = { x: e.clientX, y: e.clientY };
+        dragStartScoreRef.current = start;
+        dragAdditiveRef.current = e.metaKey || e.ctrlKey;
+        dragActiveRef.current = false;
+    };
+
+    const handleScorePointerMove = (e: React.PointerEvent) => {
+        if (dragKindRef.current !== 'pointer') {
+            return;
+        }
+        sawPointerMoveRef.current = true;
+        if (dragPointerIdRef.current !== e.pointerId) {
+            return;
+        }
+
+        const startClient = dragStartClientRef.current;
+        const startScore = dragStartScoreRef.current;
+        if (!startClient || !startScore) {
+            return;
+        }
+
+        const dxClient = e.clientX - startClient.x;
+        const dyClient = e.clientY - startClient.y;
+        const DRAG_THRESHOLD_PX = 4;
+
+        if (!dragActiveRef.current) {
+            if (Math.hypot(dxClient, dyClient) < DRAG_THRESHOLD_PX) {
+                return;
+            }
+            dragActiveRef.current = true;
+            try {
+                e.currentTarget.setPointerCapture(e.pointerId);
+            } catch {
+                // Ignore if pointer capture is not available.
+            }
+        }
+
+        const currentScore = clientToScorePoint(e.clientX, e.clientY);
+        if (!currentScore) {
+            return;
+        }
+
+        const x1 = Math.min(startScore.x, currentScore.x);
+        const y1 = Math.min(startScore.y, currentScore.y);
+        const x2 = Math.max(startScore.x, currentScore.x);
+        const y2 = Math.max(startScore.y, currentScore.y);
+
+        setDragSelectionRect({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 });
+        e.preventDefault();
+    };
+
+    const handleScorePointerUp = async (e: React.PointerEvent) => {
+        if (dragKindRef.current !== 'pointer') {
+            return;
+        }
+        if (dragPointerIdRef.current !== e.pointerId) {
+            return;
+        }
+
+        const active = dragActiveRef.current;
+        const additive = dragAdditiveRef.current;
+        const startScore = dragStartScoreRef.current;
+
+        dragKindRef.current = null;
+        sawPointerMoveRef.current = false;
+        dragPointerIdRef.current = null;
+        dragStartClientRef.current = null;
+        dragStartScoreRef.current = null;
+        dragAdditiveRef.current = false;
+        dragActiveRef.current = false;
+
+        try {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+        } catch {
+            // Ignore if pointer capture is not available.
+        }
+
+        if (!active || !startScore) {
+            return;
+        }
+
+        ignoreNextClickRef.current = true;
+
+        const endScore = clientToScorePoint(e.clientX, e.clientY);
+        if (!endScore) {
+            setDragSelectionRect(null);
+            return;
+        }
+
+        const x1 = Math.min(startScore.x, endScore.x);
+        const y1 = Math.min(startScore.y, endScore.y);
+        const x2 = Math.max(startScore.x, endScore.x);
+        const y2 = Math.max(startScore.y, endScore.y);
+        const rect = { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+
+        setDragSelectionRect(rect);
+        await performDragSelection(rect, additive);
+        setDragSelectionRect(null);
+    };
+
+    const handleScorePointerCancel = (e: React.PointerEvent) => {
+        if (dragKindRef.current !== 'pointer') {
+            return;
+        }
+        if (dragPointerIdRef.current !== e.pointerId) {
+            return;
+        }
+        dragKindRef.current = null;
+        sawPointerMoveRef.current = false;
+        dragPointerIdRef.current = null;
+        dragStartClientRef.current = null;
+        dragStartScoreRef.current = null;
+        dragAdditiveRef.current = false;
+        dragActiveRef.current = false;
+        setDragSelectionRect(null);
+
+        try {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+        } catch {
+            // Ignore if pointer capture is not available.
+        }
+    };
+
+    const handleScoreMouseDown = (e: React.MouseEvent) => {
+        if (e.button !== 0) {
+            return;
+        }
+        if (dragKindRef.current === 'pointer') {
+            return;
+        }
+        if (dragPointerIdRef.current !== null) {
+            return;
+        }
+        if (!containerRef.current || !score) {
+            return;
+        }
+
+        const start = clientToScorePoint(e.clientX, e.clientY);
+        if (!start) {
+            return;
+        }
+
+        dragKindRef.current = 'mouse';
+        dragPointerIdRef.current = -1;
+        sawPointerMoveRef.current = false;
+        dragStartClientRef.current = { x: e.clientX, y: e.clientY };
+        dragStartScoreRef.current = start;
+        dragAdditiveRef.current = e.metaKey || e.ctrlKey;
+        dragActiveRef.current = false;
+    };
+
+    const handleScoreMouseMove = (e: React.MouseEvent) => {
+        if (dragKindRef.current === 'pointer' && !sawPointerMoveRef.current && dragPointerIdRef.current !== null) {
+            const startClient = dragStartClientRef.current;
+            const startScore = dragStartScoreRef.current;
+            if (!startClient || !startScore) {
+                return;
+            }
+
+            const dxClient = e.clientX - startClient.x;
+            const dyClient = e.clientY - startClient.y;
+            const DRAG_THRESHOLD_PX = 4;
+
+            if (!dragActiveRef.current) {
+                if (Math.hypot(dxClient, dyClient) < DRAG_THRESHOLD_PX) {
+                    return;
+                }
+                dragActiveRef.current = true;
+                try {
+                    e.currentTarget.setPointerCapture(dragPointerIdRef.current);
+                } catch {
+                    // Ignore if pointer capture is not available.
+                }
+            }
+
+            const currentScore = clientToScorePoint(e.clientX, e.clientY);
+            if (!currentScore) {
+                return;
+            }
+
+            const x1 = Math.min(startScore.x, currentScore.x);
+            const y1 = Math.min(startScore.y, currentScore.y);
+            const x2 = Math.max(startScore.x, currentScore.x);
+            const y2 = Math.max(startScore.y, currentScore.y);
+
+            setDragSelectionRect({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 });
+            e.preventDefault();
+            return;
+        }
+        if (dragKindRef.current !== 'mouse') {
+            return;
+        }
+        if (dragPointerIdRef.current !== -1) {
+            return;
+        }
+
+        const startClient = dragStartClientRef.current;
+        const startScore = dragStartScoreRef.current;
+        if (!startClient || !startScore) {
+            return;
+        }
+
+        const dxClient = e.clientX - startClient.x;
+        const dyClient = e.clientY - startClient.y;
+        const DRAG_THRESHOLD_PX = 4;
+
+        if (!dragActiveRef.current) {
+            if (Math.hypot(dxClient, dyClient) < DRAG_THRESHOLD_PX) {
+                return;
+            }
+            dragActiveRef.current = true;
+        }
+
+        const currentScore = clientToScorePoint(e.clientX, e.clientY);
+        if (!currentScore) {
+            return;
+        }
+
+        const x1 = Math.min(startScore.x, currentScore.x);
+        const y1 = Math.min(startScore.y, currentScore.y);
+        const x2 = Math.max(startScore.x, currentScore.x);
+        const y2 = Math.max(startScore.y, currentScore.y);
+
+        setDragSelectionRect({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 });
+        e.preventDefault();
+    };
+
+    const handleScoreMouseUp = async (e: React.MouseEvent) => {
+        if (dragKindRef.current !== 'mouse') {
+            return;
+        }
+        if (dragPointerIdRef.current !== -1) {
+            return;
+        }
+
+        const active = dragActiveRef.current;
+        const additive = dragAdditiveRef.current;
+        const startScore = dragStartScoreRef.current;
+
+        dragKindRef.current = null;
+        dragPointerIdRef.current = null;
+        dragStartClientRef.current = null;
+        dragStartScoreRef.current = null;
+        dragAdditiveRef.current = false;
+        dragActiveRef.current = false;
+
+        if (!active || !startScore) {
+            return;
+        }
+
+        ignoreNextClickRef.current = true;
+
+        const endScore = clientToScorePoint(e.clientX, e.clientY);
+        if (!endScore) {
+            setDragSelectionRect(null);
+            return;
+        }
+
+        const x1 = Math.min(startScore.x, endScore.x);
+        const y1 = Math.min(startScore.y, endScore.y);
+        const x2 = Math.max(startScore.x, endScore.x);
+        const y2 = Math.max(startScore.y, endScore.y);
+        const rect = { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+
+        setDragSelectionRect(rect);
+        await performDragSelection(rect, additive);
+        setDragSelectionRect(null);
+    };
+
 	    const handleScoreClick = (e: React.MouseEvent) => {
+            if (ignoreNextClickRef.current) {
+                ignoreNextClickRef.current = false;
+                return;
+            }
 	        if (!containerRef.current) return;
 
             const additiveSelection = e.metaKey || e.ctrlKey;
@@ -1011,8 +1413,28 @@ export default function ScoreEditor() {
 	                    width: 'fit-content'
 	                }}
 	                onClick={handleScoreClick}
+                    onPointerDown={handleScorePointerDown}
+                    onPointerMove={handleScorePointerMove}
+                    onPointerUp={handleScorePointerUp}
+                    onPointerCancel={handleScorePointerCancel}
+                    onMouseDown={handleScoreMouseDown}
+                    onMouseMove={handleScoreMouseMove}
+                    onMouseUp={handleScoreMouseUp}
 	            >
 	                <div ref={containerRef} data-testid="svg-container" />
+
+                    {dragSelectionRect && (
+                        <div
+                            data-testid="drag-selection-rect"
+                            className="absolute border border-blue-600 bg-blue-200 bg-opacity-20 pointer-events-none"
+                            style={{
+                                left: dragSelectionRect.x,
+                                top: dragSelectionRect.y,
+                                width: dragSelectionRect.w,
+                                height: dragSelectionRect.h
+                            }}
+                        />
+                    )}
 
 	                {selectedElement && (
 	                    <div
