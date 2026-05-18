@@ -1,0 +1,10 @@
+gradio
+transformers
+torch
+torchvision
+pillow
+numpy
+accelerate
+safetensors
+loguru
+torchtune

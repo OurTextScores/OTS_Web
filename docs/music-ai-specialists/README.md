@@ -16,3 +16,4 @@ Files:
 - `docs/music-ai-specialists/scoreops-capability-inventory.md`: capability inventory + prioritization and agent-optimized signature recommendations for ScoreOps MVP scoping
 - `docs/music-ai-specialists/scoreops-method-op-matrix.md`: method-to-op matrix used to lock P0/P1 implementation priorities
 - `docs/music-ai-specialists/scoreops-mvp-runbook.md`: implemented ScoreOps MVP behavior, local validation commands, and known gaps
+- `docs/music-ai-specialists/transcoda-hf-space-runbook.md`: Hugging Face Space deployment runbook for `btrkeks/transcoda-59M-zeroshot-v1` and the follow-on OTS_Web OMR integration plan
