@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../../lib/trace-http';
 import { augmentPromptWithSourceRag } from '../_lib/source-rag';
 
-export const dynamic = 'force-static';
+export const dynamic = 'force-dynamic';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 const DEFAULT_MAX_TOKENS = 2048;

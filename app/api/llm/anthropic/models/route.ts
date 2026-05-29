@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../../../lib/trace-http';
 
-export const dynamic = 'force-static';
+export const dynamic = 'force-dynamic';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 

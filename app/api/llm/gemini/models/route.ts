@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../../../lib/trace-http';
 
-export const dynamic = 'force-static';
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
     const trace = resolveTraceContext(request);

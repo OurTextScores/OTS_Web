@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../../lib/trace-http';
 import { augmentPromptWithSourceRag } from '../_lib/source-rag';
 
-export const dynamic = 'force-static';
+export const dynamic = 'force-dynamic';
 
 const buildPrompt = (prompt: string, xml?: string) => {
     const patchSpec = `Return ONLY valid JSON in the following format:

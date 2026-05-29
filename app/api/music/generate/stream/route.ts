@@ -9,6 +9,7 @@ import {
 import { resolveTraceContext, withTraceHeaders } from '../../../../../lib/trace-http';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 const DEFAULT_NOTAGEN_SPACE_ID = (process.env.MUSIC_NOTAGEN_DEFAULT_SPACE_ID || 'ElectricAlexis/NotaGen').trim();
 const DEFAULT_NOTAGEN_SPACE_TOKEN = (process.env.MUSIC_NOTAGEN_SPACE_TOKEN || '').trim();

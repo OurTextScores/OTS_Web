@@ -75,7 +75,7 @@ export async function POST(request: Request) {
 
         const response = await fetch(getPromptsRawUrl(spaceId, revision), {
             headers: withTraceHeaders(trace, token ? { Authorization: `Bearer ${token}` } : undefined),
-            cache: 'no-store',
+            next: { revalidate: 300 },
         });
 
         if (!response.ok) {
