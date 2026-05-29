@@ -39,7 +39,7 @@ test.describe('Diff feedback OpenAI e2e', () => {
     const response = await request.post('/api/music/diff/feedback', {
       data: {
         provider: 'openai',
-        model: 'gpt-5.2',
+        model: 'gpt-5.5',
         apiKey: OPENAI_API_KEY,
         iteration: 1,
         content: FEEDBACK_BASE_XML,

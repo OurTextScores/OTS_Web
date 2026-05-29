@@ -45,7 +45,7 @@ describe('editor analytics helper', () => {
 
         trackEditorAnalyticsEvent('score_editor_runtime_loaded', {
             editor_surface: 'embedded',
-            model: '   gpt-5.2   ',
+            model: '   gpt-5.5   ',
             empty_value: '   ',
         });
 
@@ -56,7 +56,7 @@ describe('editor analytics helper', () => {
         expect(payload.eventName).toBe('score_editor_runtime_loaded');
         expect(payload.properties).toMatchObject({
             editor_surface: 'embedded',
-            model: 'gpt-5.2',
+            model: 'gpt-5.5',
         });
         expect(payload.properties.empty_value).toBeUndefined();
     });

@@ -484,7 +484,7 @@ const MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_SPACE_INSTRUMENTATION = (process.env.NEX
 const MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_SPACE_ID = (process.env.NEXT_PUBLIC_MUSIC_TRANSCODA_SPACE_ID || 'jhlusko/transcoda').trim();
 const MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_MODEL = (process.env.NEXT_PUBLIC_MUSIC_TRANSCODA_MODEL_ID || 'btrkeks/transcoda-59M-zeroshot-v1').trim();
 const MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_REVISION = (process.env.NEXT_PUBLIC_MUSIC_TRANSCODA_REVISION || 'b529f8aa5d996d9224df3395b5b92d0867343c91').trim();
-const MUSIC_AGENT_DEFAULT_MODEL = (process.env.NEXT_PUBLIC_MUSIC_AGENT_DEFAULT_MODEL || 'gpt-5.2').trim();
+const MUSIC_AGENT_DEFAULT_MODEL = (process.env.NEXT_PUBLIC_MUSIC_AGENT_DEFAULT_MODEL || 'gpt-5.5').trim();
 const CODE_EDITOR_THEME_OPTIONS: Array<{ value: CodeEditorThemeMode; label: string }> = [
     { value: 'light', label: 'Light' },
     { value: 'light-contrast', label: 'Light High Contrast' },

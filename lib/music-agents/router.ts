@@ -276,8 +276,8 @@ function summarizeForModel(
 }
 
 const DEFAULT_MODELS: Record<string, string> = {
-  openai: (process.env.MUSIC_AGENT_MODEL || 'gpt-5.2').trim(),
-  anthropic: 'claude-sonnet-4-5',
+  openai: (process.env.MUSIC_AGENT_MODEL || 'gpt-5.5').trim(),
+  anthropic: 'claude-opus-4-8',
 };
 const getDefaultModel = (provider: string) => DEFAULT_MODELS[provider] || DEFAULT_MODELS.openai;
 

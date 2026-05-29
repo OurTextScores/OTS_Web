@@ -38,14 +38,14 @@ describe('runMusicPatchService', () => {
       prompt: 'Change key signature to G major',
       content: '<score-partwise version="4.0"></score-partwise>',
       dryRun: true,
-      model: 'gpt-5.2',
+      model: 'gpt-5.5',
     });
 
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({
       ready: false,
       request: {
-        model: 'gpt-5.2',
+        model: 'gpt-5.5',
       },
     });
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -103,13 +103,13 @@ describe('runMusicPatchService', () => {
       prompt: 'Change key signature to G major',
       content: '<score-partwise version="4.0"></score-partwise>',
       apiKey: 'sk-test',
-      model: 'gpt-5.2',
+      model: 'gpt-5.5',
     });
 
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({
       mode: 'openai-responses',
-      model: 'gpt-5.2',
+      model: 'gpt-5.5',
       patch: {
         format: 'musicxml-patch@1',
         ops: [

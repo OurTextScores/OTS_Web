@@ -29,7 +29,7 @@ export const AI_PROVIDER_CONFIGS: Record<AiProvider, AiProviderConfig> = {
     openai: {
         kind: 'openai-compatible',
         label: 'OpenAI (ChatGPT)',
-        defaultModel: 'gpt-5.2',
+        defaultModel: 'gpt-5.5',
         defaultMaxTokens: 2048,
         apiKeyUrl: 'https://platform.openai.com/api-keys',
         supportsPdfContext: true,
@@ -44,7 +44,7 @@ export const AI_PROVIDER_CONFIGS: Record<AiProvider, AiProviderConfig> = {
     anthropic: {
         kind: 'anthropic',
         label: 'Anthropic (Claude)',
-        defaultModel: 'claude-opus-4-5',
+        defaultModel: 'claude-opus-4-8',
         defaultMaxTokens: 2048,
         apiKeyUrl: 'https://platform.claude.com/settings/keys',
         supportsPdfContext: true,
@@ -57,7 +57,7 @@ export const AI_PROVIDER_CONFIGS: Record<AiProvider, AiProviderConfig> = {
     gemini: {
         kind: 'gemini',
         label: 'Google (Gemini)',
-        defaultModel: 'gemini-3-pro-preview',
+        defaultModel: 'gemini-2.5-pro',
         defaultMaxTokens: 2048,
         apiKeyUrl: 'https://aistudio.google.com/apikey',
         supportsPdfContext: true,
@@ -70,7 +70,7 @@ export const AI_PROVIDER_CONFIGS: Record<AiProvider, AiProviderConfig> = {
     grok: {
         kind: 'openai-compatible',
         label: 'xAI (Grok)',
-        defaultModel: 'grok-4',
+        defaultModel: 'grok-4.3',
         defaultMaxTokens: 2048,
         apiKeyUrl: 'https://console.x.ai/home',
         supportsPdfContext: false,
@@ -85,7 +85,7 @@ export const AI_PROVIDER_CONFIGS: Record<AiProvider, AiProviderConfig> = {
     deepseek: {
         kind: 'openai-compatible',
         label: 'DeepSeek (DeepSeek)',
-        defaultModel: 'deepseek-chat',
+        defaultModel: 'deepseek-v4-pro',
         defaultMaxTokens: 2048,
         apiKeyUrl: 'https://platform.deepseek.com/api_keys',
         supportsPdfContext: false,
@@ -100,7 +100,7 @@ export const AI_PROVIDER_CONFIGS: Record<AiProvider, AiProviderConfig> = {
     kimi: {
         kind: 'openai-compatible',
         label: 'Moonshot (Kimi)',
-        defaultModel: 'kimi-k2',
+        defaultModel: 'kimi-k2.6',
         defaultMaxTokens: 2048,
         apiKeyUrl: 'https://platform.moonshot.ai/console/api-keys',
         supportsPdfContext: false,

@@ -62,7 +62,7 @@ describe('diff-feedback-service', () => {
             value: '1',
           }],
         },
-        model: 'gpt-5.2',
+        model: 'gpt-5.5',
       },
     });
     mocked.applyMusicXmlPatch.mockResolvedValue({
@@ -74,7 +74,7 @@ describe('diff-feedback-service', () => {
       content: '<score-partwise version="4.0"></score-partwise>',
       iteration: 2,
       provider: 'openai',
-      model: 'gpt-5.2',
+      model: 'gpt-5.5',
       apiKey: 'sk-test',
       blocks: [
         { partIndex: 0, measureRange: '3-4', status: 'accepted' },
@@ -86,7 +86,7 @@ describe('diff-feedback-service', () => {
     expect(mocked.runMusicPatchService).toHaveBeenCalledTimes(1);
     expect(mocked.runMusicPatchService.mock.calls[0][0]).toMatchObject({
       provider: 'openai',
-      model: 'gpt-5.2',
+      model: 'gpt-5.5',
       apiKey: 'sk-test',
       content: '<score-partwise version="4.0"></score-partwise>',
     });
@@ -98,7 +98,7 @@ describe('diff-feedback-service', () => {
         format: 'musicxml-patch@1',
       },
       proposedXml: '<score-partwise version="4.0"><part-list/></score-partwise>',
-      model: 'gpt-5.2',
+      model: 'gpt-5.5',
     });
   });
 

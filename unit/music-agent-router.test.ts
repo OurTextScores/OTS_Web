@@ -379,7 +379,7 @@ describe('runMusicAgentRouter', () => {
 
     const result = await runMusicAgentRouter({
       prompt: 'Find relevant context around measure 8',
-      model: 'gpt-5.2',
+      model: 'gpt-5.5',
       maxTurns: 3,
       toolInput: {
         context: {
@@ -391,7 +391,7 @@ describe('runMusicAgentRouter', () => {
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({
       mode: 'agents-sdk',
-      model: 'gpt-5.2',
+      model: 'gpt-5.5',
       selectedTool: 'music.context',
       toolStatus: 200,
       toolOk: true,
