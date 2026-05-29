@@ -72,6 +72,21 @@ export function looksLikeMusicXml(text: string): boolean {
   );
 }
 
+export function looksLikeKern(text: string): boolean {
+  const trimmed = text.trim();
+  if (/(^|\n)\*\*kern(\s|$)/m.test(trimmed)) {
+    return true;
+  }
+  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const hasHumdrumInterpretation = lines.some((line) => /^\*(?:clef|k\[|M|MM|met|I)/.test(line));
+  const hasKernData = lines.some((line) => (
+    /^=/.test(line) ||
+    /^\d+(?:%?\d+)?\.?r(?:[LJkKlM]*)?$/.test(line) ||
+    /^\d+(?:%?\d+)?\.?[A-Ga-g]+[#n-]*(?:[LJkKlM]*)?$/.test(line)
+  ));
+  return hasHumdrumInterpretation && hasKernData;
+}
+
 export function errorResult(
   status: number,
   code: string,
@@ -166,14 +181,14 @@ export async function resolveScoreContent(body: unknown): Promise<ScoreContentRe
       error: errorResult(400, 'invalid_request', 'Missing score content, session, or input artifact.'),
     };
   }
-  // If it doesn't look like XML, we still return it but flag it
-  // Services like 'convert' might support ABC input.
-  if (!looksLikeMusicXml(xml) && !xml.includes('M:') && !xml.includes('K:')) {
+  // If it doesn't look like XML, we still return it but flag it.
+  // Services like 'convert' support ABC and **kern input too.
+  if (!looksLikeMusicXml(xml) && !xml.includes('M:') && !xml.includes('K:') && !looksLikeKern(xml)) {
     return {
       xml: '',
       artifact: null,
       session: null,
-      error: errorResult(400, 'invalid_request', 'Input does not look like MusicXML or ABC.'),
+      error: errorResult(400, 'invalid_request', 'Input does not look like MusicXML, ABC, or **kern.'),
     };
   }
   

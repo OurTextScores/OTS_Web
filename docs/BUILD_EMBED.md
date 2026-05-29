@@ -95,6 +95,72 @@ Safe sync command:
 rsync -a --delete --exclude 'soundfonts/' out/ ../OurTextScores/frontend/public/score-editor/
 ```
 
+## Vendoring into OurTextScores
+
+OurTextScores embeds this editor in two separate ways:
+
+- **Static UI**: the iframe at `OurTextScores/frontend/app/score-editor/page.tsx` loads `/score-editor/index.html`. Those static files are vendored in `OurTextScores/frontend/public/score-editor/`.
+- **Companion API**: static export cannot run Next.js API routes. OurTextScores runs a separate `score_editor_api` service and proxies editor API calls through `/api/score-editor/*`.
+
+That means updating the embedded editor usually has two parts:
+
+1. Build the static embed export in this repository.
+2. Copy the generated `out/` files into the OurTextScores vendored public directory.
+
+From a sibling workspace layout like:
+
+```text
+workspace/
+  OTS_Web/
+  OurTextScores/
+```
+
+run:
+
+```bash
+cd ~/workspace/OTS_Web
+
+NEXT_PUBLIC_SOUNDFONT_CDN_URL=https://cdn.ourtextscores.com/soundfonts/default.sf2 \
+npm run build:embed
+
+ls -la out/soundfonts 2>/dev/null || echo "OK: no out/soundfonts directory"
+
+rsync -a --delete --exclude 'soundfonts/' \
+  out/ \
+  ../OurTextScores/frontend/public/score-editor/
+```
+
+The copied directory must contain `index.html`, `_next/`, and the WebAssembly/data artifacts such as:
+
+```text
+webmscore.lib.wasm
+webmscore.lib.mem.wasm
+webmscore.lib.data
+webmscore.lib.symbols
+webmscore.webpack.mjs
+```
+
+Do not vendor `out/soundfonts/`. Keep soundfonts on a CDN or another external static host; large soundfont files can exceed GitHub file-size limits and make the host repository difficult to push.
+
+After copying, rebuild/recreate the OurTextScores frontend image because Docker bakes `frontend/public/score-editor/` into the frontend build:
+
+```bash
+cd ~/workspace/OurTextScores
+docker compose up -d --build frontend
+```
+
+If you are also running editor features that call `/api/music/*` or `/api/llm/*`, make sure the OurTextScores `score_editor_api` service mounts or uses the current editor source/runtime. For local development with the sibling checkout above, the service should point at `../OTS_Web:/app`.
+
+The relevant OurTextScores environment/build values are:
+
+```bash
+NEXT_PUBLIC_SCORE_EDITOR_URL=http://localhost:3000/score-editor
+SCORE_EDITOR_API_ORIGIN=http://score_editor_api:3000
+NEXT_PUBLIC_SCORE_EDITOR_API_BASE=/api/score-editor
+```
+
+These keep the browser on same-origin `/score-editor/*` assets while routing dynamic editor API calls through the host app's `/api/score-editor/*` proxy.
+
 ## Soundfont Configuration
 
 ### Using the Recommended CDN (MuseScore_General)

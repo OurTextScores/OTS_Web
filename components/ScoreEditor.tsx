@@ -51,7 +51,7 @@ import {
     type SourceHistoryResponse,
     type SourceHistoryRevision,
 } from '../lib/ourtextscores-api-client';
-import { appendMusicXmlParts } from '../lib/musicxml-append-parts';
+import { appendMusicXmlMeasures, appendMusicXmlParts } from '../lib/musicxml-append-parts';
 import {
     extractTraceContextFromHeaders,
     getOrCreateEditorSessionId,
@@ -481,6 +481,9 @@ const MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_SPACE_ID = (process.env.NEXT_PUBLIC_MUSI
 const MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_SPACE_PERIOD = (process.env.NEXT_PUBLIC_MUSIC_NOTAGEN_SPACE_DEFAULT_PERIOD || 'Classical').trim();
 const MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_SPACE_COMPOSER = (process.env.NEXT_PUBLIC_MUSIC_NOTAGEN_SPACE_DEFAULT_COMPOSER || 'Mozart, Wolfgang Amadeus').trim();
 const MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_SPACE_INSTRUMENTATION = (process.env.NEXT_PUBLIC_MUSIC_NOTAGEN_SPACE_DEFAULT_INSTRUMENTATION || 'Keyboard').trim();
+const MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_SPACE_ID = (process.env.NEXT_PUBLIC_MUSIC_TRANSCODA_SPACE_ID || 'jhlusko/transcoda').trim();
+const MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_MODEL = (process.env.NEXT_PUBLIC_MUSIC_TRANSCODA_MODEL_ID || 'btrkeks/transcoda-59M-zeroshot-v1').trim();
+const MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_REVISION = (process.env.NEXT_PUBLIC_MUSIC_TRANSCODA_REVISION || 'b529f8aa5d996d9224df3395b5b92d0867343c91').trim();
 const MUSIC_AGENT_DEFAULT_MODEL = (process.env.NEXT_PUBLIC_MUSIC_AGENT_DEFAULT_MODEL || 'gpt-5.2').trim();
 const CODE_EDITOR_THEME_OPTIONS: Array<{ value: CodeEditorThemeMode; label: string }> = [
     { value: 'light', label: 'Light' },
@@ -1004,7 +1007,7 @@ export default function ScoreEditor() {
     const [isResizingSidebar, setIsResizingSidebar] = useState(false);
     const sidebarResizeStartXRef = useRef<number>(0);
     const sidebarResizeStartWidthRef = useRef<number>(0);
-    const [xmlSidebarTab, setXmlSidebarTab] = useState<'xml' | 'assistant' | 'notagen' | 'harmony' | 'functional' | 'mma'>('xml');
+    const [xmlSidebarTab, setXmlSidebarTab] = useState<'xml' | 'assistant' | 'notagen' | 'transcoda' | 'harmony' | 'functional' | 'mma'>('xml');
     const [codeEditorTheme, setCodeEditorTheme] = useState<CodeEditorThemeMode>('light');
     const [xmlText, setXmlText] = useState('');
     const [xmlDirty, setXmlDirty] = useState(false);
@@ -1061,6 +1064,27 @@ export default function ScoreEditor() {
     const [musicNotaGenSpaceCombinations, setMusicNotaGenSpaceCombinations] = useState<NotaGenSpaceCombinations | null>(null);
     const [musicNotaGenSpaceOptionsLoading, setMusicNotaGenSpaceOptionsLoading] = useState(false);
     const [musicNotaGenSpaceOptionsError, setMusicNotaGenSpaceOptionsError] = useState<string | null>(null);
+    const [musicTranscodaBusy, setMusicTranscodaBusy] = useState(false);
+    const [musicTranscodaError, setMusicTranscodaError] = useState<string | null>(null);
+    const [musicTranscodaWarning, setMusicTranscodaWarning] = useState<string | null>(null);
+    const [musicTranscodaResult, setMusicTranscodaResult] = useState<Record<string, unknown> | null>(null);
+    const [musicTranscodaGeneratedKern, setMusicTranscodaGeneratedKern] = useState('');
+    const [musicTranscodaGeneratedXml, setMusicTranscodaGeneratedXml] = useState('');
+    const [musicTranscodaImageFile, setMusicTranscodaImageFile] = useState<File | null>(null);
+    const [musicTranscodaUploadBusy, setMusicTranscodaUploadBusy] = useState(false);
+    const [musicTranscodaElapsedMs, setMusicTranscodaElapsedMs] = useState(0);
+    const [musicTranscodaPhase, setMusicTranscodaPhase] = useState<'idle' | 'uploading' | 'transcribing'>('idle');
+    const musicTranscodaStartedAtRef = useRef<number | null>(null);
+    const [musicTranscodaDecoding, setMusicTranscodaDecoding] = useState<'greedy' | 'beam'>('greedy');
+    const [musicTranscodaMaxLength, setMusicTranscodaMaxLength] = useState(2048);
+    const [musicTranscodaNumBeams, setMusicTranscodaNumBeams] = useState(3);
+    const [musicTranscodaRepetitionPenalty, setMusicTranscodaRepetitionPenalty] = useState(1.1);
+    const formatTranscodaElapsed = (value: number) => {
+        const totalSeconds = Math.max(0, Math.floor(value / 1000));
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes}:${String(seconds).padStart(2, '0')}`;
+    };
     const musicAgentPromptRef = useRef<HTMLTextAreaElement>(null);
     const [musicAgentMaxTurns, setMusicAgentMaxTurns] = useState(6);
     const [musicAgentUseFallbackOnly, setMusicAgentUseFallbackOnly] = useState(false);
@@ -1101,6 +1125,9 @@ export default function ScoreEditor() {
     const [pageCount, setPageCount] = useState(1);
     const [progressivePagingActive, setProgressivePagingActive] = useState(false);
     const [progressiveHasMorePages, setProgressiveHasMorePages] = useState(false);
+    const [pngExportDialogOpen, setPngExportDialogOpen] = useState(false);
+    const [pngExportPageInput, setPngExportPageInput] = useState('1');
+    const [pngExportBusy, setPngExportBusy] = useState(false);
     const [progressiveLoadEnabled, setProgressiveLoadEnabled] = useState(true);
     const [scoreId, setScoreId] = useState('');
     const [newScoreDialogOpen, setNewScoreDialogOpen] = useState(false);
@@ -1961,7 +1988,7 @@ export default function ScoreEditor() {
         if (aiEnabled) {
             return;
         }
-        if (xmlSidebarTab !== 'xml' && xmlSidebarTab !== 'mma' && xmlSidebarTab !== 'harmony' && xmlSidebarTab !== 'functional') {
+        if (xmlSidebarTab !== 'xml' && xmlSidebarTab !== 'transcoda' && xmlSidebarTab !== 'mma' && xmlSidebarTab !== 'harmony' && xmlSidebarTab !== 'functional') {
             setXmlSidebarTab('xml');
         }
     }, [aiEnabled, xmlSidebarTab]);
@@ -7921,12 +7948,20 @@ ${partsBodyXml}
         if (!response.ok) {
             const payloadRecord = asRecord(payload);
             const payloadError = asRecord(payloadRecord?.error);
+            const details = asRecord(payloadError?.details);
+            const providerError = asRecord(details?.providerError);
+            const providerMessage = typeof providerError?.message === 'string' ? providerError.message : '';
+            const traceId = typeof payloadError?.traceId === 'string' ? payloadError.traceId : '';
             const message = typeof payloadRecord?.error === 'string'
                 ? String(payloadRecord.error)
                 : (typeof payloadError?.message === 'string'
                     ? payloadError.message
                     : `Request failed: ${response.status}`);
-            throw new Error(message);
+            const detailParts = [
+                providerMessage && providerMessage !== message ? providerMessage : '',
+                traceId ? `traceId=${traceId}` : '',
+            ].filter(Boolean);
+            throw new Error(detailParts.length > 0 ? `${message} (${detailParts.join('; ')})` : message);
         }
         return asRecord(payload) || {};
     }, [captureApiTraceContext]);
@@ -8602,6 +8637,147 @@ ${partsBodyXml}
         } catch (err) {
             console.error('Failed to apply NotaGen output XML', err);
             alert('Failed to apply generated MusicXML. See console for details.');
+        } finally {
+            setXmlLoading(false);
+        }
+    };
+
+    const handleTranscodaImageUpload = (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0] || null;
+        setMusicTranscodaImageFile(file);
+        setMusicTranscodaError(null);
+        setMusicTranscodaWarning(null);
+        setMusicTranscodaResult(null);
+        setMusicTranscodaGeneratedKern('');
+        setMusicTranscodaGeneratedXml('');
+    };
+
+    useEffect(() => {
+        if (musicTranscodaPhase === 'idle') {
+            musicTranscodaStartedAtRef.current = null;
+            setMusicTranscodaElapsedMs(0);
+            return;
+        }
+        if (musicTranscodaStartedAtRef.current === null) {
+            musicTranscodaStartedAtRef.current = Date.now();
+        }
+        const timer = window.setInterval(() => {
+            const startedAt = musicTranscodaStartedAtRef.current || Date.now();
+            setMusicTranscodaElapsedMs(Math.max(0, Date.now() - startedAt));
+        }, 250);
+        return () => window.clearInterval(timer);
+    }, [musicTranscodaPhase]);
+
+    const handleTranscodaTranscribeImage = async () => {
+        if (!musicTranscodaImageFile) {
+            alert('Choose a page image before running Transcoda.');
+            return;
+        }
+        setMusicTranscodaPhase('uploading');
+        setMusicTranscodaUploadBusy(true);
+        musicTranscodaStartedAtRef.current = null;
+        setMusicTranscodaBusy(true);
+        setMusicTranscodaError(null);
+        setMusicTranscodaWarning(null);
+        setMusicTranscodaResult(null);
+        setMusicTranscodaGeneratedKern('');
+        setMusicTranscodaGeneratedXml('');
+        const requestStartedAt = Date.now();
+        let outcome: 'success' | 'failure' = 'failure';
+        let failureReason = '';
+        try {
+            const imageDataUrl = await fileToBase64(musicTranscodaImageFile);
+            setMusicTranscodaUploadBusy(false);
+            setMusicTranscodaPhase('transcribing');
+            musicTranscodaStartedAtRef.current = null;
+            const payload = await postScoreEditorJson('/api/music/omr/transcribe', {
+                imageDataUrl,
+                mimeType: musicTranscodaImageFile.type || 'image/png',
+                spaceId: MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_SPACE_ID,
+                decoding: musicTranscodaDecoding,
+                maxLength: musicTranscodaMaxLength,
+                numBeams: musicTranscodaNumBeams,
+                repetitionPenalty: musicTranscodaRepetitionPenalty,
+                convertToMusicXml: true,
+                includeContent: true,
+                timeoutMs: 300000,
+            });
+            setMusicTranscodaResult(payload);
+            const content = asRecord(payload.content);
+            const kern = typeof content?.kern === 'string' ? content.kern : '';
+            const musicxml = typeof content?.musicxml === 'string' ? content.musicxml : '';
+            setMusicTranscodaGeneratedKern(kern);
+            setMusicTranscodaGeneratedXml(musicxml);
+            const conversionError = asRecord(payload.conversionError);
+            const conversionErrorMessage = typeof conversionError?.message === 'string' ? conversionError.message : '';
+            if (!musicxml.trim() && conversionErrorMessage.trim()) {
+                setMusicTranscodaWarning(`Transcoda returned kern text, but MusicXML conversion failed: ${conversionErrorMessage}`);
+            }
+            outcome = 'success';
+        } catch (err) {
+            console.error('Transcoda request failed', err);
+            failureReason = errorMessage(err) || 'Transcoda request failed.';
+            setMusicTranscodaError(failureReason);
+        } finally {
+            setMusicTranscodaPhase('idle');
+            setMusicTranscodaBusy(false);
+            setMusicTranscodaUploadBusy(false);
+            emitEditorTelemetry('score_editor_ai_request', {
+                channel: 'transcoda',
+                backend: 'huggingface-space',
+                model: MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_MODEL,
+                space_id: MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_SPACE_ID,
+                image_name: musicTranscodaImageFile.name,
+                outcome,
+                duration_ms: Math.max(0, Date.now() - requestStartedAt),
+                error: outcome === 'failure' ? failureReason || undefined : undefined,
+            });
+        }
+    };
+
+    const handleApplyTranscodaOutput = async (mode: 'overwrite' | 'append') => {
+        if (!musicTranscodaGeneratedXml.trim()) {
+            alert('No Transcoda MusicXML is available yet.');
+            return;
+        }
+        if (mode === 'append' && !score) {
+            alert('Load a target score before appending Transcoda output.');
+            return;
+        }
+        setXmlLoading(true);
+        setXmlError(null);
+        try {
+            if (!score || mode === 'overwrite') {
+                const encoder = new TextEncoder();
+                const encoded = encoder.encode(musicTranscodaGeneratedXml);
+                const file = new File([encoded], 'transcoda-output.musicxml', { type: 'application/xml' });
+                if (!score) {
+                    await handleFileUpload(file, {
+                        preserveScoreId: false,
+                        updateUrl: false,
+                        telemetrySource: 'transcoda_output',
+                    });
+                } else {
+                    await applyXmlToScore(musicTranscodaGeneratedXml, { telemetrySource: 'transcoda_output_overwrite' });
+                }
+            } else {
+                const currentXml = await resolveXmlContext();
+                if (!currentXml.trim()) {
+                    throw new Error('Unable to load current score MusicXML for Transcoda append.');
+                }
+                const appendResult = appendMusicXmlMeasures(currentXml, musicTranscodaGeneratedXml);
+                if (appendResult.appendedMeasureCount <= 0) {
+                    throw new Error('Transcoda MusicXML did not contain appendable measures.');
+                }
+                await applyXmlToScore(appendResult.xml, {
+                    telemetrySource: 'transcoda_output_append',
+                    inputFormat: 'musicxml',
+                });
+            }
+            setXmlSidebarTab('xml');
+        } catch (err) {
+            console.error('Failed to apply Transcoda output XML', err);
+            alert('Failed to apply Transcoda MusicXML. See console for details.');
         } finally {
             setXmlLoading(false);
         }
@@ -10581,12 +10757,44 @@ ${partsBodyXml}
             alert('PNG export is not available in this build.');
             return;
         }
+        const defaultPage = Math.max(1, Math.min((currentPageRef.current || 0) + 1, Math.max(pageCount, 1)));
+        setPngExportPageInput(String(defaultPage));
+        setPngExportDialogOpen(true);
+    };
+
+    const handleConfirmExportPng = async (event?: React.FormEvent<HTMLFormElement>) => {
+        event?.preventDefault();
+        if (!score || !score.savePng) {
+            alert('PNG export is not available in this build.');
+            return;
+        }
+        const requestedPage = Number(pngExportPageInput);
+        if (!Number.isFinite(requestedPage)) {
+            alert('Enter a valid page number.');
+            return;
+        }
+        const maxPage = Math.max(1, pageCount);
+        const pageNumber = Math.max(1, Math.min(Math.floor(requestedPage), maxPage));
+        const pageIndex = pageNumber - 1;
+        setPngExportBusy(true);
         try {
-            const png = await score.savePng(0, true, true);
-            downloadBlob(png, 'score.png', 'image/png');
+            if (score.layoutUntilPage || score.layoutUntilPageState) {
+                const ready = await ensurePageIsLaidOut(score, pageIndex);
+                if (!ready) {
+                    throw new Error(`Page ${pageNumber} is not available yet.`);
+                }
+            }
+            const png = await runSerializedScoreOperation(
+                () => Promise.resolve(score.savePng!(pageIndex, true, true)),
+                `savePng(export-page=${pageNumber})`,
+            );
+            downloadBlob(png, `score-page-${pageNumber}.png`, 'image/png');
+            setPngExportDialogOpen(false);
         } catch (err) {
             console.error('Failed to export PNG', err);
-            alert('Unable to export PNG. See console for details.');
+            alert(err instanceof Error ? err.message : 'Unable to export PNG. See console for details.');
+        } finally {
+            setPngExportBusy(false);
         }
     };
 
@@ -12767,6 +12975,18 @@ ${partsBodyXml}
                                     )}
                                     <button
                                         type="button"
+                                        data-testid="tab-transcoda"
+                                        onClick={() => setXmlSidebarTab('transcoda')}
+                                        className={`rounded border px-2 py-1 ${
+                                            xmlSidebarTab === 'transcoda'
+                                                ? 'border-gray-400 bg-gray-100 text-gray-900'
+                                                : 'border-transparent text-gray-500 hover:text-gray-700'
+                                        }`}
+                                    >
+                                        Transcoda
+                                    </button>
+                                    <button
+                                        type="button"
                                         data-testid="tab-harmony"
                                         onClick={() => setXmlSidebarTab('harmony')}
                                         className={`rounded border px-2 py-1 ${
@@ -13648,6 +13868,241 @@ ${partsBodyXml}
                                 )}
                             </div>
                         )}
+                        {xmlSidebarTab === 'transcoda' && (
+                            <div className="mt-3 space-y-3 text-sm text-gray-700">
+                                <div className="rounded border border-gray-200 bg-gray-50/70 p-3 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                            Transcoda OMR
+                                        </div>
+                                        <a
+                                            href="https://huggingface.co/btrkeks/transcoda-59M-zeroshot-v1"
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            title="Transcoda model on Hugging Face"
+                                            aria-label="Open Transcoda model on Hugging Face"
+                                            className="text-sm leading-none text-gray-500 hover:text-gray-700"
+                                        >
+                                            ⓘ
+                                        </a>
+                                    </div>
+                                    <div className="grid gap-2">
+                                        <label className="flex flex-col gap-1">
+                                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                Space
+                                            </span>
+                                            <input
+                                                value={MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_SPACE_ID}
+                                                readOnly
+                                                className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
+                                                aria-label="Transcoda Space ID"
+                                            />
+                                        </label>
+                                        <label className="flex flex-col gap-1">
+                                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                Model
+                                            </span>
+                                            <input
+                                                value={MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_MODEL}
+                                                readOnly
+                                                className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
+                                                aria-label="Transcoda model ID"
+                                            />
+                                        </label>
+                                        <label className="flex flex-col gap-1">
+                                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                Revision
+                                            </span>
+                                            <input
+                                                value={MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_REVISION}
+                                                readOnly
+                                                className="rounded border border-gray-300 bg-white px-2 py-1 font-mono text-xs text-gray-700"
+                                                aria-label="Transcoda model revision"
+                                            />
+                                        </label>
+                                        <label className="flex flex-col gap-1">
+                                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                Decoding
+                                            </span>
+                                            <select
+                                                value={musicTranscodaDecoding}
+                                                onChange={(e) => setMusicTranscodaDecoding(e.target.value as 'greedy' | 'beam')}
+                                                className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
+                                                aria-label="Decoding strategy"
+                                            >
+                                                <option value="greedy">Greedy</option>
+                                                <option value="beam">Beam search</option>
+                                            </select>
+                                        </label>
+                                        <label className="flex flex-col gap-1">
+                                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                Max length
+                                            </span>
+                                            <input
+                                                type="number"
+                                                min={1}
+                                                step={64}
+                                                value={musicTranscodaMaxLength}
+                                                onChange={(e) => {
+                                                    const v = Math.max(1, Math.floor(Number(e.target.value)));
+                                                    if (Number.isFinite(v)) setMusicTranscodaMaxLength(v);
+                                                }}
+                                                className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
+                                                aria-label="Max length"
+                                            />
+                                        </label>
+                                        {musicTranscodaDecoding === 'beam' && (
+                                            <label className="flex flex-col gap-1">
+                                                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                    Beam count
+                                                </span>
+                                                <input
+                                                    type="number"
+                                                    min={1}
+                                                    step={1}
+                                                    value={musicTranscodaNumBeams}
+                                                    onChange={(e) => {
+                                                        const v = Math.max(1, Math.floor(Number(e.target.value)));
+                                                        if (Number.isFinite(v)) setMusicTranscodaNumBeams(v);
+                                                    }}
+                                                    className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
+                                                    aria-label="Beam count"
+                                                />
+                                            </label>
+                                        )}
+                                        <label className="flex flex-col gap-1">
+                                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                Repetition penalty
+                                            </span>
+                                            <input
+                                                type="number"
+                                                min={0}
+                                                step={0.05}
+                                                value={musicTranscodaRepetitionPenalty}
+                                                onChange={(e) => {
+                                                    const v = Number(e.target.value);
+                                                    if (Number.isFinite(v) && v >= 0) setMusicTranscodaRepetitionPenalty(v);
+                                                }}
+                                                className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
+                                                aria-label="Repetition penalty"
+                                            />
+                                        </label>
+                                    </div>
+                                    <div className="rounded border border-gray-200 bg-white px-3 py-2 text-xs leading-relaxed text-gray-600">
+                                        Upload a single score page image to send to the Transcoda Space.
+                                    </div>
+                                    <label className="flex flex-col gap-1">
+                                        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                            Page Image
+                                        </span>
+                                        <input
+                                            data-testid="transcoda-image-input"
+                                            type="file"
+                                            accept="image/png,image/jpeg,image/webp,image/tiff,image/bmp,image/*"
+                                            onChange={handleTranscodaImageUpload}
+                                            className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
+                                        />
+                                    </label>
+                                    {musicTranscodaImageFile && (
+                                        <div className="rounded border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600">
+                                            Selected: {musicTranscodaImageFile.name}
+                                        </div>
+                                    )}
+                                    {(musicTranscodaPhase !== 'idle') && (
+                                        <div className="space-y-2 rounded border border-gray-200 bg-white px-3 py-2">
+                                            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+                                                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-gray-700" />
+                                                <span>
+                                                    {musicTranscodaPhase === 'uploading' ? 'Uploading image' : 'Transcribing image'}
+                                                </span>
+                                            </div>
+                                            <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+                                                <div
+                                                    className="h-full bg-gray-800 transition-all duration-200"
+                                                    style={{ width: musicTranscodaPhase === 'uploading' ? '33%' : '78%' }}
+                                                />
+                                            </div>
+                                            <div className="flex items-center justify-between text-[11px] text-gray-500">
+                                                <span>
+                                                    {musicTranscodaPhase === 'uploading'
+                                                        ? 'Preparing image for upload'
+                                                        : 'Waiting for Transcoda response'}
+                                                </span>
+                                                <span>
+                                                    {formatTranscodaElapsed(musicTranscodaElapsedMs)}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {musicTranscodaError && (
+                                        <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                                            {musicTranscodaError}
+                                        </div>
+                                    )}
+                                    {musicTranscodaWarning && (
+                                        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+                                            {musicTranscodaWarning}
+                                        </div>
+                                    )}
+                                    <button
+                                        type="button"
+                                        disabled={musicTranscodaBusy || !musicTranscodaImageFile}
+                                        onClick={() => void handleTranscodaTranscribeImage()}
+                                        className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        data-testid="btn-transcoda-transcribe"
+                                        title={musicTranscodaImageFile ? 'Transcribe the uploaded page image with Transcoda.' : 'Upload a page image before transcribing.'}
+                                    >
+                                        {musicTranscodaBusy ? 'Transcribing...' : 'Transcribe image'}
+                                    </button>
+                                    {musicTranscodaGeneratedKern && (
+                                        <div className="space-y-1">
+                                            <div className="text-xs text-gray-500">Generated **kern</div>
+                                            <pre className="max-h-48 overflow-auto rounded border border-gray-200 bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-700 whitespace-pre-wrap">
+                                                {musicTranscodaGeneratedKern}
+                                            </pre>
+                                        </div>
+                                    )}
+                                    {musicTranscodaGeneratedXml && (
+                                        <div className="flex gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleApplyTranscodaOutput('overwrite')}
+                                                disabled={xmlLoading}
+                                                className="flex-1 rounded border border-gray-300 bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                                data-testid="btn-transcoda-apply-overwrite"
+                                            >
+                                                Overwrite
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleApplyTranscodaOutput('append')}
+                                                disabled={xmlLoading || !score}
+                                                className="flex-1 rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                data-testid="btn-transcoda-apply-append"
+                                            >
+                                                Append
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => downloadBlob(musicTranscodaGeneratedXml, 'transcoda-output.musicxml', 'application/vnd.recordare.musicxml+xml')}
+                                                className="flex-1 rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                                                data-testid="btn-transcoda-download-xml"
+                                            >
+                                                Download
+                                            </button>
+                                        </div>
+                                    )}
+                                    {musicTranscodaResult && (
+                                        <div className="space-y-1">
+                                            <div className="text-xs text-gray-500">Transcoda Response</div>
+                                            <pre className="max-h-64 overflow-auto rounded border border-gray-200 bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-700 whitespace-pre-wrap">
+                                                {JSON.stringify(musicTranscodaResult, null, 2)}
+                                            </pre>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                         {xmlSidebarTab === 'mma' && (
                             <div className="mt-3 space-y-3 text-sm text-gray-700">
                                 <div className="rounded border border-gray-200 bg-gray-50/70 p-3 space-y-3">
@@ -14248,6 +14703,70 @@ ${partsBodyXml}
                 )}
                 </div>
             </aside>
+
+            {pngExportDialogOpen && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
+                    data-testid="png-export-modal"
+                >
+                    <form
+                        onSubmit={handleConfirmExportPng}
+                        className="w-full max-w-sm rounded bg-white p-4 shadow-lg"
+                    >
+                        <div className="flex items-center justify-between">
+                            <div className="text-sm font-semibold text-gray-800">
+                                Export PNG
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setPngExportDialogOpen(false)}
+                                disabled={pngExportBusy}
+                                className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Close
+                            </button>
+                        </div>
+                        <div className="mt-4 grid gap-3 text-sm text-gray-700">
+                            <label className="flex flex-col gap-1">
+                                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                    Page
+                                </span>
+                                <input
+                                    data-testid="png-export-page-input"
+                                    type="number"
+                                    min={1}
+                                    max={Math.max(1, pageCount)}
+                                    value={pngExportPageInput}
+                                    onChange={(event) => setPngExportPageInput(event.target.value)}
+                                    className="rounded border border-gray-300 px-2 py-1 text-sm"
+                                />
+                            </label>
+                            <div className="text-xs text-gray-500">
+                                Current score has {Math.max(1, pageCount)} {Math.max(1, pageCount) === 1 ? 'page' : 'pages'}.
+                            </div>
+                        </div>
+                        <div className="mt-4 flex gap-2">
+                            <button
+                                type="submit"
+                                data-testid="btn-confirm-export-png"
+                                disabled={pngExportBusy}
+                                className="flex-1 rounded border border-gray-300 bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {pngExportBusy ? 'Exporting...' : 'Export'}
+                            </button>
+                            <button
+                                type="button"
+                                data-testid="btn-cancel-export-png"
+                                onClick={() => setPngExportDialogOpen(false)}
+                                disabled={pngExportBusy}
+                                className="flex-1 rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
 
             {newScoreDialogOpen && (
                 <div

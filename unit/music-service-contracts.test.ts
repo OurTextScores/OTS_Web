@@ -11,6 +11,7 @@ import {
   MUSIC_RENDER_TOOL_CONTRACT,
   MUSIC_MMA_TEMPLATE_TOOL_CONTRACT,
   MUSIC_MMA_RENDER_TOOL_CONTRACT,
+  MUSIC_OMR_TRANSCRIBE_TOOL_CONTRACT,
   MUSIC_TOOL_CONTRACTS,
 } from '../lib/music-services/contracts';
 
@@ -29,6 +30,7 @@ describe('music service tool contracts', () => {
       'music.render',
       'music.mma_template',
       'music.mma_render',
+      'music.omr_transcribe',
     ]);
     expect(new Set(names).size).toBe(names.length);
   });
@@ -139,6 +141,16 @@ describe('music service tool contracts', () => {
       type: 'object',
     });
     expect(MUSIC_MMA_RENDER_TOOL_CONTRACT.outputSchema).toMatchObject({
+      oneOf: expect.any(Array),
+    });
+  });
+
+  it('declares required OMR transcribe contract fields', () => {
+    expect(MUSIC_OMR_TRANSCRIBE_TOOL_CONTRACT.description.length).toBeGreaterThan(0);
+    expect(MUSIC_OMR_TRANSCRIBE_TOOL_CONTRACT.inputSchema).toMatchObject({
+      type: 'object',
+    });
+    expect(MUSIC_OMR_TRANSCRIBE_TOOL_CONTRACT.outputSchema).toMatchObject({
       oneOf: expect.any(Array),
     });
   });

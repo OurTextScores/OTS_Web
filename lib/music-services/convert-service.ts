@@ -1,5 +1,6 @@
 import {
     convertMusicNotation,
+    ensureKernMusicXmlConversionToolsAvailable,
     ensureMusicConversionToolsAvailable,
     normalizeMusicFormat,
     type MusicConversionHealthProbeResult,
@@ -12,6 +13,7 @@ import {
 } from '../score-artifacts';
 import {
     asRecord,
+    looksLikeKern,
     normalizeInputArtifactId,
     readBoolean,
     resolveScoreContent,
@@ -115,6 +117,9 @@ const inferTextFormat = (content: string) => {
     if (/(^|\n)K:\s*\S+/m.test(trimmed) || /(^|\n)X:\s*\d+/m.test(trimmed)) {
         return 'abc' as const;
     }
+    if (looksLikeKern(trimmed)) {
+        return 'kern' as const;
+    }
     if (/<score-partwise\b|<score-timewise\b|^\s*<\?xml\b/.test(trimmed)) {
         return 'musicxml' as const;
     }
@@ -172,6 +177,7 @@ export async function runMusicConvertService(body: unknown, options?: ConvertSer
     const healthCheck = readBoolean(data?.healthCheck, data?.health_check, false);
     if (healthCheck) {
         const tools = await ensureMusicConversionToolsAvailable();
+        const kernTools = await ensureKernMusicXmlConversionToolsAvailable();
         const probeCacheTtlMs = getHealthProbeCacheTtlMs();
         const probeCacheEnabled = probeCacheTtlMs > 0;
         const nowMs = Date.now();
@@ -199,8 +205,8 @@ export async function runMusicConvertService(body: unknown, options?: ConvertSer
             writeHealthProbeCache(probe, nowMs, probeCacheTtlMs);
         }
         logConvertEvent('info', 'music.convert.health_probe', traceContext, {
-            ok: tools.ok,
-            missingCount: tools.missing.length,
+            ok: tools.ok && kernTools.ok,
+            missingCount: tools.missing.length + kernTools.missing.length,
             musescoreCandidates: tools.config.musescoreBins,
             pythonCommand: tools.config.pythonCommand,
             probeOk: probe.ok,
@@ -210,20 +216,25 @@ export async function runMusicConvertService(body: unknown, options?: ConvertSer
             probeCacheTtlMs,
         });
         return {
-            status: tools.ok && probe.ok ? 200 : 503,
+            status: tools.ok && kernTools.ok && probe.ok ? 200 : 503,
             body: {
-                ok: tools.ok && probe.ok,
+                ok: tools.ok && kernTools.ok && probe.ok,
                 engine: 'notagen',
                 scripts: {
                     xml2abc: tools.config.xml2abcScript,
                     abc2xml: tools.config.abc2xmlScript,
+                    kernMusicXml: kernTools.config.kernMusicXmlScript,
+                },
+                kern: {
+                    engine: 'music21',
+                    script: kernTools.config.kernMusicXmlScript,
                 },
                 midi: {
                     engine: 'musescore',
                     candidates: tools.config.musescoreBins,
                 },
                 pythonCommand: tools.config.pythonCommand,
-                missing: tools.missing,
+                missing: [...tools.missing, ...kernTools.missing],
                 probe,
                 probeCache: {
                     enabled: probeCacheEnabled,
@@ -234,6 +245,7 @@ export async function runMusicConvertService(body: unknown, options?: ConvertSer
                 timeouts: {
                     defaultMs: tools.config.defaultTimeoutMs,
                     musescoreMs: tools.config.musescoreTimeoutMs,
+                    kernMusicXmlMs: kernTools.config.kernMusicXmlTimeoutMs,
                 },
             },
         };
@@ -244,7 +256,7 @@ export async function runMusicConvertService(body: unknown, options?: ConvertSer
     if (!outputFormat) {
         return {
             status: 400,
-            body: { error: 'Missing or invalid output format. Use abc, musicxml, or midi.' },
+            body: { error: 'Missing or invalid output format. Use abc, musicxml, midi, or kern.' },
         };
     }
 

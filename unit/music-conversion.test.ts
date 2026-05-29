@@ -59,4 +59,40 @@ describe('music-conversion MVP', () => {
     expect(normalizeMusicFormat('midi')).toBe('midi');
     expect(normalizeMusicFormat('mid')).toBe('midi');
   });
+
+  it('normalizes kern aliases and validates same-format kern content', async () => {
+    expect(normalizeMusicFormat('kern')).toBe('kern');
+    expect(normalizeMusicFormat('krn')).toBe('kern');
+    expect(normalizeMusicFormat('**kern')).toBe('kern');
+    expect(normalizeMusicFormat('humdrum')).toBe('kern');
+
+    const result = await convertMusicNotation({
+      inputFormat: 'kern',
+      outputFormat: 'kern',
+      content: '**kern\r\n*M4/4\r\n=1\r\n4c\r\n*-\r\n',
+      deepValidate: false,
+    });
+
+    expect(result.content.endsWith('\n')).toBe(true);
+    expect(result.normalization.format).toBe('kern');
+    expect(result.validation.checks.some((c) => c.id === 'kern-spine' && c.ok)).toBe(true);
+    expect(result.validation.checks.some((c) => c.id === 'kern-terminator' && c.ok)).toBe(true);
+  });
+
+  it('repairs model-style kern that omits the spine declaration and terminator', async () => {
+    const result = await convertMusicNotation({
+      inputFormat: 'kern',
+      outputFormat: 'kern',
+      content: '*clefF4\n*k[]\n*M4/4\n16GGLL\n=\n',
+      deepValidate: false,
+    });
+
+    expect(result.content).toBe('**kern\n*clefF4\n*k[]\n*M4/4\n16GGLL\n=\n*-\n');
+    expect(result.normalization.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'kern-spine-declaration', applied: true }),
+      expect.objectContaining({ id: 'kern-spine-terminator', applied: true }),
+    ]));
+    expect(result.validation.checks.some((c) => c.id === 'kern-spine' && c.ok)).toBe(true);
+    expect(result.validation.checks.some((c) => c.id === 'kern-terminator' && c.ok)).toBe(true);
+  });
 });

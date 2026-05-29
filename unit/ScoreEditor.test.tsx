@@ -200,6 +200,7 @@ describe('ScoreEditor', () => {
       destroy: vi.fn(),
       saveSvg: vi.fn(async (pageIndex?: number) => `<svg><text>page-${pageIndex ?? 0}</text></svg>`),
       savePdf: vi.fn(async () => new Uint8Array([1])),
+      savePng: vi.fn(async () => new Uint8Array([2])),
       setSoundFont: vi.fn(async () => {}),
       metadata: vi.fn(async () => ({})),
       measurePositions: vi.fn(async () => ({})),
@@ -243,6 +244,12 @@ describe('ScoreEditor', () => {
     await waitFor(() => expect(score.layoutUntilPage).toHaveBeenCalledWith(1));
     await waitFor(() => expect(screen.getByTestId('page-indicator').textContent).toContain('Page 2 of 2+'));
     await waitFor(() => expect(score.saveSvg).toHaveBeenCalledWith(1, true, true));
+
+    await user.click(screen.getByTestId('dropdown-export'));
+    await user.click(await screen.findByTestId('btn-export-png'));
+    await expect(screen.findByTestId('png-export-page-input')).resolves.toHaveValue(2);
+    await user.click(await screen.findByTestId('btn-confirm-export-png'));
+    await waitFor(() => expect(score.savePng).toHaveBeenCalledWith(1, true, true));
   });
 
   it('alerts when score load fails', async () => {
@@ -532,6 +539,8 @@ describe('ScoreEditor', () => {
     await user.click(await screen.findByTestId('btn-export-pdf'));
     await user.click(screen.getByTestId('dropdown-export'));
     await user.click(await screen.findByTestId('btn-export-png'));
+    await expect(screen.findByTestId('png-export-page-input')).resolves.toHaveValue(1);
+    await user.click(await screen.findByTestId('btn-confirm-export-png'));
     await user.click(screen.getByTestId('dropdown-export'));
     await user.click(await screen.findByTestId('btn-export-mxl'));
     await user.click(screen.getByTestId('dropdown-export'));

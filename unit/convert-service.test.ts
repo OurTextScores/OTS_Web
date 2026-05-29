@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocked = vi.hoisted(() => ({
   convertMusicNotation: vi.fn(),
+  ensureKernMusicXmlConversionToolsAvailable: vi.fn(),
   ensureMusicConversionToolsAvailable: vi.fn(),
   normalizeMusicFormat: vi.fn(),
   runMusicConversionHealthProbe: vi.fn(),
@@ -15,6 +16,7 @@ const mocked = vi.hoisted(() => ({
 
 vi.mock('../lib/music-conversion', () => ({
   convertMusicNotation: mocked.convertMusicNotation,
+  ensureKernMusicXmlConversionToolsAvailable: mocked.ensureKernMusicXmlConversionToolsAvailable,
   ensureMusicConversionToolsAvailable: mocked.ensureMusicConversionToolsAvailable,
   normalizeMusicFormat: mocked.normalizeMusicFormat,
   runMusicConversionHealthProbe: mocked.runMusicConversionHealthProbe,
@@ -33,7 +35,7 @@ import {
 
 describe('runMusicConvertService', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     __resetMusicConvertServiceHealthProbeCacheForTests();
     mocked.normalizeMusicFormat.mockImplementation((value: unknown) => {
       if (typeof value !== 'string') return null;
@@ -41,7 +43,16 @@ describe('runMusicConvertService', () => {
       if (normalized === 'abc') return 'abc';
       if (normalized === 'musicxml' || normalized === 'xml') return 'musicxml';
       if (normalized === 'midi' || normalized === 'mid') return 'midi';
+      if (normalized === 'kern' || normalized === 'krn' || normalized === '**kern' || normalized === 'humdrum') return 'kern';
       return null;
+    });
+    mocked.ensureKernMusicXmlConversionToolsAvailable.mockResolvedValue({
+      ok: true,
+      config: {
+        kernMusicXmlScript: '/app/tools/kern_conversion/convert_kern_musicxml.py',
+        kernMusicXmlTimeoutMs: 60000,
+      },
+      missing: [],
     });
     mocked.runMusicConversionHealthProbe.mockResolvedValue({
       ok: true,
@@ -61,6 +72,7 @@ describe('runMusicConvertService', () => {
         pythonCommand: 'python3',
         musescoreTimeoutMs: 60000,
         musescoreBins: ['musescore3'],
+        defaultTimeoutMs: 30000,
       },
       missing: [],
     });
@@ -94,6 +106,7 @@ describe('runMusicConvertService', () => {
         pythonCommand: 'python3',
         musescoreTimeoutMs: 60000,
         musescoreBins: ['musescore3'],
+        defaultTimeoutMs: 30000,
       },
       missing: [],
     });
@@ -130,6 +143,7 @@ describe('runMusicConvertService', () => {
           pythonCommand: 'python3',
           musescoreTimeoutMs: 60000,
           musescoreBins: ['musescore3'],
+          defaultTimeoutMs: 30000,
         },
         missing: [],
       });
@@ -178,7 +192,7 @@ describe('runMusicConvertService', () => {
 
     expect(result.status).toBe(400);
     expect(result.body).toMatchObject({
-      error: 'Missing or invalid output format. Use abc, musicxml, or midi.',
+      error: 'Missing or invalid output format. Use abc, musicxml, midi, or kern.',
     });
   });
 
@@ -245,6 +259,95 @@ describe('runMusicConvertService', () => {
       outputArtifact: { id: 'output-1', format: 'abc' },
       content: 'X:1\nT:Converted\nM:4/4\nK:C\nC D E F|',
       contentEncoding: 'utf8',
+    });
+  });
+
+  it('infers kern content and converts it to MusicXML', async () => {
+    mocked.createScoreArtifact
+      .mockResolvedValueOnce({
+        id: 'input-kern',
+        format: 'kern',
+        content: '**kern\n*M4/4\n=1\n4c\n*-\n',
+      })
+      .mockResolvedValueOnce({
+        id: 'output-xml',
+        format: 'musicxml',
+        content: '<score-partwise version="3.1"></score-partwise>',
+      });
+
+    mocked.convertMusicNotation.mockResolvedValue({
+      inputFormat: 'kern',
+      outputFormat: 'musicxml',
+      content: '<score-partwise version="3.1"></score-partwise>',
+      contentEncoding: 'utf8',
+      normalization: { schemaVersion: 'music-normalization@1', format: 'musicxml', actions: [] },
+      validation: { schemaVersion: 'music-validation@1', summary: { error: 0 } },
+      provenance: { tool: 'convertMusicNotation' },
+    });
+
+    const result = await runMusicConvertService({
+      outputFormat: 'musicxml',
+      content: '**kern\n*M4/4\n=1\n4c\n*-\n',
+      includeContent: true,
+    });
+
+    expect(mocked.convertMusicNotation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputFormat: 'kern',
+        outputFormat: 'musicxml',
+        contentEncoding: 'utf8',
+      }),
+    );
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      inputArtifactId: 'input-kern',
+      outputArtifactId: 'output-xml',
+      outputArtifact: { id: 'output-xml', format: 'musicxml' },
+      content: '<score-partwise version="3.1"></score-partwise>',
+    });
+  });
+
+  it('infers Transcoda-style kern without an explicit spine declaration', async () => {
+    mocked.createScoreArtifact
+      .mockResolvedValueOnce({
+        id: 'input-transcoda-kern',
+        format: 'kern',
+        content: '*clefF4\n*k[]\n*M4/4\n16GGLL\n=\n',
+      })
+      .mockResolvedValueOnce({
+        id: 'output-xml',
+        format: 'musicxml',
+        content: '<score-partwise version="3.1"></score-partwise>',
+      });
+
+    mocked.convertMusicNotation.mockResolvedValue({
+      inputFormat: 'kern',
+      outputFormat: 'musicxml',
+      content: '<score-partwise version="3.1"></score-partwise>',
+      contentEncoding: 'utf8',
+      normalization: { schemaVersion: 'music-normalization@1', format: 'musicxml', actions: [] },
+      validation: { schemaVersion: 'music-validation@1', summary: { error: 0 } },
+      provenance: { tool: 'convertMusicNotation' },
+    });
+
+    const result = await runMusicConvertService({
+      outputFormat: 'musicxml',
+      content: '*clefF4\n*k[]\n*M4/4\n16GGLL\n=\n',
+      includeContent: true,
+    });
+
+    expect(mocked.convertMusicNotation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputFormat: 'kern',
+        outputFormat: 'musicxml',
+        content: '*clefF4\n*k[]\n*M4/4\n16GGLL\n=\n',
+      }),
+    );
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      inputArtifactId: 'input-transcoda-kern',
+      outputArtifactId: 'output-xml',
+      content: '<score-partwise version="3.1"></score-partwise>',
     });
   });
 

@@ -71,7 +71,7 @@ Keep grammar-constrained decoding out of the first Space unless you also vendor 
 2. Choose:
    - SDK: `Gradio`
    - Visibility: `Public` while prototyping, or `Private` if you do not want source visible.
-   - Suggested name: `transcoda-omr`
+   - Suggested name: `transcoda`
    - License: match model usage expectations; include attribution for CC BY 4.0.
 3. Select hardware:
    - Start with CPU only for boot testing.
@@ -79,8 +79,8 @@ Keep grammar-constrained decoding out of the first Space unless you also vendor 
 4. Clone the Space repository locally:
 
 ```bash
-git clone https://huggingface.co/spaces/<owner>/transcoda-omr
-cd transcoda-omr
+git clone https://huggingface.co/spaces/<owner>/transcoda
+cd transcoda
 ```
 
 ## Space Files
@@ -303,7 +303,7 @@ Python smoke test:
 ```python
 from gradio_client import Client, handle_file
 
-client = Client("<owner>/transcoda-omr")
+client = Client("<owner>/transcoda")
 result = client.predict(
     image=handle_file("./sample-page.png"),
     decoding="greedy",
@@ -329,7 +329,7 @@ Acceptance criteria:
 Once the Space exists, add separate Transcoda environment variables instead of reusing the NotaGen ones:
 
 ```bash
-MUSIC_TRANSCODA_SPACE_ID=<owner>/transcoda-omr
+MUSIC_TRANSCODA_SPACE_ID=<owner>/transcoda
 MUSIC_TRANSCODA_SPACE_TOKEN=
 MUSIC_TRANSCODA_MODEL_ID=btrkeks/transcoda-59M-zeroshot-v1
 MUSIC_TRANSCODA_REVISION=b529f8aa5d996d9224df3395b5b92d0867343c91

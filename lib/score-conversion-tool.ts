@@ -3,8 +3,8 @@ import type { ScoreArtifact, ScoreArtifactSummary } from './score-artifacts';
 import { resolveScoreEditorApiPath } from './score-editor-api-client';
 
 export type ScoreConversionToolRequest = {
-    inputFormat?: MusicFormat | 'xml' | 'mxl' | 'mid';
-    outputFormat: MusicFormat | 'xml' | 'mxl' | 'mid';
+    inputFormat?: MusicFormat | 'xml' | 'mxl' | 'mid' | 'krn' | '**kern' | 'humdrum';
+    outputFormat: MusicFormat | 'xml' | 'mxl' | 'mid' | 'krn' | '**kern' | 'humdrum';
     content?: string;
     contentBase64?: string;
     contentEncoding?: 'utf8' | 'base64';

@@ -36,6 +36,12 @@ ENV MUSIC_MMA_MAX_STDERR_CHARS=8000
 ENV MUSIC_HARMONY_PYTHON=python3
 ENV MUSIC_HARMONY_SCRIPT=/app/tools/music21_harmony/analyze_harmony.py
 ENV MUSIC_HARMONY_TIMEOUT_MS=180000
+ENV MUSIC_KERN_MUSICXML_SCRIPT=/app/tools/kern_conversion/convert_kern_musicxml.py
+ENV MUSIC_KERN_MUSICXML_TIMEOUT_MS=60000
+ENV MUSIC_TRANSCODA_SPACE_ID=jhlusko/transcoda
+ENV MUSIC_TRANSCODA_MODEL_ID=btrkeks/transcoda-59M-zeroshot-v1
+ENV MUSIC_TRANSCODA_REVISION=b529f8aa5d996d9224df3395b5b92d0867343c91
+ENV MUSIC_TRANSCODA_TIMEOUT_MS=300000
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \

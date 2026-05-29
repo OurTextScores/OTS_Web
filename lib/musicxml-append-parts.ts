@@ -5,6 +5,13 @@ export type AppendMusicXmlPartsResult = {
   warnings: string[];
 };
 
+export type AppendMusicXmlMeasuresResult = {
+  xml: string;
+  appendedMeasureCount: number;
+  targetPartIds: string[];
+  warnings: string[];
+};
+
 const isElement = (node: Node | null): node is Element => Boolean(node && node.nodeType === Node.ELEMENT_NODE);
 
 const firstChildElementByName = (parent: Element, localName: string): Element | null => {
@@ -165,6 +172,86 @@ const partNameFromPart = (part: Element, fallback: string) => {
     return name.textContent.trim();
   }
   return fallback;
+};
+
+const readHighestMeasureNumber = (part: Element) => {
+  let max = 0;
+  for (const measure of directChildrenByName(part, 'measure')) {
+    const raw = measure.getAttribute('number') || '';
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed > max) {
+      max = parsed;
+    }
+  }
+  return max;
+};
+
+const ensureNewPagePrint = (doc: Document, measure: Element) => {
+  const existingPrint = firstChildElementByName(measure, 'print');
+  if (existingPrint) {
+    existingPrint.setAttribute('new-page', 'yes');
+    return;
+  }
+  const print = doc.createElement('print');
+  print.setAttribute('new-page', 'yes');
+  measure.insertBefore(print, measure.firstChild);
+};
+
+export const appendMusicXmlMeasures = (baseXml: string, sourceXml: string): AppendMusicXmlMeasuresResult => {
+  const { doc: baseDoc, root: baseRoot } = parseMusicXml(baseXml, 'Target');
+  const { root: sourceRoot } = parseMusicXml(sourceXml, 'Generated');
+
+  const warnings: string[] = [];
+  const targetParts = directChildrenByName(baseRoot, 'part');
+  const sourceParts = directChildrenByName(sourceRoot, 'part');
+  if (!targetParts.length) {
+    throw new Error('Target MusicXML does not contain any <part> elements.');
+  }
+  if (!sourceParts.length) {
+    throw new Error('Generated MusicXML does not contain any <part> elements to append.');
+  }
+  if (sourceParts.length > targetParts.length) {
+    warnings.push(`Generated MusicXML has ${sourceParts.length} part(s), but the target has ${targetParts.length}; extra generated parts were ignored.`);
+  }
+
+  let appendedMeasureCount = 0;
+  const targetPartIds: string[] = [];
+  const pairCount = Math.min(sourceParts.length, targetParts.length);
+  for (let index = 0; index < pairCount; index += 1) {
+    const sourcePart = sourceParts[index];
+    const targetPart = targetParts[index];
+    const sourceMeasures = directChildrenByName(sourcePart, 'measure');
+    if (!sourceMeasures.length) {
+      warnings.push(`Generated part ${sourcePart.getAttribute('id') || index + 1} had no measures to append.`);
+      continue;
+    }
+
+    let nextMeasureNumber = readHighestMeasureNumber(targetPart) + 1;
+    let appendedForPart = 0;
+    for (const sourceMeasure of sourceMeasures) {
+      const measure = baseDoc.importNode(sourceMeasure, true) as Element;
+      measure.setAttribute('number', String(nextMeasureNumber));
+      if (appendedMeasureCount === 0) {
+        ensureNewPagePrint(baseDoc, measure);
+      }
+      targetPart.appendChild(measure);
+      nextMeasureNumber += 1;
+      appendedMeasureCount += 1;
+      appendedForPart += 1;
+    }
+
+    if (appendedForPart > 0) {
+      targetPartIds.push(targetPart.getAttribute('id') || `part-${index + 1}`);
+    }
+  }
+
+  const serializer = new XMLSerializer();
+  return {
+    xml: serializer.serializeToString(baseDoc),
+    appendedMeasureCount,
+    targetPartIds,
+    warnings,
+  };
 };
 
 export const appendMusicXmlParts = (baseXml: string, sourceXml: string): AppendMusicXmlPartsResult => {

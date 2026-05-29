@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { MusicConversionResult, MusicFormat } from './music-conversion';
 
-export type ScoreArtifactFormat = MusicFormat | 'mma' | 'json' | 'rntxt';
+export type ScoreArtifactFormat = MusicFormat | 'mma' | 'json' | 'rntxt' | 'png';
 
 export type ScoreArtifact = {
     id: string;

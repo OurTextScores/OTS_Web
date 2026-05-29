@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type TraceContext } from './trace-http';
 
-export type MusicFormat = 'abc' | 'musicxml' | 'midi';
+export type MusicFormat = 'abc' | 'musicxml' | 'midi' | 'kern';
 export type MusicContentEncoding = 'utf8' | 'base64';
 
 export type MusicConversionRequest = {
@@ -84,6 +84,7 @@ export type MusicConversionResult = {
         scripts: {
             xml2abc: string;
             abc2xml: string;
+            kernMusicXml?: string;
         };
         durationMs: number;
         stderr?: string;
@@ -103,6 +104,8 @@ type ConversionToolConfig = {
     pythonCommand: string;
     xml2abcScript: string;
     abc2xmlScript: string;
+    kernMusicXmlScript: string;
+    kernMusicXmlTimeoutMs: number;
     defaultTimeoutMs: number;
     musescoreTimeoutMs: number;
     musescoreBins: string[];
@@ -119,7 +122,9 @@ type RunCommandResult = {
 
 const DEFAULT_XML2ABC_SCRIPT = '/home/jhlusko/workspace/NotaGen/data/xml2abc.py';
 const DEFAULT_ABC2XML_SCRIPT = '/home/jhlusko/workspace/NotaGen/data/abc2xml.py';
+const DEFAULT_KERN_MUSICXML_SCRIPT = join(process.cwd(), 'tools/kern_conversion/convert_kern_musicxml.py');
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_KERN_MUSICXML_TIMEOUT_MS = 60_000;
 const DEFAULT_MUSESCORE_TIMEOUT_MS = 60_000;
 const DEFAULT_RENDER_SMOKE_TIMEOUT_MS = 20_000;
 
@@ -165,6 +170,9 @@ export function normalizeMusicFormat(value: unknown): MusicFormat | null {
     if (raw === 'midi' || raw === 'mid') {
         return 'midi';
     }
+    if (raw === 'kern' || raw === 'krn' || raw === '**kern' || raw === 'humdrum') {
+        return 'kern';
+    }
     return null;
 }
 
@@ -172,8 +180,13 @@ export function getMusicConversionToolConfig(): ConversionToolConfig {
     const pythonCommand = (process.env.MUSIC_CONVERT_PYTHON || 'python3').trim() || 'python3';
     const xml2abcScript = (process.env.MUSIC_XML2ABC_SCRIPT || DEFAULT_XML2ABC_SCRIPT).trim();
     const abc2xmlScript = (process.env.MUSIC_ABC2XML_SCRIPT || DEFAULT_ABC2XML_SCRIPT).trim();
+    const kernMusicXmlScript = (process.env.MUSIC_KERN_MUSICXML_SCRIPT || DEFAULT_KERN_MUSICXML_SCRIPT).trim();
     const timeoutValue = Number(process.env.MUSIC_CONVERT_TIMEOUT_MS);
     const defaultTimeoutMs = Number.isFinite(timeoutValue) && timeoutValue > 0 ? timeoutValue : DEFAULT_TIMEOUT_MS;
+    const kernTimeoutValue = Number(process.env.MUSIC_KERN_MUSICXML_TIMEOUT_MS);
+    const kernMusicXmlTimeoutMs = Number.isFinite(kernTimeoutValue) && kernTimeoutValue > 0
+        ? kernTimeoutValue
+        : (Number.isFinite(timeoutValue) && timeoutValue > 0 ? timeoutValue : DEFAULT_KERN_MUSICXML_TIMEOUT_MS);
     const musescoreTimeoutValue = Number(process.env.MUSIC_MUSESCORE_TIMEOUT_MS);
     const musescoreTimeoutMs = Number.isFinite(musescoreTimeoutValue) && musescoreTimeoutValue > 0
         ? musescoreTimeoutValue
@@ -200,6 +213,8 @@ export function getMusicConversionToolConfig(): ConversionToolConfig {
         pythonCommand,
         xml2abcScript,
         abc2xmlScript,
+        kernMusicXmlScript,
+        kernMusicXmlTimeoutMs,
         defaultTimeoutMs,
         musescoreTimeoutMs,
         musescoreBins,
@@ -273,6 +288,19 @@ export async function ensureMusicConversionToolsAvailable(): Promise<{
     }
     if (!checks[1]) {
         missing.push(`abc2xml script not found: ${config.abc2xmlScript}`);
+    }
+    return { ok: missing.length === 0, missing, config };
+}
+
+export async function ensureKernMusicXmlConversionToolsAvailable(): Promise<{
+    ok: boolean;
+    missing: string[];
+    config: ConversionToolConfig;
+}> {
+    const config = getMusicConversionToolConfig();
+    const missing: string[] = [];
+    if (!(await fileExists(config.kernMusicXmlScript))) {
+        missing.push(`kern/MusicXML converter script not found: ${config.kernMusicXmlScript}`);
     }
     return { ok: missing.length === 0, missing, config };
 }
@@ -499,12 +527,74 @@ function normalizeMidiTextWithReport(text: string): { content: string; report: N
     };
 }
 
+function normalizeKernTextWithReport(text: string): { content: string; report: NormalizationReport } {
+    const actions: NormalizationAction[] = [];
+    const inputBytes = Buffer.byteLength(text, 'utf8');
+    const normalizedBase = normalizeCommonText(text);
+    let normalized = normalizedBase.trim();
+    const lines = normalized ? normalized.split('\n') : [];
+    const firstContentIndex = lines.findIndex((line) => {
+        const trimmed = line.trim();
+        return trimmed && !trimmed.startsWith('!');
+    });
+    const hasKernSpine = lines.some((line) => /^\s*\*\*kern(?:\s|$)/.test(line));
+    const insertedKernSpine = Boolean(normalized && !hasKernSpine);
+    if (insertedKernSpine) {
+        const insertAt = firstContentIndex >= 0 ? firstContentIndex : 0;
+        lines.splice(insertAt, 0, '**kern');
+    }
+
+    const hasTerminator = lines.some((line) => /^\s*\*-(?:\s|$)/.test(line));
+    const insertedTerminator = Boolean(lines.length > 0 && !hasTerminator);
+    if (insertedTerminator) {
+        lines.push('*-');
+    }
+    normalized = lines.length ? `${lines.join('\n')}\n` : '';
+
+    actions.push({
+        id: 'line-endings-and-whitespace',
+        applied: normalizedBase !== text || normalized !== normalizedBase,
+        message: normalized !== text
+            ? 'Normalized **kern line endings/whitespace and ensured trailing newline.'
+            : 'No **kern normalization changes were needed.',
+    });
+    actions.push({
+        id: 'kern-spine-declaration',
+        applied: insertedKernSpine,
+        message: insertedKernSpine
+            ? 'Inserted missing **kern spine declaration.'
+            : '**kern spine declaration was already present.',
+    });
+    actions.push({
+        id: 'kern-spine-terminator',
+        applied: insertedTerminator,
+        message: insertedTerminator
+            ? 'Inserted missing **kern spine terminator.'
+            : '**kern spine terminator was already present.',
+    });
+
+    return {
+        content: normalized,
+        report: {
+            schemaVersion: 'music-normalization@1',
+            format: 'kern',
+            changed: normalized !== text,
+            inputBytes,
+            outputBytes: Buffer.byteLength(normalized, 'utf8'),
+            actions,
+        },
+    };
+}
+
 function normalizeTextForFormat(format: MusicFormat, text: string) {
     if (format === 'abc') {
         return normalizeAbcTextWithReport(text);
     }
     if (format === 'midi') {
         return normalizeMidiTextWithReport(text);
+    }
+    if (format === 'kern') {
+        return normalizeKernTextWithReport(text);
     }
     return normalizeMusicXmlTextWithReport(text);
 }
@@ -907,7 +997,7 @@ function buildValidationStages(checks: ValidationCheck[]): ValidationReport['sta
     return {
         outputShape: buildValidationStageStatus([
             ...byExact(['non-empty-output', 'midi-header']),
-            ...byPrefix(['abc-header-', 'musicxml-root', 'xml-declaration']),
+            ...byPrefix(['abc-header-', 'musicxml-root', 'xml-declaration', 'kern-']),
         ]),
         roundtrip: buildValidationStageStatus(byPrefix(['roundtrip-'])),
         render: buildValidationStageStatus(byPrefix(['render-smoke-musescore'])),
@@ -970,7 +1060,7 @@ const basicValidationChecks = (format: MusicFormat, content: string, midiBytes?:
                 ? 'XML declaration detected.'
                 : 'XML declaration is missing (usually acceptable, but atypical).',
         });
-    } else {
+    } else if (format === 'midi') {
         const resolvedMidiBytes = midiBytes === undefined ? decodeMidiBase64(trimmed) : midiBytes;
         const hasHeader = Boolean(resolvedMidiBytes && resolvedMidiBytes.length >= 4 && resolvedMidiBytes.subarray(0, 4).toString('ascii') === 'MThd');
         checks.push({
@@ -980,6 +1070,23 @@ const basicValidationChecks = (format: MusicFormat, content: string, midiBytes?:
             message: hasHeader
                 ? 'MIDI header detected.'
                 : 'MIDI header (MThd) not detected; payload is not valid base64 MIDI.',
+        });
+    } else {
+        checks.push({
+            id: 'kern-spine',
+            ok: /(^|\n)\*\*kern(\s|$)/m.test(trimmed),
+            severity: 'error',
+            message: /(^|\n)\*\*kern(\s|$)/m.test(trimmed)
+                ? '**kern spine declaration detected.'
+                : '**kern spine declaration was not detected.',
+        });
+        checks.push({
+            id: 'kern-terminator',
+            ok: /(^|\n)\*-(\s|$)/m.test(trimmed),
+            severity: 'warning',
+            message: /(^|\n)\*-(\s|$)/m.test(trimmed)
+                ? '**kern spine terminator detected.'
+                : '**kern spine terminator was not detected.',
         });
     }
 
@@ -1038,6 +1145,10 @@ async function buildValidationChecks(args: {
         ? 'musicxml'
         : outputFormat === 'midi'
             ? 'musicxml'
+            : outputFormat === 'kern'
+                ? 'musicxml'
+                : inputFormat === 'kern'
+                    ? 'kern'
             : inputFormat === 'midi'
                 ? 'midi'
                 : 'abc';
@@ -1586,6 +1697,62 @@ async function convertMidiToXml(args: {
     }
 }
 
+async function convertKernToXml(args: {
+    config: ConversionToolConfig;
+    content: string;
+    timeoutMs: number;
+    filename?: string;
+}) {
+    const { config, content, timeoutMs, filename } = args;
+    const tempDir = await mkdtemp(join(tmpdir(), 'ots-music-convert-'));
+    try {
+        const inputPath = join(tempDir, sanitizeFilename(filename || 'input.krn', 'kern'));
+        const outputPath = join(tempDir, `${stripExtension(inputPath.split('/').pop() || 'output')}.musicxml`);
+        await writeFile(inputPath, normalizeTextForFormat('kern', content).content, 'utf8');
+        const result = await runCommand({
+            command: config.pythonCommand,
+            argv: [config.kernMusicXmlScript, 'kern-to-musicxml', inputPath, outputPath],
+            cwd: tempDir,
+            timeoutMs,
+        });
+        if ((result.exitCode ?? 1) !== 0) {
+            throw new Error(result.stderr.trim() || `kern-to-musicxml exited with code ${result.exitCode ?? 'unknown'}.`);
+        }
+        const xml = await readFile(outputPath, 'utf8');
+        return { output: normalizeTextForFormat('musicxml', xml).content, stderr: result.stderr.trim() };
+    } finally {
+        await rm(tempDir, { recursive: true, force: true });
+    }
+}
+
+async function convertXmlToKern(args: {
+    config: ConversionToolConfig;
+    content: string;
+    timeoutMs: number;
+    filename?: string;
+}) {
+    const { config, content, timeoutMs, filename } = args;
+    const tempDir = await mkdtemp(join(tmpdir(), 'ots-music-convert-'));
+    try {
+        const inputPath = join(tempDir, sanitizeFilename(filename || 'input.musicxml', 'musicxml'));
+        const outputPath = join(tempDir, `${stripExtension(inputPath.split('/').pop() || 'output')}.krn`);
+        await writeFile(inputPath, normalizeTextForFormat('musicxml', content).content, 'utf8');
+        const result = await runCommand({
+            command: config.pythonCommand,
+            argv: [config.kernMusicXmlScript, 'musicxml-to-kern', inputPath, outputPath],
+            cwd: tempDir,
+            timeoutMs,
+        });
+        if ((result.exitCode ?? 1) !== 0) {
+            throw new Error(result.stderr.trim() || `musicxml-to-kern exited with code ${result.exitCode ?? 'unknown'}.`);
+        }
+        const kern = await readFile(outputPath, 'utf8');
+        return { output: normalizeTextForFormat('kern', kern).content, stderr: result.stderr.trim() };
+    } finally {
+        await rm(tempDir, { recursive: true, force: true });
+    }
+}
+
 async function convertBetweenFormats(args: {
     config: ConversionToolConfig;
     inputFormat: MusicFormat;
@@ -1631,6 +1798,12 @@ async function convertBetweenFormats(args: {
             traceContext,
         });
     }
+    if (inputFormat === 'kern' && outputFormat === 'musicxml') {
+        return convertKernToXml({ config, content, timeoutMs, filename });
+    }
+    if (inputFormat === 'musicxml' && outputFormat === 'kern') {
+        return convertXmlToKern({ config, content, timeoutMs, filename });
+    }
     throw new Error(`Unsupported conversion: ${inputFormat} -> ${outputFormat}`);
 }
 
@@ -1646,6 +1819,9 @@ function sanitizeFilename(filename: string, fallbackFormat: MusicFormat) {
     }
     if (fallbackFormat === 'midi') {
         return safe.endsWith('.midi') || safe.endsWith('.mid') ? safe : `${stripExtension(safe)}.mid`;
+    }
+    if (fallbackFormat === 'kern') {
+        return safe.endsWith('.krn') || safe.endsWith('.kern') ? safe : `${stripExtension(safe)}.krn`;
     }
     if (safe.endsWith('.xml') || safe.endsWith('.musicxml') || safe.endsWith('.mxl')) {
         return safe;
@@ -1850,6 +2026,7 @@ export async function convertMusicNotation(request: MusicConversionRequest): Pro
                 scripts: {
                     xml2abc: toolConfig.xml2abcScript,
                     abc2xml: toolConfig.abc2xmlScript,
+                    kernMusicXml: toolConfig.kernMusicXmlScript,
                 },
                 durationMs: Date.now() - startedAt,
             },
@@ -1872,10 +2049,25 @@ export async function convertMusicNotation(request: MusicConversionRequest): Pro
         }
         config = tools.config;
     }
+    if (inputFormat === 'kern' || outputFormat === 'kern') {
+        const tools = await ensureKernMusicXmlConversionToolsAvailable();
+        if (!tools.ok) {
+            logMusicConvertEvent({
+                level: 'error',
+                event: 'music.convert.tools.unavailable',
+                traceContext,
+                extra: {
+                    missing: tools.missing,
+                },
+            });
+            throw new Error(`Kern/MusicXML conversion tools unavailable: ${tools.missing.join(' | ')}`);
+        }
+        config = tools.config;
+    }
 
     const timeoutMs = Number.isFinite(request.timeoutMs) && (request.timeoutMs || 0) > 0
         ? Number(request.timeoutMs)
-        : config.defaultTimeoutMs;
+        : (inputFormat === 'kern' || outputFormat === 'kern' ? config.kernMusicXmlTimeoutMs : config.defaultTimeoutMs);
 
     let converted: { output: string; stderr: string };
     try {
@@ -1957,6 +2149,7 @@ export async function convertMusicNotation(request: MusicConversionRequest): Pro
             scripts: {
                 xml2abc: config.xml2abcScript,
                 abc2xml: config.abc2xmlScript,
+                kernMusicXml: config.kernMusicXmlScript,
             },
             durationMs,
             stderr: converted.stderr || undefined,
