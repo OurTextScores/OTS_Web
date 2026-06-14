@@ -13012,9 +13012,9 @@ ${partsBodyXml}
                             onClick={() => {
                                 setXmlSidebarMode((prev) => (prev === 'closed' ? 'open' : prev === 'open' ? 'full' : 'closed'));
                             }}
-                            className="text-xs font-medium text-gray-600 hover:text-gray-900"
+                            className="text-xs font-medium text-gray-600 hover:text-blue-600"
                         >
-                            {xmlSidebarMode === 'closed' ? 'Open' : xmlSidebarMode === 'open' ? 'Full' : 'Close'}
+                            {xmlSidebarMode === 'closed' ? 'Open Sidebar <<' : xmlSidebarMode === 'open' ? 'Full' : 'Close'}
                         </button>
                     </div>
                     {xmlSidebarMode !== 'closed' && (
