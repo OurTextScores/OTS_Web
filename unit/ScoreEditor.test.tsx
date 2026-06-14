@@ -20,7 +20,40 @@ vi.mock('../lib/webmscore-loader', () => ({
   loadWebMscoreInProcess: mocked.loadWebMscoreInProcess,
 }));
 
-import ScoreEditor from '../components/ScoreEditor';
+import ScoreEditor, { sortChangeReviewRegionsByMeasure } from '../components/ScoreEditor';
+
+describe('sortChangeReviewRegionsByMeasure', () => {
+  it('orders change review cards by measure, then part', () => {
+    const region = (label: string, partIndex: number, headMeasureIndex: number) => ({
+      anchorId: `${partIndex}-${headMeasureIndex}`,
+      partId: `${partIndex}`,
+      partIndex,
+      side: 'head' as const,
+      changeType: 'modified' as const,
+      headMeasureIndex,
+      label,
+      summary: '',
+      commentable: true,
+      regionHash: '',
+    });
+
+    const sorted = sortChangeReviewRegionsByMeasure([
+      region('Violin 1 m18', 0, 17),
+      region('Viola m14', 2, 13),
+      region('Violin 2 m4', 1, 3),
+      region('Viola m11', 2, 10),
+      region('Violin 1 m14', 0, 13),
+    ]);
+
+    expect(sorted.map(({ label }) => label)).toEqual([
+      'Violin 2 m4',
+      'Viola m11',
+      'Violin 1 m14',
+      'Viola m14',
+      'Violin 1 m18',
+    ]);
+  });
+});
 
 describe('ScoreEditor', () => {
   const suppressConsole = () => {

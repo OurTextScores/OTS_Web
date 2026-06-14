@@ -168,6 +168,14 @@ type ChangeReviewDiff = {
     threads: ChangeReviewThread[];
 };
 
+export function sortChangeReviewRegionsByMeasure(regions: ChangeReviewScoreRegion[]) {
+    return [...regions].sort((a, b) => {
+        const aIndex = a.headMeasureIndex ?? a.baseMeasureIndex ?? Number.MAX_SAFE_INTEGER;
+        const bIndex = b.headMeasureIndex ?? b.baseMeasureIndex ?? Number.MAX_SAFE_INTEGER;
+        return aIndex - bIndex || a.partIndex - b.partIndex;
+    });
+}
+
 type MeasureAlignmentRow = {
     leftIndex: number | null;
     rightIndex: number | null;
@@ -2383,21 +2391,8 @@ export default function ScoreEditor() {
         });
         return map;
     }, [changeReviewDiff]);
-    const changeReviewRegionsByPart = useMemo(() => {
-        const map = new Map<number, ChangeReviewScoreRegion[]>();
-        changeReviewDiff?.scoreRegions.forEach((region) => {
-            const bucket = map.get(region.partIndex) || [];
-            bucket.push(region);
-            map.set(region.partIndex, bucket);
-        });
-        map.forEach((regions) => {
-            regions.sort((a, b) => {
-                const aIndex = a.headMeasureIndex ?? a.baseMeasureIndex ?? Number.MAX_SAFE_INTEGER;
-                const bIndex = b.headMeasureIndex ?? b.baseMeasureIndex ?? Number.MAX_SAFE_INTEGER;
-                return aIndex - bIndex;
-            });
-        });
-        return map;
+    const changeReviewRegionsInMeasureOrder = useMemo(() => {
+        return sortChangeReviewRegionsByMeasure(changeReviewDiff?.scoreRegions || []);
     }, [changeReviewDiff]);
     const refreshChangeReview = useCallback(async () => {
         if (!changeReviewId) {
@@ -7140,14 +7135,14 @@ ${partsBodyXml}
                 let rightSignatures: string[][] = [];
                 let usedXml = false;
                 try {
-                    if (compareView.currentXml && compareView.checkpointXml) {
-                        leftSignatures = extractMeasureSignaturesFromXml(compareView.currentXml);
-                        rightSignatures = extractMeasureSignaturesFromXml(compareView.checkpointXml);
+                    if (compareLeftXml && compareRightXml) {
+                        leftSignatures = extractMeasureSignaturesFromXml(compareLeftXml);
+                        rightSignatures = extractMeasureSignaturesFromXml(compareRightXml);
                         usedXml = true;
-                    } else if (score && compareRightScore) {
+                    } else if (compareLeftScore && compareRightScoreDisplay) {
                         const [leftMscx, rightMscx] = await Promise.all([
-                            getScoreMscxText(score),
-                            getScoreMscxText(compareRightScore),
+                            getScoreMscxText(compareLeftScore),
+                            getScoreMscxText(compareRightScoreDisplay),
                         ]);
                         if (leftMscx && rightMscx) {
                             leftSignatures = extractMeasureSignaturesFromXml(leftMscx);
@@ -7160,17 +7155,17 @@ ${partsBodyXml}
                 }
 
                 if (!usedXml) {
-                    if (!score || !compareRightScore) {
+                    if (!compareLeftScore || !compareRightScoreDisplay) {
                         setCompareAlignments([]);
                         setCompareSignatures(null);
                         return;
                     }
-                    const partCount = Math.max(scoreParts.length, compareRightParts.length, 1);
+                    const partCount = Math.max(compareLeftParts.length, compareRightPartsDisplay.length, 1);
                     leftSignatures = await Promise.all(
-                        Array.from({ length: partCount }, (_, index) => fetchMeasureSignatures(score, index)),
+                        Array.from({ length: partCount }, (_, index) => fetchMeasureSignatures(compareLeftScore, index)),
                     );
                     rightSignatures = await Promise.all(
-                        Array.from({ length: partCount }, (_, index) => fetchMeasureSignatures(compareRightScore, index)),
+                        Array.from({ length: partCount }, (_, index) => fetchMeasureSignatures(compareRightScoreDisplay, index)),
                     );
                 }
 
@@ -7229,10 +7224,12 @@ ${partsBodyXml}
     }, [
         compareView,
         compareAlignmentRevision,
-        scoreParts.length,
-        compareRightParts.length,
-        score,
-        compareRightScore,
+        compareLeftXml,
+        compareRightXml,
+        compareLeftParts.length,
+        compareRightPartsDisplay.length,
+        compareLeftScore,
+        compareRightScoreDisplay,
         fetchMeasureSignatures,
         buildLcsAlignment,
         buildIndexAlignment,
@@ -15270,15 +15267,20 @@ ${partsBodyXml}
                                                 </div>
                                             )}
                                             {!compareAlignmentLoading && Array.from({ length: comparePartCount }).map((_, index) => {
+                                                if (isChangeReviewCompareMode && index > 0) {
+                                                    return null;
+                                                }
                                                 const alignment = compareAlignmentByPart.get(index);
                                                 const rows = alignment?.rows ?? [];
                                                 const blocks = buildMismatchBlocks(rows);
-                                                const changeReviewRegions = changeReviewRegionsByPart.get(index) || [];
-                                                const partName = compareLeftParts[index]?.name
-                                                    || compareLeftParts[index]?.instrumentName
-                                                    || compareRightPartsDisplay[index]?.name
-                                                    || compareRightPartsDisplay[index]?.instrumentName
-                                                    || `Part ${index + 1}`;
+                                                const changeReviewRegions = isChangeReviewCompareMode ? changeReviewRegionsInMeasureOrder : [];
+                                                const partName = isChangeReviewCompareMode
+                                                    ? 'All parts'
+                                                    : compareLeftParts[index]?.name
+                                                        || compareLeftParts[index]?.instrumentName
+                                                        || compareRightPartsDisplay[index]?.name
+                                                        || compareRightPartsDisplay[index]?.instrumentName
+                                                        || `Part ${index + 1}`;
                                                 return (
                                                     <div
                                                         key={`compare-gutter-${index}`}
@@ -15308,8 +15310,7 @@ ${partsBodyXml}
                                                             )}
                                                             {isChangeReviewCompareMode && changeReviewRegions.length > 0 && (
                                                                 <div
-                                                                    className="relative w-full"
-                                                                    style={{ height: `${compareGutterTrackHeight}px` }}
+                                                                    className="grid w-full gap-2"
                                                                     onClick={() => setChangeReviewFocusedAnchorId(null)}
                                                                 >
                                                                     {changeReviewRegions.map((region) => {
@@ -15318,22 +15319,6 @@ ${partsBodyXml}
                                                                         const rightIndex = region.headMeasureIndex ?? null;
                                                                         const leftDiff = leftIndex !== null;
                                                                         const rightDiff = rightIndex !== null;
-                                                                        const blockLayouts: Array<{ top: number; height: number }> = [];
-                                                                        if (leftIndex !== null && compareLeftBounds[leftIndex]) {
-                                                                            blockLayouts.push(compareLeftBounds[leftIndex]);
-                                                                        }
-                                                                        if (rightIndex !== null && compareRightBounds[rightIndex]) {
-                                                                            blockLayouts.push(compareRightBounds[rightIndex]);
-                                                                        }
-                                                                        const fallbackIndex = rightIndex ?? leftIndex ?? 0;
-                                                                        let blockTop = compareHeaderSpacerHeight + (fallbackIndex * compareGutterRowHeight);
-                                                                        let blockHeight = compareGutterRowHeight;
-                                                                        if (blockLayouts.length) {
-                                                                            const minTop = Math.min(...blockLayouts.map((item) => item.top));
-                                                                            const maxBottom = Math.max(...blockLayouts.map((item) => item.top + item.height));
-                                                                            blockTop = minTop;
-                                                                            blockHeight = Math.max(compareGutterRowHeight, maxBottom - minTop);
-                                                                        }
                                                                         const regionColorClasses = region.changeType === 'added'
                                                                             ? 'border-emerald-300'
                                                                             : region.changeType === 'removed'
@@ -15344,10 +15329,8 @@ ${partsBodyXml}
                                                                         return (
                                                                             <div
                                                                                 key={`compare-review-region-${index}-${region.anchorId}`}
-                                                                                className={`absolute left-0 right-0 cursor-pointer rounded border bg-white px-2 py-2 transition-opacity duration-150 ${regionColorClasses}${isDimmed ? ' opacity-40' : ''}${isFocused ? ' ring-2 ring-blue-400 shadow-md' : ''}`}
+                                                                                className={`relative cursor-pointer rounded border bg-white px-2 py-2 transition-opacity duration-150 ${regionColorClasses}${isDimmed ? ' opacity-40' : ''}${isFocused ? ' ring-2 ring-blue-400 shadow-md' : ''}`}
                                                                                 style={{
-                                                                                    top: `${blockTop}px`,
-                                                                                    minHeight: `${blockHeight}px`,
                                                                                     zIndex: isFocused ? 50 : 10,
                                                                                 }}
                                                                                 onClick={(e) => {
