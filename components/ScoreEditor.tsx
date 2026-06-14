@@ -92,6 +92,12 @@ type CompareViewState = {
     checkpointLabel?: string;
 };
 
+type CompareBlockComment = {
+    comment: string;
+    leftIndices: number[];
+    rightIndices: number[];
+};
+
 type ChangeReviewDetail = {
     reviewId: string;
     workId: string;
@@ -1040,6 +1046,8 @@ export default function ScoreEditor() {
     const [compareAlignmentLoading, setCompareAlignmentLoading] = useState(false);
     const [compareAlignmentRevision, setCompareAlignmentRevision] = useState(0);
     const [compareSwapBusy, setCompareSwapBusy] = useState(false);
+    const [compareBlockComments, setCompareBlockComments] = useState<Record<string, CompareBlockComment>>({});
+    const [compareFocusedBlockKey, setCompareFocusedBlockKey] = useState<string | null>(null);
     const [changeReviewDetail, setChangeReviewDetail] = useState<ChangeReviewDetail | null>(null);
     const [changeReviewDiff, setChangeReviewDiff] = useState<ChangeReviewDiff | null>(null);
     const [changeReviewScoreView, setChangeReviewScoreView] = useState<ChangeReviewScoreView | null>(null);
@@ -2924,7 +2932,7 @@ export default function ScoreEditor() {
     }, [compareAlignments, compareLeftMeasurePositions, compareRightMeasurePositions]);
     const buildMeasureHighlights = useCallback((
         positions: Positions | null,
-        statuses: Array<'old-diff' | 'new-diff' | null>,
+        statuses: Array<'old-diff' | 'new-diff' | 'commented' | null>,
         zoomValue: number,
     ) => {
         if (!positions || !positions.elements.length) {
@@ -3001,6 +3009,32 @@ export default function ScoreEditor() {
             isChangeReviewCompareMode,
         ],
     );
+    const compareCommentedLeftHighlights = useMemo(() => {
+        if (isChangeReviewCompareMode || isAiCompareMode) return [];
+        const indices = new Set<number>();
+        Object.values(compareBlockComments).forEach(({ comment, leftIndices }) => {
+            if (comment.trim()) leftIndices.forEach((i) => indices.add(i));
+        });
+        if (indices.size === 0) return [];
+        const statuses = Array.from(
+            { length: compareLeftMeasurePositions?.elements.length ?? 0 },
+            (_, i) => (indices.has(i) ? 'commented' as const : null),
+        );
+        return buildMeasureHighlights(compareLeftMeasurePositions, statuses, compareEffectiveZoom);
+    }, [compareBlockComments, compareLeftMeasurePositions, compareEffectiveZoom, buildMeasureHighlights, isChangeReviewCompareMode, isAiCompareMode]);
+    const compareCommentedRightHighlights = useMemo(() => {
+        if (isChangeReviewCompareMode || isAiCompareMode) return [];
+        const indices = new Set<number>();
+        Object.values(compareBlockComments).forEach(({ comment, rightIndices }) => {
+            if (comment.trim()) rightIndices.forEach((i) => indices.add(i));
+        });
+        if (indices.size === 0) return [];
+        const statuses = Array.from(
+            { length: compareRightMeasurePositions?.elements.length ?? 0 },
+            (_, i) => (indices.has(i) ? 'commented' as const : null),
+        );
+        return buildMeasureHighlights(compareRightMeasurePositions, statuses, compareEffectiveZoom);
+    }, [compareBlockComments, compareRightMeasurePositions, compareEffectiveZoom, buildMeasureHighlights, isChangeReviewCompareMode, isAiCompareMode]);
     useEffect(() => {
         if (!isChangeReviewSingleScoreMode || !score) {
             setChangeReviewMeasurePositions(null);
@@ -15582,6 +15616,20 @@ ${partsBodyXml}
                                                             }}
                                                         />
                                                     ))}
+                                                    {compareCommentedLeftHighlights.map((highlight) => (
+                                                        <div
+                                                            key={`compare-left-comment-${highlight.id}`}
+                                                            className="absolute rounded-sm border-2"
+                                                            style={{
+                                                                left: `${highlight.left}px`,
+                                                                top: `${highlight.top}px`,
+                                                                width: `${highlight.width}px`,
+                                                                height: `${highlight.height}px`,
+                                                                backgroundColor: 'rgba(245, 158, 11, 0.25)',
+                                                                borderColor: 'rgb(245, 158, 11)',
+                                                            }}
+                                                        />
+                                                    ))}
                                                 </div>
                                             </div>
                                             </div>
@@ -15898,6 +15946,9 @@ ${partsBodyXml}
                                                                     blockTop = minTop;
                                                                     blockHeight = Math.max(compareGutterRowHeight, maxBottom - minTop);
                                                                 }
+                                                                const blockComment = compareBlockComments[blockKey];
+                                                                const hasComment = Boolean(blockComment?.comment.trim());
+                                                                const isCommentFocused = compareFocusedBlockKey === blockKey;
                                                                 return (
                                                                     <div
                                                                         key={`compare-gutter-block-${index}-${blockIndex}`}
@@ -15910,11 +15961,13 @@ ${partsBodyXml}
                                                                                         : reviewStatus === 'comment'
                                                                                             ? 'border-sky-300'
                                                                                             : 'border-gray-200')
-                                                                                : 'border-gray-200'
+                                                                                : hasComment
+                                                                                    ? 'border-amber-400'
+                                                                                    : 'border-gray-200'
                                                                         }`}
                                                                         style={{
                                                                             top: `${blockTop}px`,
-                                                                            height: `${blockHeight}px`,
+                                                                            minHeight: `${blockHeight}px`,
                                                                         }}
                                                                     >
                                                                         <div className="flex items-center justify-between text-[9px] text-gray-400">
@@ -16087,6 +16140,83 @@ ${partsBodyXml}
                                                                                 </button>
                                                                             </div>
                                                                         )}
+                                                                        {!isAiCompareMode && (
+                                                                            <div className="mt-1 grid gap-1">
+                                                                                {hasComment && !isCommentFocused ? (
+                                                                                    <div className="grid gap-1 rounded border border-amber-200 bg-amber-50 px-2 py-1">
+                                                                                        <div className="flex items-center justify-between gap-2">
+                                                                                            <span className="text-[9px] font-semibold uppercase tracking-wide text-amber-700">Note</span>
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                className="text-[9px] text-amber-600 hover:text-amber-800"
+                                                                                                onClick={() => setCompareFocusedBlockKey(blockKey)}
+                                                                                            >
+                                                                                                Edit
+                                                                                            </button>
+                                                                                        </div>
+                                                                                        <div className="whitespace-pre-wrap text-[10px] text-amber-900">
+                                                                                            {blockComment.comment}
+                                                                                        </div>
+                                                                                        <div className="flex justify-end">
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                className="text-[9px] text-gray-400 hover:text-rose-600"
+                                                                                                onClick={() => setCompareBlockComments((prev) => {
+                                                                                                    const next = { ...prev };
+                                                                                                    delete next[blockKey];
+                                                                                                    return next;
+                                                                                                })}
+                                                                                            >
+                                                                                                Remove
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ) : isCommentFocused ? (
+                                                                                    <>
+                                                                                        <textarea
+                                                                                            autoFocus
+                                                                                            defaultValue={blockComment?.comment ?? ''}
+                                                                                            placeholder="Add a note about this difference…"
+                                                                                            rows={3}
+                                                                                            className="min-h-[60px] w-full rounded border border-amber-300 bg-white px-2 py-1 text-[10px] text-gray-900 placeholder-gray-400"
+                                                                                            onKeyDown={(e) => {
+                                                                                                if (e.key === 'Escape') setCompareFocusedBlockKey(null);
+                                                                                            }}
+                                                                                            onChange={(e) => {
+                                                                                                const text = e.target.value;
+                                                                                                setCompareBlockComments((prev) => ({
+                                                                                                    ...prev,
+                                                                                                    [blockKey]: {
+                                                                                                        comment: text,
+                                                                                                        leftIndices,
+                                                                                                        rightIndices,
+                                                                                                    },
+                                                                                                }));
+                                                                                            }}
+                                                                                        />
+                                                                                        <div className="flex justify-end gap-2">
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                className="rounded border border-gray-300 bg-white px-2 py-1 text-[10px] text-gray-700"
+                                                                                                onClick={() => setCompareFocusedBlockKey(null)}
+                                                                                            >
+                                                                                                Done
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </>
+                                                                                ) : (
+                                                                                    <div className="flex justify-end">
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            className="rounded border border-gray-200 bg-white px-2 py-0.5 text-[10px] text-gray-500 hover:border-amber-300 hover:text-amber-700"
+                                                                                            onClick={() => setCompareFocusedBlockKey(blockKey)}
+                                                                                        >
+                                                                                            + Note
+                                                                                        </button>
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 );
                                                             })}
@@ -16169,6 +16299,20 @@ ${partsBodyXml}
                                                                 height: `${highlight.height}px`,
                                                                 backgroundColor: highlight.status === 'old-diff' ? 'rgba(244, 63, 94, 0.3)' : 'rgba(16, 185, 129, 0.3)',
                                                                 borderColor: highlight.status === 'old-diff' ? 'rgb(244, 63, 94)' : 'rgb(16, 185, 129)',
+                                                            }}
+                                                        />
+                                                    ))}
+                                                    {compareCommentedRightHighlights.map((highlight) => (
+                                                        <div
+                                                            key={`compare-right-comment-${highlight.id}`}
+                                                            className="absolute rounded-sm border-2"
+                                                            style={{
+                                                                left: `${highlight.left}px`,
+                                                                top: `${highlight.top}px`,
+                                                                width: `${highlight.width}px`,
+                                                                height: `${highlight.height}px`,
+                                                                backgroundColor: 'rgba(245, 158, 11, 0.25)',
+                                                                borderColor: 'rgb(245, 158, 11)',
                                                             }}
                                                         />
                                                     ))}
