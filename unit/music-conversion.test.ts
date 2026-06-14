@@ -83,11 +83,13 @@ describe('music-conversion MVP', () => {
     const result = await convertMusicNotation({
       inputFormat: 'kern',
       outputFormat: 'kern',
-      content: '*clefF4\n*k[]\n*M4/4\n16GGLL\n=\n',
+      content: '*clefF4\t*clefG2\n*k[]\t*k[]\n*M4/4\t*M4/4\n16GGLL\t16ccLL\n=\t=\n',
       deepValidate: false,
     });
 
-    expect(result.content).toBe('**kern\n*clefF4\n*k[]\n*M4/4\n16GGLL\n=\n*-\n');
+    expect(result.content).toBe(
+      '**kern\t**kern\n*clefF4\t*clefG2\n*k[]\t*k[]\n*M4/4\t*M4/4\n16GGLL\t16ccLL\n=\t=\n*-\t*-\n',
+    );
     expect(result.normalization.actions).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'kern-spine-declaration', applied: true }),
       expect.objectContaining({ id: 'kern-spine-terminator', applied: true }),

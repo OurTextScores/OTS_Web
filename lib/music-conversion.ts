@@ -533,6 +533,7 @@ function normalizeKernTextWithReport(text: string): { content: string; report: N
     const normalizedBase = normalizeCommonText(text);
     let normalized = normalizedBase.trim();
     const lines = normalized ? normalized.split('\n') : [];
+    const countSpines = (line: string) => line.split('\t').length;
     const firstContentIndex = lines.findIndex((line) => {
         const trimmed = line.trim();
         return trimmed && !trimmed.startsWith('!');
@@ -541,13 +542,19 @@ function normalizeKernTextWithReport(text: string): { content: string; report: N
     const insertedKernSpine = Boolean(normalized && !hasKernSpine);
     if (insertedKernSpine) {
         const insertAt = firstContentIndex >= 0 ? firstContentIndex : 0;
-        lines.splice(insertAt, 0, '**kern');
+        const spineCount = firstContentIndex >= 0 ? countSpines(lines[firstContentIndex]) : 1;
+        lines.splice(insertAt, 0, Array.from({ length: spineCount }, () => '**kern').join('\t'));
     }
 
     const hasTerminator = lines.some((line) => /^\s*\*-(?:\s|$)/.test(line));
     const insertedTerminator = Boolean(lines.length > 0 && !hasTerminator);
     if (insertedTerminator) {
-        lines.push('*-');
+        const lastContentLine = [...lines].reverse().find((line) => {
+            const trimmed = line.trim();
+            return trimmed && !trimmed.startsWith('!');
+        });
+        const spineCount = lastContentLine ? countSpines(lastContentLine) : 1;
+        lines.push(Array.from({ length: spineCount }, () => '*-').join('\t'));
     }
     normalized = lines.length ? `${lines.join('\n')}\n` : '';
 

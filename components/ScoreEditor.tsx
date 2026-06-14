@@ -15386,9 +15386,10 @@ ${partsBodyXml}
                                                                     No commentable diff lines
                                                                 </div>
                                                             )}
-                                                            {isChangeReviewCompareMode && changeReviewRegions.length > 0 && (
+                                                            {isChangeReviewCompareMode && changeReviewRegions.length > 0 && compareLeftMeasurePositions && compareRightMeasurePositions && (
                                                                 <div
-                                                                    className="grid w-full gap-2"
+                                                                    className="relative w-full"
+                                                                    style={{ height: `${compareGutterTrackHeight}px` }}
                                                                     onClick={() => setChangeReviewFocusedAnchorId(null)}
                                                                 >
                                                                     {changeReviewRegions.map((region) => {
@@ -15404,11 +15405,30 @@ ${partsBodyXml}
                                                                                 : 'border-amber-300';
                                                                         const isFocused = changeReviewFocusedAnchorId === region.anchorId;
                                                                         const isDimmed = changeReviewFocusedAnchorId !== null && !isFocused;
+                                                                        const regionBounds: Array<{ top: number; height: number }> = [];
+                                                                        if (leftIndex !== null && compareLeftBounds[leftIndex]) {
+                                                                            const b = compareLeftBounds[leftIndex];
+                                                                            const partH = b.height / comparePartCount;
+                                                                            regionBounds.push({ top: b.top + partH * region.partIndex, height: partH });
+                                                                        }
+                                                                        if (rightIndex !== null && compareRightBounds[rightIndex]) {
+                                                                            const b = compareRightBounds[rightIndex];
+                                                                            const partH = b.height / comparePartCount;
+                                                                            regionBounds.push({ top: b.top + partH * region.partIndex, height: partH });
+                                                                        }
+                                                                        const blockTop = regionBounds.length
+                                                                            ? Math.min(...regionBounds.map((b) => b.top))
+                                                                            : compareHeaderSpacerHeight;
+                                                                        const blockHeight = regionBounds.length
+                                                                            ? Math.max(compareGutterRowHeight, Math.max(...regionBounds.map((b) => b.top + b.height)) - blockTop)
+                                                                            : compareGutterRowHeight;
                                                                         return (
                                                                             <div
                                                                                 key={`compare-review-region-${index}-${region.anchorId}`}
-                                                                                className={`relative cursor-pointer rounded border bg-white px-2 py-2 transition-opacity duration-150 ${regionColorClasses}${isDimmed ? ' opacity-40' : ''}${isFocused ? ' ring-2 ring-blue-400 shadow-md' : ''}`}
+                                                                                className={`absolute left-0 right-0 cursor-pointer rounded border bg-white px-2 py-2 transition-opacity duration-150 ${regionColorClasses}${isDimmed ? ' opacity-40' : ''}${isFocused ? ' ring-2 ring-blue-400 shadow-md' : ''}`}
                                                                                 style={{
+                                                                                    top: `${blockTop}px`,
+                                                                                    minHeight: `${blockHeight}px`,
                                                                                     zIndex: isFocused ? 50 : 10,
                                                                                 }}
                                                                                 onClick={(e) => {
