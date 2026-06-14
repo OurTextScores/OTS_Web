@@ -176,6 +176,52 @@ export function sortChangeReviewRegionsByMeasure(regions: ChangeReviewScoreRegio
     });
 }
 
+export function buildPartLocalizedChangeReviewHighlights(
+    positions: Positions | null,
+    regions: ChangeReviewScoreRegion[],
+    side: 'base' | 'head',
+    zoomValue: number,
+    partCount: number,
+) {
+    if (!positions?.elements.length || partCount <= 0) {
+        return [];
+    }
+    const pageHeight = positions.pageSize?.height ?? 0;
+    return regions.flatMap((region) => {
+        const measureIndex = side === 'base' ? region.baseMeasureIndex : region.headMeasureIndex;
+        if (measureIndex === undefined || region.partIndex < 0 || region.partIndex >= partCount) {
+            return [];
+        }
+        const element = positions.elements[measureIndex];
+        if (!element) {
+            return [];
+        }
+        const rawWidth = typeof element.sx === 'number'
+            ? element.sx
+            : typeof (element as { width?: number }).width === 'number'
+                ? (element as { width?: number }).width
+                : 0;
+        const rawHeight = typeof element.sy === 'number'
+            ? element.sy
+            : typeof (element as { height?: number }).height === 'number'
+                ? (element as { height?: number }).height
+                : 0;
+        const partHeight = rawHeight / partCount;
+        const needsPageOffset = pageHeight > 0
+            && element.page > 0
+            && (element.y + rawHeight) <= (pageHeight * 1.2);
+        const pageOffset = needsPageOffset ? element.page * pageHeight : 0;
+        return [{
+            id: `${region.anchorId}-${side}`,
+            status: side === 'base' ? 'old-diff' as const : 'new-diff' as const,
+            left: element.x * zoomValue,
+            top: (element.y + pageOffset + (partHeight * region.partIndex)) * zoomValue,
+            width: rawWidth * zoomValue,
+            height: partHeight * zoomValue,
+        }];
+    });
+}
+
 type MeasureAlignmentRow = {
     leftIndex: number | null;
     rightIndex: number | null;
@@ -2827,12 +2873,44 @@ export default function ScoreEditor() {
         });
     }, []);
     const compareLeftHighlights = useMemo(
-        () => buildMeasureHighlights(compareLeftMeasurePositions, compareMeasureStatuses.left, compareEffectiveZoom),
-        [buildMeasureHighlights, compareLeftMeasurePositions, compareMeasureStatuses.left, compareEffectiveZoom],
+        () => isChangeReviewCompareMode
+            ? buildPartLocalizedChangeReviewHighlights(
+                compareLeftMeasurePositions,
+                changeReviewDiff?.scoreRegions || [],
+                'base',
+                compareEffectiveZoom,
+                comparePartCount,
+            )
+            : buildMeasureHighlights(compareLeftMeasurePositions, compareMeasureStatuses.left, compareEffectiveZoom),
+        [
+            buildMeasureHighlights,
+            changeReviewDiff,
+            compareLeftMeasurePositions,
+            compareMeasureStatuses.left,
+            compareEffectiveZoom,
+            comparePartCount,
+            isChangeReviewCompareMode,
+        ],
     );
     const compareRightHighlights = useMemo(
-        () => buildMeasureHighlights(compareRightMeasurePositions, compareMeasureStatuses.right, compareEffectiveZoom),
-        [buildMeasureHighlights, compareRightMeasurePositions, compareMeasureStatuses.right, compareEffectiveZoom],
+        () => isChangeReviewCompareMode
+            ? buildPartLocalizedChangeReviewHighlights(
+                compareRightMeasurePositions,
+                changeReviewDiff?.scoreRegions || [],
+                'head',
+                compareEffectiveZoom,
+                comparePartCount,
+            )
+            : buildMeasureHighlights(compareRightMeasurePositions, compareMeasureStatuses.right, compareEffectiveZoom),
+        [
+            buildMeasureHighlights,
+            changeReviewDiff,
+            compareRightMeasurePositions,
+            compareMeasureStatuses.right,
+            compareEffectiveZoom,
+            comparePartCount,
+            isChangeReviewCompareMode,
+        ],
     );
     const compareOverlayStyle = toolbarHeight > 0 ? { top: `${toolbarHeight}px` } : undefined;
     const compareModalMaxHeight = toolbarHeight > 0

@@ -20,7 +20,10 @@ vi.mock('../lib/webmscore-loader', () => ({
   loadWebMscoreInProcess: mocked.loadWebMscoreInProcess,
 }));
 
-import ScoreEditor, { sortChangeReviewRegionsByMeasure } from '../components/ScoreEditor';
+import ScoreEditor, {
+  buildPartLocalizedChangeReviewHighlights,
+  sortChangeReviewRegionsByMeasure,
+} from '../components/ScoreEditor';
 
 describe('sortChangeReviewRegionsByMeasure', () => {
   it('orders change review cards by measure, then part', () => {
@@ -51,6 +54,38 @@ describe('sortChangeReviewRegionsByMeasure', () => {
       'Violin 1 m14',
       'Viola m14',
       'Violin 1 m18',
+    ]);
+  });
+});
+
+describe('buildPartLocalizedChangeReviewHighlights', () => {
+  it('limits each changed measure highlight to its affected part', () => {
+    const positions = {
+      elements: [{ id: 7, x: 10, y: 100, sx: 80, sy: 200, page: 0 }],
+      events: [],
+      pageSize: { width: 1000, height: 1200 },
+    };
+    const region = {
+      anchorId: 'viola-m1',
+      partId: 'viola',
+      partIndex: 2,
+      side: 'head' as const,
+      changeType: 'modified' as const,
+      baseMeasureIndex: 0,
+      headMeasureIndex: 0,
+      label: 'Viola m1',
+      summary: '',
+      commentable: true,
+      regionHash: '',
+    };
+
+    expect(buildPartLocalizedChangeReviewHighlights(positions, [region], 'head', 0.5, 4)).toEqual([
+      expect.objectContaining({
+        left: 5,
+        top: 100,
+        width: 40,
+        height: 25,
+      }),
     ]);
   });
 });
