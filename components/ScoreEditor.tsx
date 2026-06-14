@@ -168,6 +168,37 @@ type ChangeReviewDiff = {
     threads: ChangeReviewThread[];
 };
 
+type ChangeReviewBar = {
+    kind: 'score_bar';
+    anchorId: string;
+    patchsetNumber?: number;
+    revisionId: string;
+    side: 'head';
+    partId: string;
+    partIndex: number;
+    partName?: string;
+    measureIndex: number;
+    measureNumber: string;
+    measureHash: string;
+    label: string;
+    changeAnchorId?: string;
+    changeType?: 'added' | 'modified';
+    summary?: string;
+    threadAnchorId?: string;
+    hasThread: boolean;
+    commentable: boolean;
+};
+
+type ChangeReviewScoreView = {
+    reviewId: string;
+    patchsetNumber?: number;
+    baseRevisionId: string;
+    headRevisionId: string;
+    bars: ChangeReviewBar[];
+    removedRegions: ChangeReviewScoreRegion[];
+    threads: ChangeReviewThread[];
+};
+
 export function sortChangeReviewRegionsByMeasure(regions: ChangeReviewScoreRegion[]) {
     return [...regions].sort((a, b) => {
         const aIndex = a.headMeasureIndex ?? a.baseMeasureIndex ?? Number.MAX_SAFE_INTEGER;
@@ -893,12 +924,17 @@ export default function ScoreEditor() {
     // Embed mode: Load external XML files for comparison
     const compareLeftUrl = searchParams.get('compareLeft');
     const compareRightUrl = searchParams.get('compareRight');
+    const reviewScoreUrl = searchParams.get('reviewScore');
+    const reviewLabel = searchParams.get('reviewLabel') || 'Review score';
     const leftLabel = searchParams.get('leftLabel') || 'Left';
     const rightLabel = searchParams.get('rightLabel') || 'Right';
     const changeReviewId = searchParams.get('changeReviewId')?.trim() || '';
     const changeReviewPatchset = searchParams.get('patchset')?.trim() || '';
-    const isEmbedMode = Boolean(compareLeftUrl && compareRightUrl);
-    const isChangeReviewCompareMode = isEmbedMode && Boolean(changeReviewId);
+    const isCompareEmbedMode = Boolean(compareLeftUrl && compareRightUrl);
+    const isChangeReviewSingleScoreMode = Boolean(reviewScoreUrl && changeReviewId);
+    const isEmbedMode = isCompareEmbedMode || isChangeReviewSingleScoreMode;
+    const isChangeReviewCompareMode = isCompareEmbedMode && Boolean(changeReviewId);
+    const isChangeReviewMode = isChangeReviewCompareMode || isChangeReviewSingleScoreMode;
     const launchContext = useMemo(
         () => parseEditorLaunchContextParam(searchParams.get('launchContext')),
         [searchParams],
@@ -934,6 +970,7 @@ export default function ScoreEditor() {
     const containerRef = useRef<HTMLDivElement>(null);
     const scoreWrapperRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const changeReviewGutterRef = useRef<HTMLDivElement>(null);
     const MIN_ZOOM = 0.01;
     const MAX_ZOOM = 1.0;
     const clampZoom = (value: number) => Math.min(Math.max(value, MIN_ZOOM), MAX_ZOOM);
@@ -1005,6 +1042,8 @@ export default function ScoreEditor() {
     const [compareSwapBusy, setCompareSwapBusy] = useState(false);
     const [changeReviewDetail, setChangeReviewDetail] = useState<ChangeReviewDetail | null>(null);
     const [changeReviewDiff, setChangeReviewDiff] = useState<ChangeReviewDiff | null>(null);
+    const [changeReviewScoreView, setChangeReviewScoreView] = useState<ChangeReviewScoreView | null>(null);
+    const [changeReviewMeasurePositions, setChangeReviewMeasurePositions] = useState<Positions | null>(null);
     const [changeReviewLoading, setChangeReviewLoading] = useState(false);
     const [changeReviewError, setChangeReviewError] = useState<string | null>(null);
     const [changeReviewActionBusy, setChangeReviewActionBusy] = useState(false);
@@ -2115,6 +2154,36 @@ export default function ScoreEditor() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [compareLeftUrl, compareRightUrl, leftLabel]);
 
+    useEffect(() => {
+        if (!reviewScoreUrl) return;
+
+        const loadReviewScore = async () => {
+            setCheckpointBusy(true);
+            try {
+                const response = await fetch(reviewScoreUrl);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch ${reviewLabel}`);
+                }
+                const xml = await response.text();
+                const blob = new Blob([xml], { type: 'application/xml' });
+                const file = new File([blob], 'review-score.xml');
+                await handleFileUpload(file, {
+                    preserveScoreId: false,
+                    updateUrl: false,
+                    telemetrySource: 'change_review_load',
+                });
+            } catch (err) {
+                console.error('Failed to load review score:', err);
+                setChangeReviewError(err instanceof Error ? err.message : String(err));
+            } finally {
+                setCheckpointBusy(false);
+            }
+        };
+
+        void loadReviewScore();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [reviewLabel, reviewScoreUrl]);
+
     // Load score from sessionStorage if opened from "Open in Editor" button
     useEffect(() => {
         const openInEditorData = sessionStorage.getItem('openInEditor');
@@ -2432,11 +2501,20 @@ export default function ScoreEditor() {
     }, [compareAlignments]);
     const changeReviewThreadsByAnchor = useMemo(() => {
         const map = new Map<string, ChangeReviewThread>();
-        changeReviewDiff?.threads.forEach((thread) => {
+        const threads = changeReviewScoreView?.threads || changeReviewDiff?.threads || [];
+        threads.forEach((thread) => {
             map.set(thread.diffAnchor.anchorId, thread);
         });
+        changeReviewScoreView?.bars.forEach((bar) => {
+            const barThread = map.get(bar.anchorId)
+                || (bar.threadAnchorId ? map.get(bar.threadAnchorId) : null)
+                || (bar.changeAnchorId ? map.get(bar.changeAnchorId) : null);
+            if (barThread && !map.has(bar.anchorId)) {
+                map.set(bar.anchorId, barThread);
+            }
+        });
         return map;
-    }, [changeReviewDiff]);
+    }, [changeReviewDiff, changeReviewScoreView]);
     const changeReviewRegionsInMeasureOrder = useMemo(() => {
         return sortChangeReviewRegionsByMeasure(changeReviewDiff?.scoreRegions || []);
     }, [changeReviewDiff]);
@@ -2444,24 +2522,33 @@ export default function ScoreEditor() {
         if (!changeReviewId) {
             setChangeReviewDetail(null);
             setChangeReviewDiff(null);
+            setChangeReviewScoreView(null);
             setChangeReviewError(null);
             return;
         }
         setChangeReviewLoading(true);
         setChangeReviewError(null);
         try {
-            const [detail, diff] = await Promise.all([
+            const [detail, reviewData] = await Promise.all([
                 fetchJsonOrThrow<ChangeReviewDetail>(`/api/proxy/change-reviews/${encodeURIComponent(changeReviewId)}`),
-                fetchJsonOrThrow<ChangeReviewDiff>(`/api/proxy/change-reviews/${encodeURIComponent(changeReviewId)}/diff${changeReviewPatchset ? `?patchset=${encodeURIComponent(changeReviewPatchset)}` : ''}`),
+                isChangeReviewSingleScoreMode
+                    ? fetchJsonOrThrow<ChangeReviewScoreView>(`/api/proxy/change-reviews/${encodeURIComponent(changeReviewId)}/score-view${changeReviewPatchset ? `?patchset=${encodeURIComponent(changeReviewPatchset)}` : ''}`)
+                    : fetchJsonOrThrow<ChangeReviewDiff>(`/api/proxy/change-reviews/${encodeURIComponent(changeReviewId)}/diff${changeReviewPatchset ? `?patchset=${encodeURIComponent(changeReviewPatchset)}` : ''}`),
             ]);
             setChangeReviewDetail(detail);
-            setChangeReviewDiff(diff);
+            if (isChangeReviewSingleScoreMode) {
+                setChangeReviewScoreView(reviewData as ChangeReviewScoreView);
+                setChangeReviewDiff(null);
+            } else {
+                setChangeReviewDiff(reviewData as ChangeReviewDiff);
+                setChangeReviewScoreView(null);
+            }
         } catch (err) {
             setChangeReviewError(err instanceof Error ? err.message : String(err));
         } finally {
             setChangeReviewLoading(false);
         }
-    }, [changeReviewId, changeReviewPatchset]);
+    }, [changeReviewId, changeReviewPatchset, isChangeReviewSingleScoreMode]);
     const notifyParentChangeReviewUpdated = useCallback(() => {
         if (typeof window === 'undefined' || !changeReviewId || window.parent === window) {
             return;
@@ -2488,9 +2575,11 @@ export default function ScoreEditor() {
         }
     }, [notifyParentChangeReviewUpdated, refreshChangeReview]);
     useEffect(() => {
-        if (!isChangeReviewCompareMode) {
+        if (!isChangeReviewMode) {
             setChangeReviewDetail(null);
             setChangeReviewDiff(null);
+            setChangeReviewScoreView(null);
+            setChangeReviewMeasurePositions(null);
             setChangeReviewLoading(false);
             setChangeReviewError(null);
             setChangeReviewActionError(null);
@@ -2502,7 +2591,7 @@ export default function ScoreEditor() {
             return;
         }
         void refreshChangeReview();
-    }, [isChangeReviewCompareMode, refreshChangeReview]);
+    }, [isChangeReviewMode, refreshChangeReview]);
     const renderChangeReviewThread = useCallback((thread: ChangeReviewThread) => (
         <div className="mt-2 grid gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-2 text-[10px] text-slate-700">
             <div className="flex items-center justify-between gap-2">
@@ -2912,6 +3001,52 @@ export default function ScoreEditor() {
             isChangeReviewCompareMode,
         ],
     );
+    useEffect(() => {
+        if (!isChangeReviewSingleScoreMode || !score) {
+            setChangeReviewMeasurePositions(null);
+            return;
+        }
+        void refreshMeasurePositions(score, setChangeReviewMeasurePositions);
+    }, [currentPage, isChangeReviewSingleScoreMode, refreshMeasurePositions, score, scoreRevision]);
+    const changeReviewBarBoxes = useMemo(() => {
+        if (!changeReviewMeasurePositions?.elements.length || !changeReviewScoreView) {
+            return [];
+        }
+        const partCount = Math.max(
+            scoreParts.length,
+            ...changeReviewScoreView.bars.map((bar) => bar.partIndex + 1),
+            1,
+        );
+        return changeReviewScoreView.bars.flatMap((bar) => {
+            const element = changeReviewMeasurePositions.elements[bar.measureIndex];
+            if (!element || element.page !== currentPage) {
+                return [];
+            }
+            const width = typeof element.sx === 'number'
+                ? element.sx
+                : typeof (element as { width?: number }).width === 'number'
+                    ? (element as { width?: number }).width!
+                    : 0;
+            const height = typeof element.sy === 'number'
+                ? element.sy
+                : typeof (element as { height?: number }).height === 'number'
+                    ? (element as { height?: number }).height!
+                    : 0;
+            const partHeight = height / partCount;
+            return [{
+                bar,
+                left: element.x,
+                top: element.y + (partHeight * bar.partIndex),
+                width,
+                height: partHeight,
+            }];
+        });
+    }, [changeReviewMeasurePositions, changeReviewScoreView, currentPage, scoreParts.length]);
+    const changeReviewGutterBars = useMemo(() => (
+        changeReviewBarBoxes
+            .filter(({ bar }) => bar.anchorId === changeReviewFocusedAnchorId || changeReviewThreadsByAnchor.has(bar.anchorId))
+            .sort((a, b) => a.top - b.top || a.bar.partIndex - b.bar.partIndex)
+    ), [changeReviewBarBoxes, changeReviewFocusedAnchorId, changeReviewThreadsByAnchor]);
     const compareOverlayStyle = toolbarHeight > 0 ? { top: `${toolbarHeight}px` } : undefined;
     const compareModalMaxHeight = toolbarHeight > 0
         ? `calc(100dvh - ${toolbarHeight + 48}px)`
@@ -12762,6 +12897,11 @@ ${partsBodyXml}
 
                 <div
                     ref={scrollContainerRef}
+                    onScroll={(event) => {
+                        if (isChangeReviewSingleScoreMode && changeReviewGutterRef.current) {
+                            changeReviewGutterRef.current.scrollTop = event.currentTarget.scrollTop;
+                        }
+                    }}
                     className={`relative z-0 flex-1 overflow-auto bg-gray-50 p-8 ${xmlSidebarMode === 'full' ? 'hidden' : ''}`}
                 >
                 {loading && (
@@ -12846,17 +12986,58 @@ ${partsBodyXml}
 	                    transform: `scale(${zoom})`,
 	                    width: 'fit-content'
 	                }}
-                onClick={handleScoreClick}
-                onPointerDown={handleScorePointerDown}
-                    onPointerMove={handleScorePointerMove}
-                    onPointerUp={handleScorePointerUp}
-                    onPointerCancel={handleScorePointerCancel}
-                onMouseDown={handleScoreMouseDown}
-                onMouseMove={handleScoreMouseMove}
-                onMouseUp={handleScoreMouseUp}
-                onContextMenu={handleScoreContextMenu}
+                onClick={isChangeReviewSingleScoreMode ? () => {
+                    setChangeReviewFocusedAnchorId(null);
+                    setChangeReviewNewThreadAnchorId(null);
+                    setChangeReviewNewThreadContent('');
+                } : handleScoreClick}
+                onPointerDown={isChangeReviewSingleScoreMode ? undefined : handleScorePointerDown}
+                    onPointerMove={isChangeReviewSingleScoreMode ? undefined : handleScorePointerMove}
+                    onPointerUp={isChangeReviewSingleScoreMode ? undefined : handleScorePointerUp}
+                    onPointerCancel={isChangeReviewSingleScoreMode ? undefined : handleScorePointerCancel}
+                onMouseDown={isChangeReviewSingleScoreMode ? undefined : handleScoreMouseDown}
+                onMouseMove={isChangeReviewSingleScoreMode ? undefined : handleScoreMouseMove}
+                onMouseUp={isChangeReviewSingleScoreMode ? undefined : handleScoreMouseUp}
+                onContextMenu={isChangeReviewSingleScoreMode ? undefined : handleScoreContextMenu}
             >
 	                <div ref={containerRef} data-testid="svg-container" />
+
+                    {isChangeReviewSingleScoreMode && changeReviewBarBoxes.map(({ bar, left, top, width, height }) => {
+                        const selected = changeReviewFocusedAnchorId === bar.anchorId;
+                        const hasThread = bar.hasThread || changeReviewThreadsByAnchor.has(bar.anchorId);
+                        const changedClasses = hasThread
+                            ? 'border-emerald-500 bg-emerald-300/30'
+                            : bar.changeType === 'added'
+                                ? 'border-emerald-500 bg-emerald-200/20'
+                                : bar.changeType === 'modified'
+                                    ? 'border-amber-500 bg-amber-200/20'
+                                    : 'border-transparent bg-transparent hover:border-sky-400 hover:bg-sky-100/20';
+                        return (
+                            <button
+                                key={bar.anchorId}
+                                type="button"
+                                aria-label={`Comment on ${bar.label}`}
+                                aria-pressed={selected}
+                                className={`absolute z-20 cursor-pointer border-2 transition-colors ${changedClasses} ${selected ? 'ring-2 ring-sky-500 ring-offset-1' : ''}`}
+                                style={{
+                                    left,
+                                    top,
+                                    width,
+                                    height,
+                                    ...(hasThread ? {
+                                        backgroundColor: 'rgba(16, 185, 129, 0.35)',
+                                        borderColor: 'rgb(5, 150, 105)',
+                                    } : {}),
+                                }}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    setChangeReviewFocusedAnchorId(bar.anchorId);
+                                    setChangeReviewNewThreadAnchorId(null);
+                                    setChangeReviewNewThreadContent('');
+                                }}
+                            />
+                        );
+                    })}
 
                     {dragSelectionRect && (
                         <div
@@ -12957,8 +13138,134 @@ ${partsBodyXml}
                 </div>
             </div>
 
+            {isChangeReviewSingleScoreMode && (
+                <aside
+                    ref={changeReviewGutterRef}
+                    className="relative w-80 shrink-0 overflow-hidden border-l border-slate-200 bg-slate-50"
+                    data-testid="change-review-gutter"
+                >
+                    <div className="sticky top-0 z-[60] border-b border-slate-200 bg-white px-3 py-2">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-700">{reviewLabel}</div>
+                        <div className="mt-1 text-[10px] text-slate-500">Select any bar to leave a comment.</div>
+                        {changeReviewLoading && <div className="mt-1 text-[10px] text-slate-500">Loading review...</div>}
+                        {(changeReviewError || changeReviewActionError) && (
+                            <div className="mt-1 text-[10px] text-rose-700">{changeReviewError || changeReviewActionError}</div>
+                        )}
+                    </div>
+                    <div className="relative min-h-full" style={{ height: `${Math.max(900, (changeReviewMeasurePositions?.pageSize?.height || 900) * zoom + 160)}px` }}>
+                        {changeReviewGutterBars.map(({ bar, top }) => {
+                            const thread = changeReviewThreadsByAnchor.get(bar.anchorId);
+                            const selected = changeReviewFocusedAnchorId === bar.anchorId;
+                            return (
+                                <div
+                                    key={`gutter-${bar.anchorId}`}
+                                    className={`absolute left-2 right-2 rounded border bg-white p-2 text-xs shadow-sm ${selected ? 'z-50 border-sky-400 ring-2 ring-sky-300' : 'z-10 border-slate-300'}`}
+                                    style={{ top: `${64 + top * zoom}px` }}
+                                    onClick={() => setChangeReviewFocusedAnchorId(bar.anchorId)}
+                                >
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="font-semibold text-slate-800">{bar.label}</span>
+                                        {bar.changeType && (
+                                            <span className={`rounded px-1 py-0.5 text-[9px] uppercase ${bar.changeType === 'added' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                {bar.changeType}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {selected && bar.summary && <div className="mt-1 text-[10px] text-slate-500">{bar.summary}</div>}
+                                    {!thread && selected && changeReviewDetail?.permissions.canAddThread && (
+                                        <div className="mt-2 grid gap-2">
+                                            {changeReviewNewThreadAnchorId === bar.anchorId ? (
+                                                <>
+                                                    <label className="font-semibold text-slate-800" htmlFor={`change-review-comment-${bar.anchorId}`}>
+                                                        Write a comment on this bar.
+                                                    </label>
+                                                    <textarea
+                                                        id={`change-review-comment-${bar.anchorId}`}
+                                                        autoFocus
+                                                        value={changeReviewNewThreadContent}
+                                                        onChange={(event) => setChangeReviewNewThreadContent(event.target.value)}
+                                                        rows={4}
+                                                        placeholder="Enter your review comment"
+                                                        className="w-full rounded border border-sky-400 bg-white px-2 py-1 text-xs text-slate-900 placeholder:text-slate-600"
+                                                        disabled={changeReviewActionBusy}
+                                                        onClick={(event) => event.stopPropagation()}
+                                                    />
+                                                    <div className="flex justify-end gap-2">
+                                                        <button
+                                                            type="button"
+                                                            disabled={changeReviewActionBusy}
+                                                            className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 disabled:opacity-50"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                setChangeReviewNewThreadAnchorId(null);
+                                                                setChangeReviewNewThreadContent('');
+                                                            }}
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            disabled={changeReviewActionBusy || !changeReviewNewThreadContent.trim()}
+                                                            className="rounded bg-sky-600 px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                void runChangeReviewAction(async () => {
+                                                                    await fetchJsonOrThrow(`/api/proxy/change-reviews/${encodeURIComponent(changeReviewId)}/threads`, {
+                                                                        method: 'POST',
+                                                                        body: JSON.stringify({
+                                                                            anchorId: bar.anchorId,
+                                                                            content: changeReviewNewThreadContent,
+                                                                            patchsetNumber: changeReviewPatchset ? Number(changeReviewPatchset) : undefined,
+                                                                        }),
+                                                                    });
+                                                                    setChangeReviewNewThreadAnchorId(null);
+                                                                    setChangeReviewNewThreadContent('');
+                                                                });
+                                                            }}
+                                                        >
+                                                            Save Thread
+                                                        </button>
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    disabled={changeReviewActionBusy}
+                                                    className="rounded border border-sky-400 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-800 disabled:opacity-50"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        setChangeReviewNewThreadAnchorId(bar.anchorId);
+                                                        setChangeReviewNewThreadContent('');
+                                                    }}
+                                                >
+                                                    Add Thread
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                    {thread && (selected || thread.status === 'open') && renderChangeReviewThread(thread)}
+                                    {thread && !selected && thread.status === 'resolved' && (
+                                        <div className="mt-1 text-[10px] text-emerald-700">Resolved · {thread.comments.length} comment{thread.comments.length === 1 ? '' : 's'}</div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                        {changeReviewScoreView?.removedRegions.map((region, index) => {
+                            const thread = changeReviewThreadsByAnchor.get(region.anchorId);
+                            return (
+                                <div key={region.anchorId} className="absolute bottom-2 left-2 right-2 rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-800" style={{ transform: `translateY(${-index * 52}px)` }}>
+                                    <div className="font-semibold">{region.label}</div>
+                                    <div className="text-[10px]">Removed from the head score</div>
+                                    {thread && renderChangeReviewThread(thread)}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </aside>
+            )}
+
             <aside
-                className={`shrink-0 border-l bg-white text-sm flex ${
+                className={`shrink-0 border-l bg-white text-sm ${isEmbedMode ? 'hidden' : 'flex'} ${
                     xmlSidebarMode === 'closed'
                         ? 'w-12'
                         : xmlSidebarMode === 'full'

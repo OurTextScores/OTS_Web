@@ -53,6 +53,15 @@ npm run build:embed
 npm run package:release
 ```
 
+> **Soundfont:** `build:embed` defaults to `https://cdn.ourtextscores.com/soundfonts/default.sf2` as the
+> soundfont CDN URL (baked in at build time via `NEXT_PUBLIC_SOUNDFONT_CDN_URL`). To use a different
+> soundfont, override it before building:
+> ```bash
+> NEXT_PUBLIC_SOUNDFONT_CDN_URL=https://your-cdn.com/soundfonts/custom.sf2 npm run build:embed
+> ```
+> Omitting this variable (or building without the default in the script) results in "No default soundfont
+> found" at runtime.
+
 This creates the following files in `release/`:
 - `score-editor-v0.1.0.tar.gz` - Tarball archive
 - `score-editor-v0.1.0.zip` - Zip archive

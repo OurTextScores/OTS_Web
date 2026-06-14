@@ -29,6 +29,8 @@ try {
       NEXT_PUBLIC_BUILD_MODE: 'embed',
       BUILD_MODE: 'embed',
       NEXT_PUBLIC_SCORE_EDITOR_API_BASE: '/api/score-editor',
+      // Default CDN soundfont; override by setting NEXT_PUBLIC_SOUNDFONT_CDN_URL in the environment.
+      NEXT_PUBLIC_SOUNDFONT_CDN_URL: process.env.NEXT_PUBLIC_SOUNDFONT_CDN_URL || 'https://cdn.ourtextscores.com/soundfonts/default.sf2',
     },
     stdio: 'inherit',
   });
