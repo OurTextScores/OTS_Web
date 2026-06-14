@@ -235,6 +235,25 @@ test.describe('Embed Mode - External XML Comparison', () => {
         await expect(openInEditorButtons.nth(1)).toBeVisible();
     });
 
+    test('should keep compare labels and score contents on the same side', async ({ page }) => {
+        await page.goto(`/?compareLeft=${encodeURIComponent(leftXmlUrl)}&compareRight=${encodeURIComponent(rightXmlUrl)}&leftLabel=Left&rightLabel=Right`);
+        await page.waitForTimeout(3000);
+        await page.evaluate(() => {
+            window.open = () => null;
+        });
+
+        const openInEditorButtons = page.getByRole('button', { name: /Open in Editor/ });
+        await openInEditorButtons.first().click();
+        const leftStored = await page.evaluate(() => JSON.parse(sessionStorage.getItem('openInEditor') || '{}'));
+        expect(leftStored.filename).toBe('Left.xml');
+        expect(leftStored.xml).toContain('<step>C</step>');
+
+        await openInEditorButtons.nth(1).click();
+        const rightStored = await page.evaluate(() => JSON.parse(sessionStorage.getItem('openInEditor') || '{}'));
+        expect(rightStored.filename).toBe('Right.xml');
+        expect(rightStored.xml).toContain('<step>D</step>');
+    });
+
     test('should open left score in full editor in new tab when clicking "Open in Editor"', async ({ page, context }) => {
         await page.goto(`/?compareLeft=${encodeURIComponent(leftXmlUrl)}&compareRight=${encodeURIComponent(rightXmlUrl)}&leftLabel=Version%201&rightLabel=Version%202`);
         await page.waitForTimeout(3000);

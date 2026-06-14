@@ -2321,25 +2321,25 @@ export default function ScoreEditor() {
     const compareCurrentTitle = compareView?.currentLabel || 'Current';
     const compareLeftScore = useMemo(
         () => (isEmbedMode
-            ? (compareSwapped ? compareRightScore : score)
+            ? (compareSwapped ? score : compareRightScore)
             : (compareSwapped ? score : compareRightScore)),
         [compareSwapped, compareRightScore, isEmbedMode, score],
     );
     const compareRightScoreDisplay = useMemo(
         () => (isEmbedMode
-            ? (compareSwapped ? score : compareRightScore)
+            ? (compareSwapped ? compareRightScore : score)
             : (compareSwapped ? compareRightScore : score)),
         [compareSwapped, score, compareRightScore, isEmbedMode],
     );
     const compareLeftParts = useMemo(
         () => (isEmbedMode
-            ? (compareSwapped ? compareRightParts : scoreParts)
+            ? (compareSwapped ? scoreParts : compareRightParts)
             : (compareSwapped ? scoreParts : compareRightParts)),
         [compareSwapped, compareRightParts, scoreParts, isEmbedMode],
     );
     const compareRightPartsDisplay = useMemo(
         () => (isEmbedMode
-            ? (compareSwapped ? scoreParts : compareRightParts)
+            ? (compareSwapped ? compareRightParts : scoreParts)
             : (compareSwapped ? compareRightParts : scoreParts)),
         [compareSwapped, scoreParts, compareRightParts, isEmbedMode],
     );
@@ -2351,12 +2351,12 @@ export default function ScoreEditor() {
         : (compareSwapped ? compareCheckpointTitle : compareCurrentTitle);
     const compareLeftXml = compareView
         ? (isEmbedMode
-            ? (compareSwapped ? compareView.checkpointXml : compareView.currentXml)
+            ? (compareSwapped ? compareView.currentXml : compareView.checkpointXml)
             : (compareSwapped ? compareView.currentXml : compareView.checkpointXml))
         : '';
     const compareRightXml = compareView
         ? (isEmbedMode
-            ? (compareSwapped ? compareView.currentXml : compareView.checkpointXml)
+            ? (compareSwapped ? compareView.checkpointXml : compareView.currentXml)
             : (compareSwapped ? compareView.checkpointXml : compareView.currentXml))
         : '';
     const compareLeftIsCurrent = compareLeftScore === score;
@@ -7336,30 +7336,53 @@ ${partsBodyXml}
         if (typeof window === 'undefined') {
             return;
         }
-        const leftWidth = leftContainer.clientWidth;
-        const rightWidth = rightContainer.clientWidth;
-        if (!leftWidth || !rightWidth) {
-            return;
+        let animationFrame: number | null = null;
+        const updateZoom = () => {
+            if (animationFrame !== null) {
+                window.cancelAnimationFrame(animationFrame);
+            }
+            animationFrame = window.requestAnimationFrame(() => {
+                animationFrame = null;
+                const leftWidth = leftContainer.clientWidth;
+                const rightWidth = rightContainer.clientWidth;
+                if (!leftWidth || !rightWidth) {
+                    return;
+                }
+                const fitZoom = Math.min(leftWidth / compareLeftSvgSize.width, rightWidth / compareRightSvgSize.width);
+                if (!Number.isFinite(fitZoom) || fitZoom <= 0) {
+                    return;
+                }
+                const nextZoom = Math.max(0.2, Math.min(fitZoom, 1.5));
+                setCompareZoom((currentZoom) => (
+                    currentZoom === null || Math.abs(currentZoom - nextZoom) > 0.01
+                        ? nextZoom
+                        : currentZoom
+                ));
+            });
+        };
+
+        updateZoom();
+        if (typeof ResizeObserver === 'undefined') {
+            return () => {
+                if (animationFrame !== null) {
+                    window.cancelAnimationFrame(animationFrame);
+                }
+            };
         }
-        window.requestAnimationFrame(() => {
-            const fitZoom = Math.min(leftWidth / compareLeftSvgSize.width, rightWidth / compareRightSvgSize.width);
-            if (!Number.isFinite(fitZoom) || fitZoom <= 0) {
-                return;
+        const observer = new ResizeObserver(updateZoom);
+        observer.observe(leftContainer);
+        observer.observe(rightContainer);
+        return () => {
+            observer.disconnect();
+            if (animationFrame !== null) {
+                window.cancelAnimationFrame(animationFrame);
             }
-            const clamped = Math.max(0.2, Math.min(fitZoom, 1.5));
-            const maxZoom = compareZoom ?? compareDefaultZoom;
-            const nextZoom = Math.min(maxZoom, clamped);
-            if (compareZoom === null || Math.abs(compareZoom - nextZoom) > 0.01) {
-                setCompareZoom(nextZoom);
-            }
-        });
+        };
     }, [
         compareView,
         compareRightLoading,
         compareRightError,
         currentPage,
-        compareEffectiveZoom,
-        compareZoom,
         compareLeftSvgSize,
         compareRightSvgSize,
     ]);
