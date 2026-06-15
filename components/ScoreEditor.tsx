@@ -100,6 +100,7 @@ type CompareBlockComment = {
 
 type ChangeReviewDetail = {
     reviewId: string;
+    viewerUserId: string;
     workId: string;
     sourceId: string;
     status: 'draft' | 'open' | 'closed' | 'withdrawn';
@@ -154,9 +155,11 @@ type ChangeReviewScoreRegion = {
 type ChangeReviewDiff = {
     reviewId: string;
     fileKind: 'canonical';
+    patchsetNumber?: number;
     baseRevisionId: string;
     headRevisionId: string;
     scoreRegions: ChangeReviewScoreRegion[];
+    bars: ChangeReviewBar[];
     hunks: Array<{
         hunkId: string;
         header: string;
@@ -179,7 +182,7 @@ type ChangeReviewBar = {
     anchorId: string;
     patchsetNumber?: number;
     revisionId: string;
-    side: 'head';
+    side: 'base' | 'head';
     partId: string;
     partIndex: number;
     partName?: string;
@@ -191,7 +194,7 @@ type ChangeReviewBar = {
     changeType?: 'added' | 'modified';
     summary?: string;
     threadAnchorId?: string;
-    hasThread: boolean;
+    hasThread?: boolean;
     commentable: boolean;
 };
 
@@ -253,6 +256,50 @@ export function buildPartLocalizedChangeReviewHighlights(
             status: side === 'base' ? 'old-diff' as const : 'new-diff' as const,
             left: element.x * zoomValue,
             top: (element.y + pageOffset + (partHeight * region.partIndex)) * zoomValue,
+            width: rawWidth * zoomValue,
+            height: partHeight * zoomValue,
+        }];
+    });
+}
+
+export function buildPartLocalizedChangeReviewBarHighlights(
+    positions: Positions | null,
+    bars: ChangeReviewBar[],
+    side: 'base' | 'head',
+    zoomValue: number,
+    partCount: number,
+) {
+    if (!positions?.elements.length || partCount <= 0) {
+        return [];
+    }
+    const pageHeight = positions.pageSize?.height ?? 0;
+    return bars.flatMap((bar) => {
+        if (bar.side !== side || bar.partIndex < 0 || bar.partIndex >= partCount) {
+            return [];
+        }
+        const element = positions.elements[bar.measureIndex];
+        if (!element) {
+            return [];
+        }
+        const rawWidth = typeof element.sx === 'number'
+            ? element.sx
+            : typeof (element as { width?: number }).width === 'number'
+                ? (element as { width?: number }).width
+                : 0;
+        const rawHeight = typeof element.sy === 'number'
+            ? element.sy
+            : typeof (element as { height?: number }).height === 'number'
+                ? (element as { height?: number }).height
+                : 0;
+        const partHeight = rawHeight / partCount;
+        const needsPageOffset = pageHeight > 0
+            && element.page > 0
+            && (element.y + rawHeight) <= (pageHeight * 1.2);
+        const pageOffset = needsPageOffset ? element.page * pageHeight : 0;
+        return [{
+            id: `${bar.anchorId}-${side}`,
+            left: element.x * zoomValue,
+            top: (element.y + pageOffset + (partHeight * bar.partIndex)) * zoomValue,
             width: rawWidth * zoomValue,
             height: partHeight * zoomValue,
         }];
@@ -1061,6 +1108,7 @@ export default function ScoreEditor() {
     const [changeReviewReplyThreadId, setChangeReviewReplyThreadId] = useState<string | null>(null);
     const [changeReviewReplyContent, setChangeReviewReplyContent] = useState('');
     const [changeReviewFocusedAnchorId, setChangeReviewFocusedAnchorId] = useState<string | null>(null);
+    const [compareClickedMeasures, setCompareClickedMeasures] = useState<{ leftIndex: number | null; rightIndex: number | null; partIndex: number | null } | null>(null);
     const [aiDiffReviews, setAiDiffReviews] = useState<BlockReview[]>([]);
     const [aiDiffIteration, setAiDiffIteration] = useState(0);
     const [aiDiffGlobalComment, setAiDiffGlobalComment] = useState('');
@@ -2526,6 +2574,15 @@ export default function ScoreEditor() {
     const changeReviewRegionsInMeasureOrder = useMemo(() => {
         return sortChangeReviewRegionsByMeasure(changeReviewDiff?.scoreRegions || []);
     }, [changeReviewDiff]);
+    const changeReviewCompareBarsForGutter = useMemo(() => (
+        (changeReviewDiff?.bars || [])
+            .filter((bar) => (
+                bar.anchorId === changeReviewFocusedAnchorId
+                || changeReviewThreadsByAnchor.has(bar.anchorId)
+            ))
+            .sort((a, b) => a.measureIndex - b.measureIndex || a.partIndex - b.partIndex || a.side.localeCompare(b.side))
+    ), [changeReviewDiff, changeReviewFocusedAnchorId, changeReviewThreadsByAnchor]);
+
     const refreshChangeReview = useCallback(async () => {
         if (!changeReviewId) {
             setChangeReviewDetail(null);
@@ -2631,9 +2688,25 @@ export default function ScoreEditor() {
             <div className="grid gap-2">
                 {thread.comments.map((comment) => (
                     <div key={comment.commentId} className="rounded border border-slate-200 bg-white px-2 py-2">
-                        <div className="text-[9px] text-slate-500">
-                            {comment.username || comment.userId} · {new Date(comment.createdAt).toLocaleString()}
-                            {comment.editedAt ? ' · edited' : ''}
+                        <div className="flex items-start justify-between gap-2">
+                            <div className="text-[9px] text-slate-500">
+                                {comment.username || comment.userId} · {new Date(comment.createdAt).toLocaleString()}
+                                {comment.editedAt ? ' · edited' : ''}
+                            </div>
+                            {changeReviewDetail?.viewerUserId === comment.userId && (
+                                <button
+                                    type="button"
+                                    disabled={changeReviewActionBusy}
+                                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[9px] text-slate-700 disabled:opacity-50"
+                                    onClick={() => void runChangeReviewAction(async () => {
+                                        await fetchJsonOrThrow(`/api/proxy/change-reviews/${encodeURIComponent(changeReviewId)}/comments/${encodeURIComponent(comment.commentId)}`, {
+                                            method: 'DELETE',
+                                        });
+                                    })}
+                                >
+                                    Delete
+                                </button>
+                            )}
                         </div>
                         <div className="mt-1 whitespace-pre-wrap text-[10px] text-slate-800">
                             {comment.content}
@@ -2817,6 +2890,178 @@ export default function ScoreEditor() {
     }, [aiDiffCommentCount, aiDiffRejectedCount, aiDiffPendingCount, aiDiffAcceptedCount]);
     const compareDefaultZoom = 0.5;
     const compareEffectiveZoom = compareZoom ?? compareDefaultZoom;
+
+    const compareGutterRegionRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+    const hitTestMeasure = useCallback((
+        positions: Positions | null,
+        clientX: number,
+        clientY: number,
+        wrapperRef: React.RefObject<HTMLDivElement>,
+        zoom: number,
+    ): number => {
+        if (!positions?.elements.length || !wrapperRef.current) return -1;
+        const rect = wrapperRef.current.getBoundingClientRect();
+        const scoreX = (clientX - rect.left) / zoom;
+        const scoreY = (clientY - rect.top) / zoom;
+        const pageHeight = positions.pageSize?.height ?? 0;
+        // Exact hit first
+        const exact = positions.elements.findIndex((el) => {
+            const w = typeof el.sx === 'number' ? el.sx : (el as any).width ?? 0;
+            const h = typeof el.sy === 'number' ? el.sy : (el as any).height ?? 0;
+            const needsPageOffset = pageHeight > 0 && el.page > 0 && (el.y + h) <= (pageHeight * 1.2);
+            const pageOffset = needsPageOffset ? el.page * pageHeight : 0;
+            const y = el.y + pageOffset;
+            return scoreX >= el.x && scoreX <= el.x + w && scoreY >= y && scoreY <= y + h;
+        });
+        if (exact >= 0) return exact;
+        // Nearest fallback: closest measure by 2D distance to its centre
+        let bestIdx = -1;
+        let bestDist = Infinity;
+        positions.elements.forEach((el, idx) => {
+            const w = typeof el.sx === 'number' ? el.sx : (el as any).width ?? 0;
+            const h = typeof el.sy === 'number' ? el.sy : (el as any).height ?? 0;
+            const needsPageOffset = pageHeight > 0 && el.page > 0 && (el.y + h) <= (pageHeight * 1.2);
+            const pageOffset = needsPageOffset ? el.page * pageHeight : 0;
+            const cy = el.y + pageOffset + h / 2;
+            const cx = el.x + w / 2;
+            const dist = (scoreX - cx) ** 2 + (scoreY - cy) ** 2;
+            if (dist < bestDist) { bestDist = dist; bestIdx = idx; }
+        });
+        return bestIdx;
+    }, []);
+
+    const handleCompareScoreClick = useCallback((
+        event: React.MouseEvent<HTMLDivElement>,
+        side: 'left' | 'right',
+    ) => {
+        const positions = side === 'left' ? compareLeftMeasurePositions : compareRightMeasurePositions;
+        const wrapperRef = side === 'left' ? compareLeftWrapperRef : compareRightWrapperRef;
+        const measureIndex = hitTestMeasure(positions, event.clientX, event.clientY, wrapperRef, compareEffectiveZoom);
+        if (measureIndex < 0) return;
+
+        if (isChangeReviewCompareMode) {
+            const crSide = compareSwapped
+                ? (side === 'left' ? 'head' : 'base')
+                : (side === 'left' ? 'base' : 'head');
+            let clickedPartIndex = 0;
+            if (comparePartCount > 1 && wrapperRef.current && positions) {
+                const el = positions.elements[measureIndex];
+                if (el) {
+                    const h = typeof el.sy === 'number' ? el.sy : (el as any).height ?? 0;
+                    const pageHeight = positions.pageSize?.height ?? 0;
+                    const needsPageOffset = pageHeight > 0 && el.page > 0 && (el.y + h) <= (pageHeight * 1.2);
+                    const pageOffset = needsPageOffset ? el.page * pageHeight : 0;
+                    const rect = wrapperRef.current.getBoundingClientRect();
+                    const scoreY = (event.clientY - rect.top) / compareEffectiveZoom;
+                    const relativeY = scoreY - (el.y + pageOffset);
+                    clickedPartIndex = Math.min(Math.max(Math.floor((relativeY / h) * comparePartCount), 0), comparePartCount - 1);
+                }
+            }
+            const region = changeReviewDiff?.scoreRegions.find((r) =>
+                r.partIndex === clickedPartIndex
+                && (crSide === 'base' ? r.baseMeasureIndex === measureIndex : r.headMeasureIndex === measureIndex)
+            );
+            const bar = changeReviewDiff?.bars.find((candidate) =>
+                candidate.side === crSide
+                && candidate.partIndex === clickedPartIndex
+                && candidate.measureIndex === measureIndex
+            );
+            const nextAnchorId = region?.anchorId ?? bar?.anchorId;
+            if (!nextAnchorId) return;
+            const toggling = changeReviewFocusedAnchorId === nextAnchorId;
+
+            // Compute the measure indices for the blue highlight on both sides
+            let leftIndex: number | null = null;
+            let rightIndex: number | null = null;
+            const focusedPartIndex: number | null = region?.partIndex ?? bar?.partIndex ?? clickedPartIndex;
+            if (!toggling) {
+                if (region) {
+                    const baseIdx = region.baseMeasureIndex ?? null;
+                    const headIdx = region.headMeasureIndex ?? null;
+                    leftIndex = compareSwapped ? headIdx : baseIdx;
+                    rightIndex = compareSwapped ? baseIdx : headIdx;
+                } else {
+                    // Unchanged bar: use alignment to find the partner index
+                    leftIndex = side === 'left' ? measureIndex : null;
+                    rightIndex = side === 'right' ? measureIndex : null;
+                    const alignment = compareAlignmentByPart.get(clickedPartIndex);
+                    if (alignment) {
+                        for (const row of alignment.rows) {
+                            const rowIdx = side === 'left' ? row.leftIndex : row.rightIndex;
+                            if (rowIdx === measureIndex) {
+                                leftIndex = row.leftIndex ?? null;
+                                rightIndex = row.rightIndex ?? null;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            setCompareClickedMeasures(toggling ? null : { leftIndex, rightIndex, partIndex: focusedPartIndex });
+            setChangeReviewFocusedAnchorId(toggling ? null : nextAnchorId);
+
+            if (!toggling) {
+                const existingThread = changeReviewThreadsByAnchor.get(nextAnchorId);
+                if (!existingThread && changeReviewDetail?.permissions.canAddThread) {
+                    setChangeReviewNewThreadAnchorId(nextAnchorId);
+                    setChangeReviewNewThreadContent('');
+                } else {
+                    setChangeReviewNewThreadAnchorId(null);
+                    setChangeReviewNewThreadContent('');
+                }
+                requestAnimationFrame(() => {
+                    compareGutterRegionRefs.current.get(nextAnchorId)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                });
+            }
+            return;
+        }
+
+        // Plain compare mode: focus the gutter block that contains this measure
+        for (const [partIndex, alignment] of compareAlignmentByPart) {
+            const blocks = buildMismatchBlocks(alignment.rows);
+            for (let bi = 0; bi < blocks.length; bi++) {
+                const block = blocks[bi];
+                const rows = alignment.rows.slice(block.start, block.end + 1);
+                const indices = rows.map((r) => (side === 'left' ? r.leftIndex : r.rightIndex))
+                    .filter((v): v is number => v !== null);
+                if (!indices.includes(measureIndex)) continue;
+                const rightIndices = rows.map((r) => r.rightIndex).filter((v): v is number => v !== null);
+                const leftIndices = rows.map((r) => r.leftIndex).filter((v): v is number => v !== null);
+                const rStart = rightIndices[0];
+                const rEnd = rightIndices[rightIndices.length - 1];
+                const lStart = leftIndices[0];
+                const lEnd = leftIndices[leftIndices.length - 1];
+                const primaryStart = rightIndices.length ? rStart : lStart;
+                const primaryEnd = rightIndices.length ? rEnd : lEnd;
+                const measureRange = primaryStart !== undefined
+                    ? `${primaryStart + 1}${primaryEnd !== primaryStart ? `-${primaryEnd + 1}` : ''}`
+                    : `${bi}:${lStart ?? 'x'}:${lEnd ?? 'x'}:${rStart ?? 'x'}:${rEnd ?? 'x'}`;
+                const blockKey = `${partIndex}:${measureRange}`;
+                setCompareFocusedBlockKey((prev) => (prev === blockKey ? null : blockKey));
+                return;
+            }
+        }
+    }, [
+        compareLeftMeasurePositions,
+        compareRightMeasurePositions,
+        compareLeftWrapperRef,
+        compareRightWrapperRef,
+        compareEffectiveZoom,
+        hitTestMeasure,
+        isChangeReviewCompareMode,
+        compareSwapped,
+        comparePartCount,
+        changeReviewDiff,
+        changeReviewFocusedAnchorId,
+        changeReviewId,
+        changeReviewThreadsByAnchor,
+        changeReviewDetail,
+        compareAlignmentByPart,
+        buildMismatchBlocks,
+    ]);
+
     const compareGutterRowHeight = 56;
     const compareGutterRowStyle = { minHeight: `${compareGutterRowHeight}px` };
     const compareZoomStyle = {
@@ -3035,6 +3280,54 @@ export default function ScoreEditor() {
         );
         return buildMeasureHighlights(compareRightMeasurePositions, statuses, compareEffectiveZoom);
     }, [compareBlockComments, compareRightMeasurePositions, compareEffectiveZoom, buildMeasureHighlights, isChangeReviewCompareMode, isAiCompareMode]);
+    const compareThreadedLeftHighlights = useMemo(() => {
+        if (!isChangeReviewCompareMode) return [];
+        return buildPartLocalizedChangeReviewBarHighlights(
+            compareLeftMeasurePositions,
+            (changeReviewDiff?.bars || []).filter((bar) => changeReviewThreadsByAnchor.has(bar.anchorId)),
+            compareSwapped ? 'head' : 'base',
+            compareEffectiveZoom,
+            comparePartCount,
+        );
+    }, [changeReviewDiff, changeReviewThreadsByAnchor, compareEffectiveZoom, compareLeftMeasurePositions, comparePartCount, compareSwapped, isChangeReviewCompareMode]);
+    const compareThreadedRightHighlights = useMemo(() => {
+        if (!isChangeReviewCompareMode) return [];
+        return buildPartLocalizedChangeReviewBarHighlights(
+            compareRightMeasurePositions,
+            (changeReviewDiff?.bars || []).filter((bar) => changeReviewThreadsByAnchor.has(bar.anchorId)),
+            compareSwapped ? 'base' : 'head',
+            compareEffectiveZoom,
+            comparePartCount,
+        );
+    }, [changeReviewDiff, changeReviewThreadsByAnchor, compareEffectiveZoom, comparePartCount, compareRightMeasurePositions, compareSwapped, isChangeReviewCompareMode]);
+    const compareFocusedHighlights = useMemo((): { left: { left: number; top: number; width: number; height: number } | null; right: { left: number; top: number; width: number; height: number } | null } => {
+        const nullResult = { left: null, right: null };
+        if (!isChangeReviewCompareMode || !changeReviewFocusedAnchorId || !compareClickedMeasures) return nullResult;
+        const pIdx = compareClickedMeasures.partIndex;
+        const nParts = pIdx !== null && comparePartCount > 1 ? comparePartCount : 1;
+        const getBox = (positions: Positions | null, measureIndex: number | null) => {
+            if (measureIndex == null || !positions?.elements.length) return null;
+            const el = positions.elements[measureIndex];
+            if (!el) return null;
+            const w = typeof el.sx === 'number' ? el.sx : (el as any).width ?? 0;
+            const h = typeof el.sy === 'number' ? el.sy : (el as any).height ?? 0;
+            const pageHeight = positions.pageSize?.height ?? 0;
+            const needsPageOffset = pageHeight > 0 && el.page > 0 && (el.y + h) <= (pageHeight * 1.2);
+            const pageOffset = needsPageOffset ? el.page * pageHeight : 0;
+            const partH = h / nParts;
+            const partOffset = pIdx !== null ? pIdx * partH : 0;
+            return {
+                left: el.x * compareEffectiveZoom,
+                top: (el.y + pageOffset + partOffset) * compareEffectiveZoom,
+                width: w * compareEffectiveZoom,
+                height: partH * compareEffectiveZoom,
+            };
+        };
+        return {
+            left: getBox(compareLeftMeasurePositions, compareClickedMeasures.leftIndex),
+            right: getBox(compareRightMeasurePositions, compareClickedMeasures.rightIndex),
+        };
+    }, [isChangeReviewCompareMode, changeReviewFocusedAnchorId, compareClickedMeasures, comparePartCount, compareLeftMeasurePositions, compareRightMeasurePositions, compareEffectiveZoom]);
     useEffect(() => {
         if (!isChangeReviewSingleScoreMode || !score) {
             setChangeReviewMeasurePositions(null);
@@ -13065,8 +13358,13 @@ ${partsBodyXml}
                                 }}
                                 onClick={(event) => {
                                     event.stopPropagation();
-                                    setChangeReviewFocusedAnchorId(bar.anchorId);
-                                    setChangeReviewNewThreadAnchorId(null);
+                                    const nowFocused = changeReviewFocusedAnchorId !== bar.anchorId;
+                                    setChangeReviewFocusedAnchorId(nowFocused ? bar.anchorId : null);
+                                    if (nowFocused && !hasThread && changeReviewDetail?.permissions.canAddThread) {
+                                        setChangeReviewNewThreadAnchorId(bar.anchorId);
+                                    } else {
+                                        setChangeReviewNewThreadAnchorId(null);
+                                    }
                                     setChangeReviewNewThreadContent('');
                                 }}
                             />
@@ -13240,7 +13538,7 @@ ${partsBodyXml}
                                                         <button
                                                             type="button"
                                                             disabled={changeReviewActionBusy || !changeReviewNewThreadContent.trim()}
-                                                            className="rounded bg-sky-600 px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                                                            className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 disabled:opacity-50"
                                                             onClick={(event) => {
                                                                 event.stopPropagation();
                                                                 void runChangeReviewAction(async () => {
@@ -13257,7 +13555,7 @@ ${partsBodyXml}
                                                                 });
                                                             }}
                                                         >
-                                                            Save Thread
+                                                            Submit
                                                         </button>
                                                     </div>
                                                 </>
@@ -15630,6 +15928,40 @@ ${partsBodyXml}
                                                             }}
                                                         />
                                                     ))}
+                                                    {compareThreadedLeftHighlights.map((highlight) => (
+                                                        <div
+                                                            key={`compare-left-thread-${highlight.id}`}
+                                                            data-testid="compare-left-thread-highlight"
+                                                            className="absolute rounded-sm border-2"
+                                                            style={{
+                                                                left: `${highlight.left}px`,
+                                                                top: `${highlight.top}px`,
+                                                                width: `${highlight.width}px`,
+                                                                height: `${highlight.height}px`,
+                                                                backgroundColor: 'rgba(16, 185, 129, 0.35)',
+                                                                borderColor: 'rgb(5, 150, 105)',
+                                                            }}
+                                                        />
+                                                    ))}
+                                                    {compareFocusedHighlights.left && (
+                                                        <div
+                                                            className="absolute rounded-sm border-2 border-blue-500 ring-2 ring-blue-300/50"
+                                                            style={{
+                                                                left: `${compareFocusedHighlights.left.left}px`,
+                                                                top: `${compareFocusedHighlights.left.top}px`,
+                                                                width: `${compareFocusedHighlights.left.width}px`,
+                                                                height: `${compareFocusedHighlights.left.height}px`,
+                                                            }}
+                                                        />
+                                                    )}
+                                                    {(isChangeReviewCompareMode || !isAiCompareMode) && compareLeftMeasurePositions && (
+                                                        <div
+                                                            className="absolute inset-0 cursor-pointer"
+                                                            style={{ pointerEvents: 'auto' }}
+                                                            title="Click a bar to highlight and annotate it"
+                                                            onClick={(e) => handleCompareScoreClick(e, 'left')}
+                                                        />
+                                                    )}
                                                 </div>
                                             </div>
                                             </div>
@@ -15736,12 +16068,12 @@ ${partsBodyXml}
                                                                     No changes
                                                                 </div>
                                                             )}
-                                                            {isChangeReviewCompareMode && !changeReviewLoading && rows.length > 0 && changeReviewRegions.length === 0 && (
+                                                            {isChangeReviewCompareMode && !changeReviewLoading && rows.length > 0 && changeReviewRegions.length === 0 && changeReviewCompareBarsForGutter.length === 0 && (
                                                                 <div className="text-center text-[10px] text-gray-400">
                                                                     No commentable diff lines
                                                                 </div>
                                                             )}
-                                                            {isChangeReviewCompareMode && changeReviewRegions.length > 0 && compareLeftMeasurePositions && compareRightMeasurePositions && (
+                                                            {isChangeReviewCompareMode && (changeReviewRegions.length > 0 || changeReviewCompareBarsForGutter.length > 0) && compareLeftMeasurePositions && compareRightMeasurePositions && (
                                                                 <div
                                                                     className="relative w-full"
                                                                     style={{ height: `${compareGutterTrackHeight}px` }}
@@ -15774,12 +16106,18 @@ ${partsBodyXml}
                                                                         const blockTop = regionBounds.length
                                                                             ? Math.min(...regionBounds.map((b) => b.top))
                                                                             : compareHeaderSpacerHeight;
+                                                                        // Use the natural part-row span so adjacent-part cards on the
+                                                                        // same system don't overlap (mirrors single-source gutter behaviour).
                                                                         const blockHeight = regionBounds.length
-                                                                            ? Math.max(compareGutterRowHeight, Math.max(...regionBounds.map((b) => b.top + b.height)) - blockTop)
+                                                                            ? Math.max(...regionBounds.map((b) => b.top + b.height)) - blockTop
                                                                             : compareGutterRowHeight;
                                                                         return (
                                                                             <div
                                                                                 key={`compare-review-region-${index}-${region.anchorId}`}
+                                                                                ref={(el) => {
+                                                                                    if (el) compareGutterRegionRefs.current.set(region.anchorId, el);
+                                                                                    else compareGutterRegionRefs.current.delete(region.anchorId);
+                                                                                }}
                                                                                 className={`absolute left-0 right-0 cursor-pointer rounded border bg-white px-2 py-2 transition-opacity duration-150 ${regionColorClasses}${isDimmed ? ' opacity-40' : ''}${isFocused ? ' ring-2 ring-blue-400 shadow-md' : ''}`}
                                                                                 style={{
                                                                                     top: `${blockTop}px`,
@@ -15788,7 +16126,7 @@ ${partsBodyXml}
                                                                                 }}
                                                                                 onClick={(e) => {
                                                                                     e.stopPropagation();
-                                                                                    setChangeReviewFocusedAnchorId(isFocused ? null : region.anchorId);
+                                                                                    setChangeReviewFocusedAnchorId(region.anchorId);
                                                                                 }}
                                                                             >
                                                                                 <div className="flex items-center justify-between gap-2 text-[9px] text-gray-400">
@@ -15831,21 +16169,22 @@ ${partsBodyXml}
                                                                                                     </button>
                                                                                                     <button
                                                                                                         type="button"
-                                                                                                        disabled={changeReviewActionBusy}
-                                                                                                        className="rounded border border-sky-300 bg-sky-50 px-2 py-1 text-[10px] text-sky-700 disabled:opacity-50"
+                                                                                                        disabled={changeReviewActionBusy || !changeReviewNewThreadContent.trim()}
+                                                                                                        className="rounded border border-gray-300 bg-white px-2 py-1 text-[10px] text-gray-700 disabled:opacity-50"
                                                                                                         onClick={() => void runChangeReviewAction(async () => {
                                                                                                             await fetchJsonOrThrow(`/api/proxy/change-reviews/${encodeURIComponent(changeReviewId)}/threads`, {
                                                                                                                 method: 'POST',
                                                                                                                 body: JSON.stringify({
                                                                                                                     anchorId: region.anchorId,
                                                                                                                     content: changeReviewNewThreadContent,
+                                                                                                                    patchsetNumber: changeReviewPatchset ? Number(changeReviewPatchset) : undefined,
                                                                                                                 }),
                                                                                                             });
                                                                                                             setChangeReviewNewThreadAnchorId(null);
                                                                                                             setChangeReviewNewThreadContent('');
                                                                                                         })}
                                                                                                     >
-                                                                                                        Save Thread
+                                                                                                        Submit
                                                                                                     </button>
                                                                                                 </div>
                                                                                             </>
@@ -15864,6 +16203,82 @@ ${partsBodyXml}
                                                                                                 </button>
                                                                                             </div>
                                                                                         )}
+                                                                                    </div>
+                                                                                )}
+                                                                                {thread && renderChangeReviewThread(thread)}
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                    {changeReviewCompareBarsForGutter.map((bar) => {
+                                                                        const thread = changeReviewThreadsByAnchor.get(bar.anchorId);
+                                                                        const isFocused = changeReviewFocusedAnchorId === bar.anchorId;
+                                                                        const bounds = bar.side === 'base'
+                                                                            ? compareLeftBounds[bar.measureIndex]
+                                                                            : compareRightBounds[bar.measureIndex];
+                                                                        const partHeight = bounds ? bounds.height / comparePartCount : compareGutterRowHeight;
+                                                                        const blockTop = bounds
+                                                                            ? bounds.top + partHeight * bar.partIndex
+                                                                            : compareHeaderSpacerHeight;
+                                                                        return (
+                                                                            <div
+                                                                                key={`compare-review-bar-${bar.anchorId}`}
+                                                                                ref={(el) => {
+                                                                                    if (el) compareGutterRegionRefs.current.set(bar.anchorId, el);
+                                                                                    else compareGutterRegionRefs.current.delete(bar.anchorId);
+                                                                                }}
+                                                                                className={`absolute left-0 right-0 cursor-pointer rounded border border-emerald-400 bg-white px-2 py-2 ${isFocused ? 'z-50 ring-2 ring-blue-400 shadow-md' : 'z-20'}`}
+                                                                                style={{ top: `${blockTop}px`, minHeight: `${partHeight}px` }}
+                                                                                onClick={(event) => {
+                                                                                    event.stopPropagation();
+                                                                                    setChangeReviewFocusedAnchorId(bar.anchorId);
+                                                                                }}
+                                                                            >
+                                                                                <div className="flex items-center justify-between gap-2 text-[9px] text-gray-500">
+                                                                                    <span className="rounded bg-emerald-100 px-1 py-0.5 text-emerald-700">
+                                                                                        {bar.side === 'base' ? 'L' : 'R'}{bar.measureIndex + 1}
+                                                                                    </span>
+                                                                                    <span>{bar.partName || `Part ${bar.partIndex + 1}`}</span>
+                                                                                </div>
+                                                                                <div className="mt-1 text-[10px] font-semibold text-gray-800">{bar.label}</div>
+                                                                                {!thread && isFocused && changeReviewDetail?.permissions.canAddThread && (
+                                                                                    <div className="mt-2 grid gap-2">
+                                                                                        <textarea
+                                                                                            value={changeReviewNewThreadContent}
+                                                                                            onChange={(event) => setChangeReviewNewThreadContent(event.target.value)}
+                                                                                            rows={3}
+                                                                                            autoFocus
+                                                                                            placeholder="Write a comment on this bar"
+                                                                                            className="min-h-[72px] w-full rounded border border-sky-300 bg-white px-2 py-1 text-[10px] text-gray-900 placeholder-gray-600"
+                                                                                            disabled={changeReviewActionBusy}
+                                                                                        />
+                                                                                        <div className="flex justify-end gap-2">
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                disabled={changeReviewActionBusy}
+                                                                                                className="rounded border border-gray-300 bg-white px-2 py-1 text-[10px] text-gray-700 disabled:opacity-50"
+                                                                                                onClick={() => {
+                                                                                                    setChangeReviewNewThreadAnchorId(null);
+                                                                                                    setChangeReviewNewThreadContent('');
+                                                                                                }}
+                                                                                            >Cancel</button>
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                disabled={changeReviewActionBusy || !changeReviewNewThreadContent.trim()}
+                                                                                                className="rounded border border-gray-300 bg-white px-2 py-1 text-[10px] text-gray-700 disabled:opacity-50"
+                                                                                                onClick={() => void runChangeReviewAction(async () => {
+                                                                                                    await fetchJsonOrThrow(`/api/proxy/change-reviews/${encodeURIComponent(changeReviewId)}/threads`, {
+                                                                                                        method: 'POST',
+                                                                                                        body: JSON.stringify({
+                                                                                                            anchorId: bar.anchorId,
+                                                                                                            content: changeReviewNewThreadContent,
+                                                                                                            patchsetNumber: changeReviewPatchset ? Number(changeReviewPatchset) : undefined,
+                                                                                                        }),
+                                                                                                    });
+                                                                                                    setChangeReviewNewThreadAnchorId(null);
+                                                                                                    setChangeReviewNewThreadContent('');
+                                                                                                })}
+                                                                                            >Submit</button>
+                                                                                        </div>
                                                                                     </div>
                                                                                 )}
                                                                                 {thread && renderChangeReviewThread(thread)}
@@ -16316,6 +16731,40 @@ ${partsBodyXml}
                                                             }}
                                                         />
                                                     ))}
+                                                    {compareThreadedRightHighlights.map((highlight) => (
+                                                        <div
+                                                            key={`compare-right-thread-${highlight.id}`}
+                                                            data-testid="compare-right-thread-highlight"
+                                                            className="absolute rounded-sm border-2"
+                                                            style={{
+                                                                left: `${highlight.left}px`,
+                                                                top: `${highlight.top}px`,
+                                                                width: `${highlight.width}px`,
+                                                                height: `${highlight.height}px`,
+                                                                backgroundColor: 'rgba(16, 185, 129, 0.35)',
+                                                                borderColor: 'rgb(5, 150, 105)',
+                                                            }}
+                                                        />
+                                                    ))}
+                                                    {compareFocusedHighlights.right && (
+                                                        <div
+                                                            className="absolute rounded-sm border-2 border-blue-500 ring-2 ring-blue-300/50"
+                                                            style={{
+                                                                left: `${compareFocusedHighlights.right.left}px`,
+                                                                top: `${compareFocusedHighlights.right.top}px`,
+                                                                width: `${compareFocusedHighlights.right.width}px`,
+                                                                height: `${compareFocusedHighlights.right.height}px`,
+                                                            }}
+                                                        />
+                                                    )}
+                                                    {(isChangeReviewCompareMode || !isAiCompareMode) && compareRightMeasurePositions && (
+                                                        <div
+                                                            className="absolute inset-0 cursor-pointer"
+                                                            style={{ pointerEvents: 'auto' }}
+                                                            title="Click a bar to highlight and annotate it"
+                                                            onClick={(e) => handleCompareScoreClick(e, 'right')}
+                                                        />
+                                                    )}
                                                 </div>
                                             </div>
                                             </div>

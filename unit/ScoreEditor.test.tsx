@@ -21,6 +21,7 @@ vi.mock('../lib/webmscore-loader', () => ({
 }));
 
 import ScoreEditor, {
+  buildPartLocalizedChangeReviewBarHighlights,
   buildPartLocalizedChangeReviewHighlights,
   sortChangeReviewRegionsByMeasure,
 } from '../components/ScoreEditor';
@@ -86,6 +87,43 @@ describe('buildPartLocalizedChangeReviewHighlights', () => {
         width: 40,
         height: 25,
       }),
+    ]);
+  });
+});
+
+describe('buildPartLocalizedChangeReviewBarHighlights', () => {
+  it('keeps threaded bar highlights distinct by side and part', () => {
+    const positions = {
+      elements: [{ id: 7, x: 10, y: 100, sx: 80, sy: 200, page: 0 }],
+      events: [],
+      pageSize: { width: 1000, height: 1200 },
+    };
+    const bar = (anchorId: string, side: 'base' | 'head', partIndex: number) => ({
+      kind: 'score_bar' as const,
+      anchorId,
+      revisionId: `rev-${side}`,
+      side,
+      partId: `part-${partIndex}`,
+      partIndex,
+      measureIndex: 0,
+      measureNumber: '1',
+      measureHash: `${side}-${partIndex}`,
+      label: `${side} part ${partIndex}`,
+      hasThread: true,
+      commentable: true,
+    });
+
+    const highlights = buildPartLocalizedChangeReviewBarHighlights(
+      positions,
+      [bar('base-violin', 'base', 0), bar('base-cello', 'base', 3), bar('head-cello', 'head', 3)],
+      'base',
+      0.5,
+      4,
+    );
+
+    expect(highlights).toEqual([
+      expect.objectContaining({ id: 'base-violin-base', top: 50, height: 25 }),
+      expect.objectContaining({ id: 'base-cello-base', top: 125, height: 25 }),
     ]);
   });
 });
