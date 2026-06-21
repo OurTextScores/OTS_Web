@@ -64,8 +64,17 @@ describe('detectScoreInputFormat', () => {
 
   it('distinguishes compressed MusicXML from MSCZ using ZIP entry names', () => {
     const mxl = new Uint8Array([0x50, 0x4b, ...new TextEncoder().encode('META-INF/container.xml')]);
-    const mscz = new Uint8Array([0x50, 0x4b, ...new TextEncoder().encode('score.mscx')]);
+    // Classic MSCZ (pre-4.x): just a .mscx inside the zip
+    const msczClassic = new Uint8Array([0x50, 0x4b, ...new TextEncoder().encode('score.mscx')]);
+    // MuseScore 4.x MSCZ: also has META-INF/container.xml alongside the .mscx
+    const mscz4x = new Uint8Array([0x50, 0x4b, ...new TextEncoder().encode('something-5string.mscxMETA-INF/container.xml')]);
     expect(detectScoreInputFormat('https://example.com/download', mxl)).toBe('mxl');
-    expect(detectScoreInputFormat('https://example.com/download', mscz)).toBe('mscz');
+    expect(detectScoreInputFormat('https://example.com/download', msczClassic)).toBe('mscz');
+    expect(detectScoreInputFormat('https://example.com/download', mscz4x)).toBe('mscz');
+  });
+
+  it('uses .mscz extension to fast-path detection without reading file bytes', () => {
+    expect(detectScoreInputFormat('https://example.com/something.mscz')).toBe('mscz');
+    expect(detectScoreInputFormat('https://example.com/something.mscz?token=abc')).toBe('mscz');
   });
 });

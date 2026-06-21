@@ -78,9 +78,17 @@ export function detectScoreInputFormat(source: string, data?: Uint8Array): Input
   if (normalized.endsWith('.mscx')) {
     return 'mscx';
   }
+  if (normalized.endsWith('.mscz')) {
+    return 'mscz';
+  }
 
   if (data?.byteLength) {
     const isZip = data[0] === 0x50 && data[1] === 0x4b;
+    // MuseScore 4.x MSCZ files are ZIPs that also contain META-INF/container.xml,
+    // so check for a .mscx entry (the MuseScore signature) before checking for MXL.
+    if (isZip && containsAscii(data, '.mscx')) {
+      return 'mscz';
+    }
     if (isZip && containsAscii(data, 'META-INF/container.xml')) {
       return 'mxl';
     }
