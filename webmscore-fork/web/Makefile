@@ -19,6 +19,9 @@ release:
 	if test ! -d build.release; then mkdir build.release; fi; \
 	  cd build.release;                                        \
 	  emcmake cmake -DCMAKE_BUILD_TYPE=RELEASE	                \
+	  -DCMAKE_POLICY_VERSION_MINIMUM=3.5                         \
+	  -DCMAKE_AR=$(shell which emar)                             \
+	  -DCMAKE_RANLIB=$(shell which emranlib)                     \
 	  -DEMBED_PRELOADS="${EMBED_PRELOADS}"                       \
 	  -DCMAKE_TOOLCHAIN_FILE="${CMAKE_TOOLCHAIN_FILE}"            \
 	  -DCMAKE_BUILD_NUMBER="${BUILD_NUMBER}" ..;                   \
@@ -29,6 +32,9 @@ debug:
 	if test ! -d build.debug; then mkdir build.debug; fi; \
 	  cd build.debug;                                      \
 	  emcmake cmake -DCMAKE_BUILD_TYPE=DEBUG	            \
+	  -DCMAKE_POLICY_VERSION_MINIMUM=3.5                   \
+	  -DCMAKE_AR=$(shell which emar)                       \
+	  -DCMAKE_RANLIB=$(shell which emranlib)               \
 	  -DEMBED_PRELOADS="${EMBED_PRELOADS}"                   \
 	  -DCMAKE_TOOLCHAIN_FILE="${CMAKE_TOOLCHAIN_FILE}"        \
 	  -DCMAKE_BUILD_NUMBER="${BUILD_NUMBER}" ..;               \

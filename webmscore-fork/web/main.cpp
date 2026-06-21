@@ -34,6 +34,7 @@
 
 #include "draw/ifontprovider.h"
 #include "engraving/libmscore/score.h"
+#include "engraving/libmscore/mscore.h"
 #include "project/internal/notationproject.h"
 #include "engraving/engravingproject.h"
 #include "engraving/compat/mscxcompat.h"
@@ -239,44 +240,42 @@ void _init(int argc, char** argv) {
     char* forcedArgv[] = { arg0, arg1, arg2, nullptr };
     int forcedArgc = 3;
     new QGuiApplication(forcedArgc, forcedArgv);
-    printf("[WASM BUILD] audition-sequence-fix-v3\n");
     (void)argc;
     (void)argv;
 
     modularity::ioc()->registerExport<context::IGlobalContext>("", s_globalContext);
     modularity::ioc()->registerExport<notation::INotationConfiguration>("", new notation::NotationConfiguration());
-
-    // src/framework/global/globalmodule.cpp#67
     modularity::ioc()->registerExport<io::IFileSystem>("", new io::FileSystem());
     modularity::ioc()->registerExport<ICryptographicHash>("", new CryptographicHash());
 
-    // src/framework/draw/drawmodule.cpp
     auto drawM = new draw::DrawModule();
     drawM->registerExports();
 
     auto engM = new engraving::EngravingModule();
     engM->registerExports();
     engM->onInit(framework::IApplication::RunMode::Converter);
+
     auto mpeM = new mpe::MpeModule();
     mpeM->registerExports();
 
-    // populate `engraving::instrumentGroups` and `engraving::instrumentTemplates`
     engraving::clearInstrumentTemplates();
     engraving::loadInstrumentTemplates("/instruments.xml");
 
-    // file import/export
     modularity::ioc()->registerExport<project::INotationReadersRegister>("", new project::NotationReadersRegister());
     modularity::ioc()->registerExport<project::INotationWritersRegister>("", new project::NotationWritersRegister());
     auto mxlM = new iex::musicxml::MusicXmlModule();
     mxlM->registerExports();
     mxlM->resolveImports();
+
     auto gpM = new iex::guitarpro::GuitarProModule();
     gpM->registerExports();
     gpM->resolveImports();
+
     auto midiM = new iex::midi::MidiModule();
     midiM->registerExports();
     midiM->resolveImports();
     midiM->onInit(framework::IApplication::RunMode::Converter);
+
     auto imgM = new iex::imagesexport::ImagesExportModule();
     imgM->registerExports();
     imgM->resolveImports();
@@ -284,7 +283,6 @@ void _init(int argc, char** argv) {
 
     auto writers = modularity::ioc()->resolve<project::INotationWritersRegister>("");
     writers->reg({ engraving::MSCZ }, std::make_shared<notation::MscNotationWriter>(engraving::MscIoMode::Zip));
-    // writers->reg({ engraving::MSCX }, std::make_shared<notation::MscNotationWriter>(engraving::MscIoMode::Dir));
     writers->reg({ engraving::MSCS }, std::make_shared<notation::MscNotationWriter>(engraving::MscIoMode::XmlFile));
 
     MainAudio::initModule();
@@ -330,6 +328,16 @@ Ret _doLoad(engraving::EngravingProjectPtr proj, QString filePath, bool doLayout
     if (err != engraving::Err::NoError) {
         if (deferLayout) {
             score->lockUpdates(false);
+        }
+        // The compatibility loader intentionally attempts newer MSCZ versions.
+        // If that attempt fails, report the actual compatibility problem instead
+        // of exposing the parser's generic "Bad format" error.
+        if (err == engraving::Err::FileBadFormat && score->mscVersion() > engraving::MSCVERSION) {
+            return Ret(
+                static_cast<int>(engraving::Err::FileTooNew),
+                "This score was saved in a newer MuseScore format that this editor does not support yet. "
+                "Export the score as MusicXML in MuseScore, then load the MusicXML file here."
+            );
         }
         return make_ret(err);
     }

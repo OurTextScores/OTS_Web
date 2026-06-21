@@ -91,6 +91,10 @@ include(EmbedFiles)
 set(QT_MIN_VERSION    "5.15.0")
 include(FindQt5)
 
+# Qt5GuiConfig.cmake in our Qt build only auto-loads the offscreen plugin.
+# Explicitly load the wasm platform plugin so it can be statically linked.
+include("${Qt5Gui_DIR}/Qt5Gui_QWasmIntegrationPlugin.cmake")
+
 include(SetupFreetypeBrotli)
 
 ###########################################
@@ -142,6 +146,7 @@ target_include_directories(webmscore PUBLIC
 )
 
 target_link_libraries(webmscore
+    Qt5::QWasmIntegrationPlugin
     ${QT_LIBRARIES}
     global
     engraving
