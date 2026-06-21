@@ -38,6 +38,30 @@ describe('Toolbar', () => {
     expect(onFileUpload).toHaveBeenCalledWith(file);
   });
 
+  it('wires the Google Drive export and share-link actions', async () => {
+    const user = userEvent.setup();
+    const onExportToGoogleDrive = vi.fn();
+    const onCreateShareableLink = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        exportsEnabled
+        onExportToGoogleDrive={onExportToGoogleDrive}
+        onCreateShareableLink={onCreateShareableLink}
+      />,
+    );
+
+    await user.click(screen.getByTestId('btn-export-google-drive'));
+    await user.click(screen.getByTestId('btn-create-share-link'));
+
+    expect(onExportToGoogleDrive).toHaveBeenCalledTimes(1);
+    expect(onCreateShareableLink).toHaveBeenCalledTimes(1);
+  });
+
   it('ignores empty file inputs', () => {
     const onFileUpload = vi.fn();
     const onSoundFontUpload = vi.fn();

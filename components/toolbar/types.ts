@@ -48,6 +48,8 @@ export interface ToolbarSectionProps {
     onExportMidi?: () => void;
     onExportAudio?: () => void;
     onExportCurrentPageAudio?: () => void;
+    onExportToGoogleDrive?: () => void;
+    onCreateShareableLink?: () => void;
     onSoundFontUpload?: (file: File) => void;
     exportsEnabled?: boolean;
     pngAvailable?: boolean;

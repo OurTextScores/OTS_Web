@@ -2,7 +2,7 @@ import React from 'react';
 import { Button } from '../../ui/Button';
 import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenu } from '../../ui/DropdownMenu';
 import { ToolbarSectionProps } from '../types';
-import { FilePlus, FolderOpen, Download, Music } from 'lucide-react';
+import { CloudUpload, FilePlus, FolderOpen, Download, Music, Share2 } from 'lucide-react';
 
 export const FileSection: React.FC<ToolbarSectionProps> = ({
     onNewScore,
@@ -18,6 +18,8 @@ export const FileSection: React.FC<ToolbarSectionProps> = ({
     onExportMidi,
     onExportAudio,
     onExportCurrentPageAudio,
+    onExportToGoogleDrive,
+    onCreateShareableLink,
     onSoundFontUpload,
     exportsEnabled,
     pngAvailable,
@@ -92,6 +94,31 @@ export const FileSection: React.FC<ToolbarSectionProps> = ({
                     </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
+
+            <Button
+                data-testid="btn-export-google-drive"
+                onClick={onExportToGoogleDrive}
+                variant="outline"
+                size="sm"
+                disabled={!exportsEnabled || !onExportToGoogleDrive}
+                className="shadow-sm"
+                title="Download this score, then upload it to Google Drive"
+            >
+                <CloudUpload size={14} className="mr-2" />
+                Export to Drive
+            </Button>
+
+            <Button
+                data-testid="btn-create-share-link"
+                onClick={onCreateShareableLink}
+                variant="outline"
+                size="sm"
+                className="shadow-sm"
+                title="Create an editor link from a public Google Drive share URL"
+            >
+                <Share2 size={14} className="mr-2" />
+                Share Link
+            </Button>
 
             <div className="h-3 w-px bg-slate-200"></div>
 

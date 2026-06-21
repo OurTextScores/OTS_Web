@@ -23,8 +23,25 @@ vi.mock('../lib/webmscore-loader', () => ({
 import ScoreEditor, {
   buildPartLocalizedChangeReviewBarHighlights,
   buildPartLocalizedChangeReviewHighlights,
+  scoreLoadErrorMessage,
   sortChangeReviewRegionsByMeasure,
 } from '../components/ScoreEditor';
+
+describe('scoreLoadErrorMessage', () => {
+  it('surfaces the newer MuseScore format guidance without the WASM prefix', () => {
+    expect(scoreLoadErrorMessage(new Error(
+      'WebMscore Err[2007] This score was saved in a newer MuseScore format that this editor does not support yet. Export the score as MusicXML in MuseScore, then load the MusicXML file here.',
+    ))).toBe(
+      'This score was saved in a newer MuseScore format that this editor does not support yet. Export the score as MusicXML in MuseScore, then load the MusicXML file here.',
+    );
+  });
+
+  it('keeps the generic user message for unrelated parser failures', () => {
+    expect(scoreLoadErrorMessage(new Error('WebMscore Err[2004] Bad format'))).toBe(
+      'Failed to load score. See console for details.',
+    );
+  });
+});
 
 describe('sortChangeReviewRegionsByMeasure', () => {
   it('orders change review cards by measure, then part', () => {

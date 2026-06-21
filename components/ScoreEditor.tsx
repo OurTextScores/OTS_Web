@@ -58,6 +58,12 @@ import {
     trackEditorAnalyticsEvent,
 } from '../lib/editor-analytics';
 import {
+    buildScoreEditorShareUrl,
+    detectScoreInputFormat,
+    isGoogleDriveScoreUrl,
+    resolvePublicScoreUrl,
+} from '../lib/public-score-url';
+import {
     MMA_ARRANGEMENT_PRESETS,
     type MmaArrangementPreset,
 } from '../lib/music-mma-presets';
@@ -901,6 +907,14 @@ const errorMessage = (err: unknown) => {
     return '';
 };
 
+export const scoreLoadErrorMessage = (err: unknown) => {
+    const message = errorMessage(err);
+    if (message.includes('newer MuseScore format')) {
+        return message.replace(/^WebMscore Err(?:\[2007\]\s*)?/, '').trim();
+    }
+    return 'Failed to load score. See console for details.';
+};
+
 const MMA_TEMPLATE_MAX_MEASURES = 2500;
 const HARMONY_ANALYZE_DEFAULT_TIMEOUT_MS = 60_000;
 const HARMONY_ANALYZE_MEDIUM_TIMEOUT_MS = 180_000;
@@ -1277,6 +1291,12 @@ export default function ScoreEditor() {
     const [pngExportDialogOpen, setPngExportDialogOpen] = useState(false);
     const [pngExportPageInput, setPngExportPageInput] = useState('1');
     const [pngExportBusy, setPngExportBusy] = useState(false);
+    const [googleDriveExportDialogOpen, setGoogleDriveExportDialogOpen] = useState(false);
+    const [shareLinkDialogOpen, setShareLinkDialogOpen] = useState(false);
+    const [googleDriveShareUrl, setGoogleDriveShareUrl] = useState('');
+    const [generatedShareUrl, setGeneratedShareUrl] = useState('');
+    const [shareLinkError, setShareLinkError] = useState('');
+    const [shareLinkCopied, setShareLinkCopied] = useState(false);
     const [progressiveLoadEnabled, setProgressiveLoadEnabled] = useState(true);
     const [scoreId, setScoreId] = useState('');
     const [newScoreDialogOpen, setNewScoreDialogOpen] = useState(false);
@@ -1405,19 +1425,6 @@ export default function ScoreEditor() {
         };
     }, [clearInteractionPrime, emitEditorTelemetry]);
 
-    const detectInputFormat = (source: string): InputFileFormat => {
-        const normalized = source.toLowerCase().split('#')[0].split('?')[0];
-        if (normalized.endsWith('.xml') || normalized.endsWith('.musicxml')) {
-            return 'musicxml';
-        }
-        if (normalized.endsWith('.mxl')) {
-            return 'mxl';
-        }
-        if (normalized.endsWith('.mscx')) {
-            return 'mscx';
-        }
-        return 'mscz';
-    };
     const isLargeScoreData = (data: Uint8Array) => data.byteLength >= LARGE_SCORE_THRESHOLD_BYTES;
     const shouldSkipCoverPageFirstRender = (format: InputFileFormat, data: Uint8Array) => (
         isLargeScoreData(data) && (format === 'mscz' || format === 'mscx' || format === 'mxl')
@@ -5303,14 +5310,15 @@ ${partsBodyXml}
         autoFitPendingRef.current = true;
         let engineMode: string | undefined;
         try {
-            const response = await fetch(url, signal ? { signal } : undefined);
+            const fetchUrl = resolvePublicScoreUrl(url);
+            const response = await fetch(fetchUrl, signal ? { signal } : undefined);
             if (!response.ok) throw new Error('Failed to fetch score');
             const buffer = await response.arrayBuffer();
             const data = new Uint8Array(buffer);
             const inputByteLength = data.byteLength;
             const inputIsLarge = isLargeScoreData(data);
             largeScoreSessionRef.current = inputIsLarge;
-            const format = detectInputFormat(url);
+            const format = detectScoreInputFormat(url, data);
             const resolvedEngine = await resolveWebMscoreEngine();
             engineMode = resolvedEngine.mode;
             if (inputIsLarge) {
@@ -5428,6 +5436,9 @@ ${partsBodyXml}
             return true;
         } catch (err) {
             console.error('Error auto-loading file:', err);
+            if (!signal?.aborted) {
+                alert(scoreLoadErrorMessage(err));
+            }
             setInteractionState({ preparing: false, ready: false });
             telemetryCountersRef.current.documentLoadFailures += 1;
             emitEditorTelemetry('score_editor_document_load_failed', {
@@ -5529,7 +5540,7 @@ ${partsBodyXml}
             inputByteLength = data.byteLength;
             largeScoreSessionRef.current = isLargeUpload;
             logUploadStage('read-buffer:done', { bytes: inputByteLength });
-            format = detectInputFormat(file.name);
+            format = detectScoreInputFormat(file.name, data);
             const resolvedEngine = await resolveWebMscoreEngine();
             engineMode = resolvedEngine.mode;
             logUploadStage('webmscore-ready', { engineMode });
@@ -5633,7 +5644,7 @@ ${partsBodyXml}
 
         } catch (err) {
             console.error('Error loading file:', err);
-            alert('Failed to load score. See console for details.');
+            alert(scoreLoadErrorMessage(err));
             setInteractionState({ preparing: false, ready: false });
             telemetryCountersRef.current.documentLoadFailures += 1;
             emitEditorTelemetry('score_editor_document_load_failed', {
@@ -11386,6 +11397,65 @@ ${partsBodyXml}
         }
     };
 
+    const handleExportToGoogleDrive = async () => {
+        if (!score || !score.saveMsc) {
+            alert('MSCZ export is not available in this build.');
+            return;
+        }
+        try {
+            const mscz = await score.saveMsc('mscz');
+            downloadBlob(mscz, 'score.mscz', 'application/vnd.musescore.mscz');
+            setGoogleDriveExportDialogOpen(true);
+        } catch (err) {
+            console.error('Failed to export score for Google Drive', err);
+            alert('Unable to export the score. See console for details.');
+        }
+    };
+
+    const handleOpenShareLinkDialog = () => {
+        setGoogleDriveExportDialogOpen(false);
+        setShareLinkDialogOpen(true);
+        setGeneratedShareUrl('');
+        setShareLinkError('');
+        setShareLinkCopied(false);
+    };
+
+    const handleGenerateShareLink = (event?: React.FormEvent<HTMLFormElement>) => {
+        event?.preventDefault();
+        const driveUrl = googleDriveShareUrl.trim();
+        setShareLinkCopied(false);
+        if (!isGoogleDriveScoreUrl(driveUrl)) {
+            setGeneratedShareUrl('');
+            setShareLinkError('Paste a Google Drive file share link, not a folder link.');
+            return;
+        }
+        try {
+            const shareUrl = buildScoreEditorShareUrl(
+                driveUrl,
+                window.location.href,
+                process.env.NEXT_PUBLIC_SCORE_EDITOR_PUBLIC_URL,
+            );
+            setGeneratedShareUrl(shareUrl);
+            setShareLinkError('');
+        } catch {
+            setGeneratedShareUrl('');
+            setShareLinkError('Unable to create a shareable editor link from this URL.');
+        }
+    };
+
+    const handleCopyShareLink = async () => {
+        if (!generatedShareUrl) return;
+        try {
+            await navigator.clipboard.writeText(generatedShareUrl);
+            setShareLinkCopied(true);
+        } catch {
+            const input = document.querySelector<HTMLInputElement>('[data-testid="generated-share-link"]');
+            input?.select();
+            document.execCommand('copy');
+            setShareLinkCopied(true);
+        }
+    };
+
     const handleExportMscx = async () => {
         if (!score || !score.saveMsc) {
             alert('MSCX export is not available in this build.');
@@ -13086,6 +13156,8 @@ ${partsBodyXml}
                 onExportMidi={handleExportMidi}
                 onExportAudio={handleExportAudio}
                 onExportCurrentPageAudio={score?.saveAudioForMeasureRange ? handleExportCurrentPageAudio : undefined}
+                onExportToGoogleDrive={handleExportToGoogleDrive}
+                onCreateShareableLink={handleOpenShareLinkDialog}
                 onPlayAudio={handlePlayAudio}
                 onPlayCurrentPageAudio={score?.saveAudioForMeasureRange ? playCurrentPageAudio : undefined}
                 onPlayFromSelectionAudio={interactionReady ? handlePlayFromSelectionAudio : undefined}
@@ -15502,6 +15574,123 @@ ${partsBodyXml}
                             </button>
                         </div>
                     </form>
+                </div>
+            )}
+
+            {googleDriveExportDialogOpen && (
+                <div
+                    className="fixed inset-0 z-50 overflow-y-auto bg-black/40"
+                    data-testid="google-drive-export-modal"
+                >
+                  <div className="flex min-h-full items-center justify-center p-6">
+                    <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
+                        <div className="flex items-center justify-between gap-4">
+                            <div className="text-base font-semibold text-gray-900">Export to Google Drive</div>
+                            <button
+                                type="button"
+                                onClick={() => setGoogleDriveExportDialogOpen(false)}
+                                className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100"
+                            >
+                                Close
+                            </button>
+                        </div>
+                        <ol className="mt-5 list-decimal space-y-2.5 pl-5 text-sm text-gray-700">
+                            <li><strong>score.mscz</strong> has been downloaded.</li>
+                            <li>Open Google Drive and upload the downloaded file.</li>
+                            <li>Set General access to <strong>Anyone with the link</strong>, then copy its share link.</li>
+                        </ol>
+                        <div className="mt-6 flex flex-wrap gap-3">
+                            <a
+                                href="https://drive.google.com/drive/my-drive"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded border border-blue-600 bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                            >
+                                Open Google Drive
+                            </a>
+                            <button
+                                type="button"
+                                data-testid="btn-drive-next-share-link"
+                                onClick={handleOpenShareLinkDialog}
+                                className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                            >
+                                Create Shareable Link
+                            </button>
+                        </div>
+                    </div>
+                  </div>
+                </div>
+            )}
+
+            {shareLinkDialogOpen && (
+                <div
+                    className="fixed inset-0 z-50 overflow-y-auto bg-black/40"
+                    data-testid="share-link-modal"
+                >
+                    <div className="flex min-h-full items-center justify-center p-6">
+                        <form onSubmit={handleGenerateShareLink} className="w-full max-w-xl rounded-lg bg-white p-6 shadow-xl">
+                            <div className="flex items-center justify-between gap-4">
+                                <div className="text-base font-semibold text-gray-900">Create Shareable Editor Link</div>
+                                <button
+                                    type="button"
+                                    onClick={() => setShareLinkDialogOpen(false)}
+                                    className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                            <p className="mt-3 text-sm text-gray-600">
+                                Paste the public Google Drive file link. The generated URL opens this editor and loads that score.
+                            </p>
+                            <label className="mt-4 flex flex-col gap-1.5">
+                                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Google Drive share link</span>
+                                <input
+                                    data-testid="google-drive-share-url"
+                                    type="url"
+                                    value={googleDriveShareUrl}
+                                    onChange={(event) => {
+                                        setGoogleDriveShareUrl(event.target.value);
+                                        setGeneratedShareUrl('');
+                                        setShareLinkError('');
+                                        setShareLinkCopied(false);
+                                    }}
+                                    placeholder="https://drive.google.com/file/d/.../view?usp=sharing"
+                                    className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                                    autoFocus
+                                />
+                            </label>
+                            {shareLinkError && <div className="mt-2 text-sm text-red-600">{shareLinkError}</div>}
+                            <button
+                                type="submit"
+                                data-testid="btn-generate-share-link"
+                                className="mt-4 rounded border border-blue-600 bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                            >
+                                Generate Link
+                            </button>
+                            {generatedShareUrl && (
+                                <div className="mt-5 rounded-md border border-green-200 bg-green-50 p-4">
+                                    <label className="flex flex-col gap-1.5">
+                                        <span className="text-xs font-semibold uppercase tracking-wide text-green-800">Shareable editor link</span>
+                                        <input
+                                            data-testid="generated-share-link"
+                                            readOnly
+                                            value={generatedShareUrl}
+                                            onFocus={(event) => event.currentTarget.select()}
+                                            className="rounded border border-green-300 bg-white px-3 py-2 text-sm text-gray-900"
+                                        />
+                                    </label>
+                                    <button
+                                        type="button"
+                                        data-testid="btn-copy-share-link"
+                                        onClick={() => { void handleCopyShareLink(); }}
+                                        className="mt-3 rounded border border-green-700 bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-800"
+                                    >
+                                        {shareLinkCopied ? 'Copied' : 'Copy Link'}
+                                    </button>
+                                </div>
+                            )}
+                        </form>
+                    </div>
                 </div>
             )}
 
