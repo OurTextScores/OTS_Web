@@ -8,11 +8,11 @@ import {
 } from '../lib/public-score-url';
 
 describe('resolvePublicScoreUrl', () => {
-  it('converts a copied Google Drive share URL to the CORS-enabled download host', () => {
+  it('routes a Google Drive share URL through the server-side proxy', () => {
     expect(resolvePublicScoreUrl(
       'https://drive.google.com/file/d/abc_123-XYZ/view?usp=sharing',
     )).toBe(
-      'https://drive.usercontent.google.com/download?id=abc_123-XYZ&export=download',
+      '/api/fetch-score?url=https%3A%2F%2Fdrive.usercontent.google.com%2Fdownload%3Fid%3Dabc_123-XYZ%26export%3Ddownload',
     );
   });
 
@@ -20,7 +20,7 @@ describe('resolvePublicScoreUrl', () => {
     expect(resolvePublicScoreUrl(
       'https://drive.google.com/open?id=abc123',
     )).toBe(
-      'https://drive.usercontent.google.com/download?id=abc123&export=download',
+      '/api/fetch-score?url=https%3A%2F%2Fdrive.usercontent.google.com%2Fdownload%3Fid%3Dabc123%26export%3Ddownload',
     );
   });
 

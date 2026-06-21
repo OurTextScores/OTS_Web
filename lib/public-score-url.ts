@@ -25,7 +25,11 @@ export function isGoogleDriveScoreUrl(source: string): boolean {
   }
 }
 
-/** Converts a copied public Google Drive share URL into a CORS-enabled file download URL. */
+/**
+ * Converts a Google Drive share URL into a fetchable URL.
+ * Direct browser fetches to drive.usercontent.google.com are blocked by CORS,
+ * so we route through our server-side proxy which is allowed to fetch it.
+ */
 export function resolvePublicScoreUrl(source: string): string {
   try {
     const url = new URL(source);
@@ -37,7 +41,8 @@ export function resolvePublicScoreUrl(source: string): string {
     const downloadUrl = new URL('https://drive.usercontent.google.com/download');
     downloadUrl.searchParams.set('id', driveFileId);
     downloadUrl.searchParams.set('export', 'download');
-    return downloadUrl.toString();
+
+    return `/api/fetch-score?url=${encodeURIComponent(downloadUrl.toString())}`;
   } catch {
     // Relative URLs are valid score sources and should pass through unchanged.
     return source;
