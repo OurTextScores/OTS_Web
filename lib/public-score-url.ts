@@ -42,7 +42,11 @@ export function resolvePublicScoreUrl(source: string): string {
     downloadUrl.searchParams.set('id', driveFileId);
     downloadUrl.searchParams.set('export', 'download');
 
-    return `/api/fetch-score?url=${encodeURIComponent(downloadUrl.toString())}`;
+    // In embed/static builds NEXT_PUBLIC_SCORE_EDITOR_API_BASE points to the
+    // companion API proxy (e.g. /api/score-editor), which routes to the
+    // score_editor_api Next.js service where /api/fetch-score lives.
+    const apiBase = (process.env.NEXT_PUBLIC_SCORE_EDITOR_API_BASE ?? '').replace(/\/$/, '') || '/api';
+    return `${apiBase}/fetch-score?url=${encodeURIComponent(downloadUrl.toString())}`;
   } catch {
     // Relative URLs are valid score sources and should pass through unchanged.
     return source;

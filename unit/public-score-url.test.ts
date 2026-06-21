@@ -24,6 +24,21 @@ describe('resolvePublicScoreUrl', () => {
     );
   });
 
+  it('uses NEXT_PUBLIC_SCORE_EDITOR_API_BASE as the proxy prefix in embed builds', () => {
+    const original = process.env.NEXT_PUBLIC_SCORE_EDITOR_API_BASE;
+    process.env.NEXT_PUBLIC_SCORE_EDITOR_API_BASE = '/api/score-editor';
+    try {
+      expect(resolvePublicScoreUrl(
+        'https://drive.google.com/file/d/abc123/view?usp=sharing',
+      )).toBe(
+        '/api/score-editor/fetch-score?url=https%3A%2F%2Fdrive.usercontent.google.com%2Fdownload%3Fid%3Dabc123%26export%3Ddownload',
+      );
+    } finally {
+      if (original === undefined) delete process.env.NEXT_PUBLIC_SCORE_EDITOR_API_BASE;
+      else process.env.NEXT_PUBLIC_SCORE_EDITOR_API_BASE = original;
+    }
+  });
+
   it('does not alter relative or non-Google URLs', () => {
     expect(resolvePublicScoreUrl('/scores/example.musicxml')).toBe('/scores/example.musicxml');
     expect(resolvePublicScoreUrl('https://example.com/example.mscz')).toBe('https://example.com/example.mscz');
