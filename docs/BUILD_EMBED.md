@@ -151,6 +151,76 @@ docker compose up -d --build frontend
 
 If you are also running editor features that call `/api/music/*` or `/api/llm/*`, make sure the OurTextScores `score_editor_api` service mounts or uses the current editor source/runtime. For local development with the sibling checkout above, the service should point at `../OTS_Web:/app`.
 
+## Updating the Editor API Docker Image (Production)
+
+Production runs a pre-built Docker image for the `score_editor_api` service instead of mounting the source tree. The image is `ghcr.io/ourtextscores/ots-web-editor-api` and is built from `Dockerfile.editor-api` via the `publish-editor-api-image.yml` GitHub Actions workflow.
+
+**Unlike the static embed, the Docker image is not rebuilt automatically when you push commits.** It is only rebuilt when you push a version tag or trigger the workflow manually.
+
+### When you need to rebuild the image
+
+Rebuild any time you change something that runs server-side inside `score_editor_api`:
+
+- New or modified **API routes** under `app/api/` (e.g. adding `app/api/fetch-score/route.ts`)
+- Changes to **server-side libraries** under `lib/` that are called from API routes
+- Changes to **`tools/`** scripts (music21, kern conversion, etc.)
+- Updates to the **WASM artifacts** (`public/webmscore.lib.*`) — these are copied into the image
+- Dependency changes in `package.json` that affect server behaviour
+
+You do **not** need to rebuild the image for changes that only affect the static embed UI (components, styles, client-side JS). Those are picked up by the `npm run build:embed` → rsync → frontend rebuild cycle above.
+
+### How to trigger a rebuild
+
+**Option 1 — Push a version tag** (creates a tagged release on GHCR):
+
+```bash
+cd ~/workspace/OTS_Web
+git tag v<major>.<minor>.<patch>
+git push origin v<major>.<minor>.<patch>
+```
+
+The `publish-editor-api-image.yml` workflow runs automatically and pushes both a versioned tag and `:latest` to GHCR.
+
+**Option 2 — Trigger via GitHub CLI** (pushes `:latest` without a release tag):
+
+```bash
+gh workflow run publish-editor-api-image.yml --repo jhlusko/OTS_Web
+```
+
+Or trigger from the GitHub Actions UI under **Actions → Publish Editor API Image → Run workflow**.
+
+### How to deploy the new image on the production server
+
+After the workflow completes:
+
+1. **Update the pinned tag** in the production `.env` file. The image tag is controlled by `OTS_EDITOR_API_IMAGE_TAG`; if it is pinned to an old version, `docker compose pull` will fetch the old image and the container will not update.
+
+   ```bash
+   # On the production server:
+   grep OTS_EDITOR_API_IMAGE_TAG /opt/ourtextscores/.env   # check current value
+   sed -i 's/OTS_EDITOR_API_IMAGE_TAG=.*/OTS_EDITOR_API_IMAGE_TAG=v0.7.0/' /opt/ourtextscores/.env
+   ```
+
+   Replace `v0.7.0` with the tag you just pushed. Alternatively, remove the line entirely to fall back to the `:latest` default — though an explicit tag is safer in production.
+
+2. **Pull and recreate**:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.score-editor-image.yml pull score_editor_api
+   docker compose -f docker-compose.yml -f docker-compose.score-editor-image.yml up -d --force-recreate score_editor_api
+   ```
+
+   The `--force-recreate` flag is required when the image digest changes even if the tag string stays the same (e.g. when using `:latest`).
+
+3. **Verify** the new image is running:
+
+   ```bash
+   docker ps --format "{{.Names}}\t{{.Image}}\t{{.Status}}" | grep score_editor
+   docker logs ourtextscores_score_editor_api --tail 20
+   ```
+
+   The image column should show the new tag and the logs should end with `▲ Next.js … ready`.
+
 The relevant OurTextScores environment/build values are:
 
 ```bash

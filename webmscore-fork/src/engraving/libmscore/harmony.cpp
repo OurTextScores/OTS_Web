@@ -355,7 +355,29 @@ void Harmony::read(XmlReader& e)
 {
     while (e.readNextStartElement()) {
         const AsciiStringView tag(e.name());
-        if (tag == "base") {
+        if (tag == "harmonyInfo") {
+            // MuseScore 4.1+ wraps chord data in <harmonyInfo>; child tags are identical.
+            while (e.readNextStartElement()) {
+                const AsciiStringView t(e.name());
+                if (t == "root") {
+                    setRootTpc(e.readInt());
+                } else if (t == "rootCase") {
+                    _rootCase = static_cast<NoteCaseType>(e.readInt());
+                } else if (t == "base") {
+                    setBaseTpc(e.readInt());
+                } else if (t == "baseCase") {
+                    _baseCase = static_cast<NoteCaseType>(e.readInt());
+                } else if (t == "name") {
+                    _textName = e.readText();
+                } else if (t == "extension") {
+                    setId(e.readInt());
+                } else if (t == "function") {
+                    _function = e.readText();
+                } else {
+                    e.unknown();
+                }
+            }
+        } else if (tag == "base") {
             setBaseTpc(e.readInt());
         } else if (tag == "baseCase") {
             _baseCase = static_cast<NoteCaseType>(e.readInt());
