@@ -81,3 +81,12 @@ You can embed the diff viewer in other web pages:
   style="border: 1px solid #ccc; border-radius: 4px;"
 ></iframe>
 ```
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**, inherited from the MuseScore engraving engine (`libmscore`) used via the `webmscore-fork` dependency. See [LICENSE](LICENSE) for the full text.
+
+Key implications:
+- You may use, modify, and distribute this software freely.
+- Any distributed modifications must also be released under GPL-3.0 with source available.
+- The MuseScore font embedding exception applies: documents created with embedded MuseScore fonts are not themselves covered by the GPL.
