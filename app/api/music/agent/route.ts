@@ -1,8 +1,32 @@
 import { NextResponse } from 'next/server';
+import { requireServerCredentialAccess } from '../../../../lib/api-access-control';
 import { runMusicAgentRouter } from '../../../../lib/music-agents/router';
 import { applyTraceHeaders, resolveTraceContext } from '../../../../lib/trace-http';
 
 export const runtime = 'nodejs';
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' ? value as Record<string, unknown> : null
+);
+
+const readTrimmedString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+
+const routeWouldUseServerAiKey = (body: unknown) => {
+  const data = asRecord(body);
+  if (data?.useFallbackOnly === true) {
+    return false;
+  }
+  const requestApiKey = readTrimmedString(data?.apiKey) || readTrimmedString(data?.api_key);
+  if (requestApiKey) {
+    return false;
+  }
+  const provider = readTrimmedString(data?.provider).toLowerCase() === 'anthropic'
+    ? 'anthropic'
+    : 'openai';
+  return provider === 'anthropic'
+    ? Boolean((process.env.ANTHROPIC_API_KEY || '').trim())
+    : Boolean((process.env.OPENAI_API_KEY || '').trim());
+};
 
 export async function POST(request: Request) {
   const traceContext = resolveTraceContext(request);
@@ -35,6 +59,17 @@ export async function POST(request: Request) {
       { error: 'Invalid JSON body.', traceId },
       { status: 400 },
     );
+  }
+
+  if (routeWouldUseServerAiKey(body)) {
+    const access = requireServerCredentialAccess({
+      request,
+      trace: traceContext,
+      route: '/api/music/agent',
+    });
+    if (!access.ok) {
+      return access.response;
+    }
   }
 
   const traceLog = (level: 'info' | 'warn' | 'error', event: string, payload: Record<string, unknown>) => {

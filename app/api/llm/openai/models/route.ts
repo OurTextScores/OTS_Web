@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireSensitiveApiAccess } from '../../../../../lib/api-access-control';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../../../lib/trace-http';
 
 export const dynamic = 'force-dynamic';
@@ -10,6 +11,15 @@ export async function POST(request: Request) {
         applyTraceHeaders(response.headers, trace);
         return response;
     };
+    const access = requireSensitiveApiAccess({
+        request,
+        trace,
+        route: '/api/llm/openai/models',
+        allowUnauthenticatedEnvVar: 'ALLOW_UNAUTHENTICATED_LLM_PROXY',
+    });
+    if (!access.ok) {
+        return access.response;
+    }
     try {
         const body = await request.json();
         const apiKey = String(body?.apiKey || '').trim();
@@ -25,8 +35,8 @@ export async function POST(request: Request) {
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
-            return tracedJson({ error: errorText || 'OpenAI request failed.' }, { status: response.status });
+            await response.text().catch(() => '');
+            return tracedJson({ error: 'OpenAI request failed.', providerStatus: response.status }, { status: response.status });
         }
 
         const data = await response.json();

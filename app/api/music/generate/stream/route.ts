@@ -6,16 +6,17 @@ import {
     createScoreArtifact,
     summarizeScoreArtifact,
 } from '../../../../../lib/score-artifacts';
+import { requireServerCredentialAccess } from '../../../../../lib/api-access-control';
 import { resolveTraceContext, withTraceHeaders } from '../../../../../lib/trace-http';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 const DEFAULT_NOTAGEN_SPACE_ID = (process.env.MUSIC_NOTAGEN_DEFAULT_SPACE_ID || 'ElectricAlexis/NotaGen').trim();
-const DEFAULT_NOTAGEN_SPACE_TOKEN = (process.env.MUSIC_NOTAGEN_SPACE_TOKEN || '').trim();
 const DEFAULT_TIMEOUT_MS = 300_000;
 
 const readTrimmedString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+const getDefaultNotagenSpaceToken = () => (process.env.MUSIC_NOTAGEN_SPACE_TOKEN || '').trim();
 const readFiniteNumber = (value: unknown): number | null => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
@@ -122,7 +123,17 @@ export async function POST(request: Request) {
     const composer = readTrimmedString(body?.composer ?? body?.spaceComposer ?? body?.space_composer);
     const instrumentation = readTrimmedString(body?.instrumentation ?? body?.spaceInstrumentation ?? body?.space_instrumentation);
     const requestToken = readTrimmedString(body?.hfToken ?? body?.hf_token);
-    const hfToken = requestToken || DEFAULT_NOTAGEN_SPACE_TOKEN;
+    if (!requestToken && getDefaultNotagenSpaceToken()) {
+        const access = requireServerCredentialAccess({
+            request,
+            trace,
+            route: '/api/music/generate/stream',
+        });
+        if (!access.ok) {
+            return access.response;
+        }
+    }
+    const hfToken = requestToken || getDefaultNotagenSpaceToken();
     const timeoutMs = Math.max(1_000, readFiniteNumber(body?.timeoutMs ?? body?.timeout_ms) ?? DEFAULT_TIMEOUT_MS);
     const validate = readBoolean(body?.validate, undefined, true);
     const deepValidate = readBoolean(body?.deepValidate, body?.deep_validate, false);

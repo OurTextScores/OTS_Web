@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { allowServerCredentialFallback } from '../api-access-control';
 import { convertMusicNotation } from '../music-conversion';
 import {
     createScoreArtifact,
@@ -7,7 +8,6 @@ import {
 import { type TraceContext, withTraceHeaders } from '../trace-http';
 
 const DEFAULT_TRANSCODA_SPACE_ID = (process.env.MUSIC_TRANSCODA_SPACE_ID || 'jhlusko/transcoda').trim();
-const DEFAULT_TRANSCODA_SPACE_TOKEN = (process.env.MUSIC_TRANSCODA_SPACE_TOKEN || process.env.HF_TOKEN || '').trim();
 const DEFAULT_TRANSCODA_MODEL_ID = (process.env.MUSIC_TRANSCODA_MODEL_ID || 'btrkeks/transcoda-59M-zeroshot-v1').trim();
 const DEFAULT_TRANSCODA_REVISION = (process.env.MUSIC_TRANSCODA_REVISION || 'b529f8aa5d996d9224df3395b5b92d0867343c91').trim();
 const DEFAULT_TRANSCODA_TIMEOUT_MS = 300_000;
@@ -40,6 +40,12 @@ const asRecord = (value: unknown): Record<string, unknown> | null => (
 );
 
 const readTrimmedString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+
+const getDefaultTranscodaSpaceToken = () => (
+    allowServerCredentialFallback()
+        ? (process.env.MUSIC_TRANSCODA_SPACE_TOKEN || process.env.HF_TOKEN || '').trim()
+        : ''
+);
 
 const safeErrorMessage = (value: unknown): string => {
     if (value instanceof Error && value.message.trim()) {
@@ -330,7 +336,7 @@ export async function runMusicOmrTranscribeService(body: unknown, options?: OmrS
     }
 
     const spaceId = readTrimmedString(data?.spaceId ?? data?.space_id) || DEFAULT_TRANSCODA_SPACE_ID;
-    const hfToken = readTrimmedString(data?.hfToken ?? data?.hf_token) || DEFAULT_TRANSCODA_SPACE_TOKEN;
+    const hfToken = readTrimmedString(data?.hfToken ?? data?.hf_token) || getDefaultTranscodaSpaceToken();
     const decoding = normalizeDecoding(data?.decoding);
     const maxLength = Math.max(1, Math.floor(readFiniteNumber(data?.maxLength ?? data?.max_length) || DEFAULT_TRANSCODA_MAX_LENGTH));
     const numBeams = Math.max(1, Math.floor(readFiniteNumber(data?.numBeams ?? data?.num_beams) || DEFAULT_TRANSCODA_NUM_BEAMS));

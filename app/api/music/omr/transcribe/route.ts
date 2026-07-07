@@ -1,10 +1,17 @@
 import { NextResponse } from 'next/server';
+import { requireServerCredentialAccess } from '../../../../../lib/api-access-control';
 import { logApiRouteSummary } from '../../../../../lib/api-route-logging';
 import { runMusicOmrTranscribeService } from '../../../../../lib/music-services/omr-service';
 import { MusicServiceError } from '../../../../../lib/music-services/errors';
 import { applyTraceHeaders, resolveTraceContext } from '../../../../../lib/trace-http';
 
 export const runtime = 'nodejs';
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+    value && typeof value === 'object' ? value as Record<string, unknown> : null
+);
+
+const readTrimmedString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 
 export async function POST(request: Request) {
     const startedAt = Date.now();
@@ -16,7 +23,21 @@ export async function POST(request: Request) {
         return response;
     };
     try {
-        const result = await runMusicOmrTranscribeService(await request.json(), { traceContext: trace });
+        const body = await request.json();
+        const data = asRecord(body);
+        const requestHfToken = readTrimmedString(data?.hfToken ?? data?.hf_token);
+        if (!requestHfToken && (process.env.MUSIC_TRANSCODA_SPACE_TOKEN || process.env.HF_TOKEN || '').trim()) {
+            const access = requireServerCredentialAccess({
+                request,
+                trace,
+                route: '/api/music/omr/transcribe',
+            });
+            if (!access.ok) {
+                status = access.response.status;
+                return access.response;
+            }
+        }
+        const result = await runMusicOmrTranscribeService(body, { traceContext: trace });
         status = result.status;
         return tracedJson(result.body, { status: result.status });
     } catch (error) {

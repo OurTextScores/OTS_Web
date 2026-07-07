@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
+import {
+    isConfiguredAppApiToken,
+    requireServerCredentialAccess,
+} from '../../../../../lib/api-access-control';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../../../lib/trace-http';
 
 export const runtime = 'nodejs';
 
 const DEFAULT_NOTAGEN_SPACE_ID = (process.env.MUSIC_NOTAGEN_DEFAULT_SPACE_ID || 'ElectricAlexis/NotaGen').trim();
-const DEFAULT_NOTAGEN_SPACE_TOKEN = (process.env.MUSIC_NOTAGEN_SPACE_TOKEN || '').trim();
 const DEFAULT_SPACE_REVISION = (process.env.MUSIC_NOTAGEN_SPACE_PROMPTS_REVISION || 'main').trim();
 
 const readTrimmedString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
@@ -71,7 +74,21 @@ export async function POST(request: Request) {
         const revision = readTrimmedString(data.revision) || DEFAULT_SPACE_REVISION;
         const bearer = readTrimmedString(request.headers.get('authorization'));
         const tokenFromHeader = bearer.toLowerCase().startsWith('bearer ') ? bearer.slice(7).trim() : '';
-        const token = tokenFromHeader || DEFAULT_NOTAGEN_SPACE_TOKEN;
+        const explicitToken = readTrimmedString(data.hfToken ?? data.hf_token)
+            || readTrimmedString(request.headers.get('x-hf-token'))
+            || (isConfiguredAppApiToken(tokenFromHeader) ? '' : tokenFromHeader);
+        const defaultToken = (process.env.MUSIC_NOTAGEN_SPACE_TOKEN || '').trim();
+        if (!explicitToken && defaultToken) {
+            const access = requireServerCredentialAccess({
+                request,
+                trace,
+                route: '/api/music/notagen-space/options',
+            });
+            if (!access.ok) {
+                return access.response;
+            }
+        }
+        const token = explicitToken || defaultToken;
 
         const response = await fetch(getPromptsRawUrl(spaceId, revision), {
             headers: withTraceHeaders(trace, token ? { Authorization: `Bearer ${token}` } : undefined),

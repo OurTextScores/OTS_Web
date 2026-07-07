@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireSensitiveApiAccess } from '../../../../lib/api-access-control';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../../lib/trace-http';
 import { augmentPromptWithSourceRag } from '../_lib/source-rag';
 
@@ -48,6 +49,15 @@ export async function POST(request: Request) {
         applyTraceHeaders(response.headers, trace);
         return response;
     };
+    const access = requireSensitiveApiAccess({
+        request,
+        trace,
+        route: '/api/llm/openai',
+        allowUnauthenticatedEnvVar: 'ALLOW_UNAUTHENTICATED_LLM_PROXY',
+    });
+    if (!access.ok) {
+        return access.response;
+    }
     try {
         const body = await request.json();
         const apiKey = String(body?.apiKey || '').trim();
@@ -126,9 +136,9 @@ export async function POST(request: Request) {
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
+            await response.text().catch(() => '');
             if (hasPdf) {
-                return tracedJson({ error: errorText || 'OpenAI request failed.' }, { status: response.status });
+                return tracedJson({ error: 'OpenAI request failed.', providerStatus: response.status }, { status: response.status });
             }
             const userMessageContent: unknown = hasImage
                 ? [
@@ -163,8 +173,8 @@ export async function POST(request: Request) {
             });
 
             if (!fallbackResponse.ok) {
-                const fallbackError = await fallbackResponse.text();
-                return tracedJson({ error: fallbackError || errorText || 'OpenAI request failed.' }, { status: fallbackResponse.status });
+                await fallbackResponse.text().catch(() => '');
+                return tracedJson({ error: 'OpenAI request failed.', providerStatus: fallbackResponse.status }, { status: fallbackResponse.status });
             }
 
             const fallbackData = await fallbackResponse.json();

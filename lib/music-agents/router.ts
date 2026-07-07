@@ -4,6 +4,7 @@ import { OpenAIResponsesModel } from '@openai/agents-openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { OpenAI } from 'openai';
 import { z } from 'zod';
+import { allowServerCredentialFallback } from '../api-access-control';
 import { runMusicContextService } from '../music-services/context-service';
 import { runMusicConvertService } from '../music-services/convert-service';
 import { runDiffFeedbackService } from '../music-services/diff-feedback-service';
@@ -1199,8 +1200,8 @@ export async function runMusicAgentRouter(
     ? data.apiKey
     : (typeof data?.api_key === 'string' ? data.api_key : '')).trim();
   const envApiKey = provider === 'anthropic'
-    ? (process.env.ANTHROPIC_API_KEY || '').trim()
-    : (process.env.OPENAI_API_KEY || '').trim();
+    ? (allowServerCredentialFallback() ? (process.env.ANTHROPIC_API_KEY || '').trim() : '')
+    : (allowServerCredentialFallback() ? (process.env.OPENAI_API_KEY || '').trim() : '');
   const openaiApiKey = requestApiKey || envApiKey;
 
   if (useFallbackOnly || !openaiApiKey) {

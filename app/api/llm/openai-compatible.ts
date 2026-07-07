@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireSensitiveApiAccess } from '../../../lib/api-access-control';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../lib/trace-http';
 import { augmentPromptWithSourceRag } from './_lib/source-rag';
 
@@ -215,6 +216,15 @@ export async function handleOpenAiCompatibleRequest(provider: OpenAiCompatiblePr
         applyTraceHeaders(response.headers, trace);
         return response;
     };
+    const access = requireSensitiveApiAccess({
+        request,
+        trace,
+        route: `/api/llm/${provider}`,
+        allowUnauthenticatedEnvVar: 'ALLOW_UNAUTHENTICATED_LLM_PROXY',
+    });
+    if (!access.ok) {
+        return access.response;
+    }
     try {
         const body = await request.json();
         const normalized = parseRequestBody(body);
@@ -292,9 +302,9 @@ export async function handleOpenAiCompatibleRequest(provider: OpenAiCompatiblePr
                 return tracedJson({ text: parseResponsesText(data), sourceRag: sourceRagResult.sourceRag });
             }
 
-            const errorText = await response.text();
+            await response.text().catch(() => '');
             if (hasPdf) {
-                return tracedJson({ error: errorText || `${config.label} request failed.` }, { status: response.status });
+                return tracedJson({ error: `${config.label} request failed.`, providerStatus: response.status }, { status: response.status });
             }
         }
 
@@ -316,8 +326,8 @@ export async function handleOpenAiCompatibleRequest(provider: OpenAiCompatiblePr
         });
 
         if (!chatResponse.ok) {
-            const errorText = await chatResponse.text();
-            return tracedJson({ error: errorText || `${config.label} request failed.` }, { status: chatResponse.status });
+            await chatResponse.text().catch(() => '');
+            return tracedJson({ error: `${config.label} request failed.`, providerStatus: chatResponse.status }, { status: chatResponse.status });
         }
 
         const chatData = await chatResponse.json();
@@ -336,6 +346,15 @@ export async function handleOpenAiCompatibleModelsRequest(provider: OpenAiCompat
         applyTraceHeaders(response.headers, trace);
         return response;
     };
+    const access = requireSensitiveApiAccess({
+        request,
+        trace,
+        route: `/api/llm/${provider}/models`,
+        allowUnauthenticatedEnvVar: 'ALLOW_UNAUTHENTICATED_LLM_PROXY',
+    });
+    if (!access.ok) {
+        return access.response;
+    }
     try {
         const body = await request.json();
         const apiKey = String(body?.apiKey || '').trim();
@@ -351,8 +370,8 @@ export async function handleOpenAiCompatibleModelsRequest(provider: OpenAiCompat
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
-            return tracedJson({ error: errorText || `${config.label} request failed.` }, { status: response.status });
+            await response.text().catch(() => '');
+            return tracedJson({ error: `${config.label} request failed.`, providerStatus: response.status }, { status: response.status });
         }
 
         const data = await response.json();

@@ -3,6 +3,7 @@ import {
   type AiProvider,
   requestAiTextDirect,
 } from '../ai-provider-adapters';
+import { allowServerCredentialFallback } from '../api-access-control';
 import { summarizeScoreArtifact } from '../score-artifacts';
 import { type TraceContext } from '../trace-http';
 import { asRecord, resolveScoreContent } from './common';
@@ -65,6 +66,9 @@ export const resolveProvider = (value: unknown): AiProvider => {
 const resolveApiKeyForProvider = (provider: AiProvider, explicitApiKey: string) => {
   if (explicitApiKey.trim()) {
     return explicitApiKey.trim();
+  }
+  if (!allowServerCredentialFallback()) {
+    return '';
   }
   if (provider === 'openai') {
     return (process.env.OPENAI_API_KEY || '').trim();

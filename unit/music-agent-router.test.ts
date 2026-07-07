@@ -69,9 +69,12 @@ import { runMusicAgentRouter } from '../lib/music-agents/router';
 
 describe('runMusicAgentRouter', () => {
   const priorOpenAiKey = process.env.OPENAI_API_KEY;
+  const priorAnthropicKey = process.env.ANTHROPIC_API_KEY;
+  const priorAllowServerKeys = process.env.ALLOW_SERVER_LLM_KEYS;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.ALLOW_SERVER_LLM_KEYS;
   });
 
   afterEach(() => {
@@ -79,6 +82,16 @@ describe('runMusicAgentRouter', () => {
       delete process.env.OPENAI_API_KEY;
     } else {
       process.env.OPENAI_API_KEY = priorOpenAiKey;
+    }
+    if (priorAnthropicKey === undefined) {
+      delete process.env.ANTHROPIC_API_KEY;
+    } else {
+      process.env.ANTHROPIC_API_KEY = priorAnthropicKey;
+    }
+    if (priorAllowServerKeys === undefined) {
+      delete process.env.ALLOW_SERVER_LLM_KEYS;
+    } else {
+      process.env.ALLOW_SERVER_LLM_KEYS = priorAllowServerKeys;
     }
   });
 
@@ -368,6 +381,7 @@ describe('runMusicAgentRouter', () => {
 
   it('uses Agents SDK path when OPENAI_API_KEY is set', async () => {
     process.env.OPENAI_API_KEY = 'sk-test';
+    process.env.ALLOW_SERVER_LLM_KEYS = '1';
     mocked.run.mockResolvedValue({
       finalOutput: {
         selectedTool: 'music_context',
@@ -399,8 +413,35 @@ describe('runMusicAgentRouter', () => {
     expect(mocked.run).toHaveBeenCalledTimes(1);
   });
 
+  it('ignores OPENAI_API_KEY when server-key fallback is not explicitly enabled', async () => {
+    process.env.OPENAI_API_KEY = 'sk-test';
+    mocked.runMusicContextService.mockResolvedValue({
+      status: 200,
+      body: { strategy: 'musicxml-primary' },
+    });
+
+    const result = await runMusicAgentRouter({
+      prompt: 'Find relevant context around measure 8',
+      model: 'gpt-5.5',
+      toolInput: {
+        context: {
+          inputArtifactId: 'art-1',
+        },
+      },
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      mode: 'fallback',
+      selectedTool: 'music.context',
+      toolOk: true,
+    });
+    expect(mocked.run).not.toHaveBeenCalled();
+  });
+
   it('normalizes functional harmony tool selection from Agents SDK output', async () => {
     process.env.OPENAI_API_KEY = 'sk-test';
+    process.env.ALLOW_SERVER_LLM_KEYS = '1';
     mocked.run.mockResolvedValue({
       finalOutput: {
         selectedTool: 'music_functional_harmony_analyze',
@@ -430,6 +471,7 @@ describe('runMusicAgentRouter', () => {
 
   it('falls back to heuristic router if agents-sdk execution throws', async () => {
     process.env.OPENAI_API_KEY = 'sk-test';
+    process.env.ALLOW_SERVER_LLM_KEYS = '1';
     mocked.run.mockRejectedValue(new Error('agents run failed'));
     mocked.runMusicConvertService.mockResolvedValue({
       status: 200,
@@ -520,6 +562,7 @@ describe('runMusicAgentRouter', () => {
   it('uses Anthropic provider and API key when requested', async () => {
     delete process.env.OPENAI_API_KEY;
     process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+    process.env.ALLOW_SERVER_LLM_KEYS = '1';
     mocked.run.mockResolvedValue({
       finalOutput: {
         selectedTool: 'music_context',
@@ -579,6 +622,7 @@ describe('runMusicAgentRouter', () => {
 
   it('calls music_render tool via Agents SDK', async () => {
     process.env.OPENAI_API_KEY = 'test-key';
+    process.env.ALLOW_SERVER_LLM_KEYS = '1';
     mocked.run.mockResolvedValue({
       finalOutput: {
         selectedTool: 'music_render',

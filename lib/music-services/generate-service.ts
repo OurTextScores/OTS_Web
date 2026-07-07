@@ -9,12 +9,12 @@ import {
     summarizeScoreArtifact,
     type ScoreArtifact,
 } from '../score-artifacts';
+import { allowServerCredentialFallback } from '../api-access-control';
 import { type TraceContext, withTraceHeaders } from '../trace-http';
 
 const DEFAULT_NOTAGEN_MODEL_ID = (process.env.MUSIC_NOTAGEN_DEFAULT_MODEL_ID || '').trim();
 const DEFAULT_NOTAGEN_REVISION = (process.env.MUSIC_NOTAGEN_DEFAULT_REVISION || '').trim();
 const DEFAULT_NOTAGEN_SPACE_ID = (process.env.MUSIC_NOTAGEN_DEFAULT_SPACE_ID || 'ElectricAlexis/NotaGen').trim();
-const DEFAULT_NOTAGEN_SPACE_TOKEN = (process.env.MUSIC_NOTAGEN_SPACE_TOKEN || '').trim();
 const DEFAULT_HF_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_NEW_TOKENS = 512;
 const DEFAULT_TEMPERATURE = 0.8;
@@ -31,6 +31,12 @@ const asRecord = (value: unknown): Record<string, unknown> | null => (
 );
 
 const readTrimmedString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+
+const getDefaultNotagenSpaceToken = () => (
+    allowServerCredentialFallback()
+        ? (process.env.MUSIC_NOTAGEN_SPACE_TOKEN || '').trim()
+        : ''
+);
 
 const readFiniteNumber = (value: unknown): number | null => {
     const parsed = Number(value);
@@ -590,7 +596,7 @@ export async function runMusicGenerateService(
         }
 
         const hfToken = backend === 'huggingface-space'
-            ? (requestHfToken || DEFAULT_NOTAGEN_SPACE_TOKEN)
+            ? (requestHfToken || getDefaultNotagenSpaceToken())
             : requestHfToken;
 
         const seedArtifact = inputArtifactId ? await getScoreArtifact(inputArtifactId) : null;

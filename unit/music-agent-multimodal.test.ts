@@ -69,10 +69,13 @@ import { runMusicAgentRouter } from '../lib/music-agents/router';
 
 describe('runMusicAgentRouter Multimodal', () => {
   const priorOpenAiKey = process.env.OPENAI_API_KEY;
+  const priorAllowServerKeys = process.env.ALLOW_SERVER_LLM_KEYS;
 
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.OPENAI_API_KEY = 'test-key';
+    // Server-side key fallback is opt-in; the SDK path only runs when enabled.
+    process.env.ALLOW_SERVER_LLM_KEYS = '1';
   });
 
   afterEach(() => {
@@ -80,6 +83,11 @@ describe('runMusicAgentRouter Multimodal', () => {
       delete process.env.OPENAI_API_KEY;
     } else {
       process.env.OPENAI_API_KEY = priorOpenAiKey;
+    }
+    if (priorAllowServerKeys === undefined) {
+      delete process.env.ALLOW_SERVER_LLM_KEYS;
+    } else {
+      process.env.ALLOW_SERVER_LLM_KEYS = priorAllowServerKeys;
     }
   });
 
