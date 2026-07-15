@@ -1912,8 +1912,14 @@ export default function ScoreEditor() {
         if (!aiEnabled) {
             return;
         }
-        const cached = window.localStorage.getItem(aiKeyStorageKey);
-        setAiApiKey(cached ?? '');
+        const stored = window.sessionStorage.getItem(aiKeyStorageKey);
+        // Migrate any key previously persisted in localStorage into sessionStorage,
+        // and stop persisting it there — the key should not linger across sessions.
+        const legacy = window.localStorage.getItem(aiKeyStorageKey);
+        if (legacy) {
+            window.localStorage.removeItem(aiKeyStorageKey);
+        }
+        setAiApiKey(stored ?? legacy ?? '');
     }, [aiEnabled, aiKeyStorageKey]);
 
     useEffect(() => {
@@ -1924,9 +1930,9 @@ export default function ScoreEditor() {
             return;
         }
         if (aiApiKey.trim()) {
-            window.localStorage.setItem(aiKeyStorageKey, aiApiKey);
+            window.sessionStorage.setItem(aiKeyStorageKey, aiApiKey);
         } else {
-            window.localStorage.removeItem(aiKeyStorageKey);
+            window.sessionStorage.removeItem(aiKeyStorageKey);
         }
     }, [aiApiKey, aiEnabled, aiKeyStorageKey]);
 
@@ -4492,13 +4498,19 @@ ${partsBodyXml}
                     : models;
                 const sorted = [...new Set(filtered.length ? filtered : models)].sort();
                 setAiModels(sorted);
-                if (!aiModel || !sorted.includes(aiModel)) {
-                    const preferred = sorted.find((id: string) => id === DEFAULT_MODEL_BY_PROVIDER[aiProvider])
+                // Keep the user's current selection if it is still valid; only
+                // pick a default when the selection is empty or no longer offered.
+                // Uses a functional update so this effect need not depend on
+                // aiModel (which would refetch/reset on every keystroke).
+                setAiModel((prev) => {
+                    if (prev && sorted.includes(prev)) {
+                        return prev;
+                    }
+                    return sorted.find((id: string) => id === DEFAULT_MODEL_BY_PROVIDER[aiProvider])
                         || sorted[0]
                         || DEFAULT_MODEL_BY_PROVIDER[aiProvider]
                         || '';
-                    setAiModel(preferred);
-                }
+                });
             } catch (err) {
                 if (!canceled) {
                     console.error(`Failed to load ${AI_PROVIDER_LABELS[aiProvider]} models`, err);
@@ -4516,7 +4528,7 @@ ${partsBodyXml}
         return () => {
             canceled = true;
         };
-    }, [aiApiKey, aiModel, aiEnabled, aiProvider, isEmbedBuild, llmProxyBase, useLlmProxy, proxyUrlFor]);
+    }, [aiApiKey, aiEnabled, aiProvider, isEmbedBuild, llmProxyBase, useLlmProxy, proxyUrlFor]);
 
     useEffect(() => {
         if (!newScoreDialogOpen) {
@@ -13946,18 +13958,31 @@ ${partsBodyXml}
                                             <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                                                 Model
                                             </label>
-                                            <input
-                                                list="ai-models"
-                                                value={aiModel}
-                                                onChange={(event) => setAiModel(event.target.value)}
-                                                className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
-                                                placeholder="Enter model name"
-                                            />
-                                            <datalist id="ai-models">
-                                                {aiModels.map((modelId) => (
-                                                    <option key={modelId} value={modelId} />
-                                                ))}
-                                            </datalist>
+                                            {aiModels.length > 0 ? (
+                                                <select
+                                                    value={aiModels.includes(aiModel) ? aiModel : ''}
+                                                    onChange={(event) => setAiModel(event.target.value)}
+                                                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                                                >
+                                                    {!aiModels.includes(aiModel) && (
+                                                        <option value="" disabled>
+                                                            Select a model…
+                                                        </option>
+                                                    )}
+                                                    {aiModels.map((modelId) => (
+                                                        <option key={modelId} value={modelId}>
+                                                            {modelId}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            ) : (
+                                                <input
+                                                    value={aiModel}
+                                                    onChange={(event) => setAiModel(event.target.value)}
+                                                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                                                    placeholder="Enter model name"
+                                                />
+                                            )}
                                             {aiModelsLoading && (
                                                 <div className="mt-1 text-[11px] text-gray-500">
                                                     Loading models...
@@ -13965,7 +13990,9 @@ ${partsBodyXml}
                                             )}
                                             {!aiModelsLoading && !aiModels.length && !aiModelsError && (
                                                 <div className="mt-1 text-[11px] text-gray-500">
-                                                    No models loaded. Enter a model name manually.
+                                                    {aiApiKey.trim()
+                                                        ? 'No models loaded. Enter a model name manually.'
+                                                        : 'Enter your API key to load available models.'}
                                                 </div>
                                             )}
                                             {aiModelsError && (
@@ -13992,7 +14019,9 @@ ${partsBodyXml}
                                                 autoComplete="off"
                                             />
                                             <div className="mt-1 text-[11px] text-gray-500">
-                                                Stored locally in this browser.
+                                                Saved in this browser tab and sent through our server to{' '}
+                                                {AI_PROVIDER_LABELS[aiProvider]} with each request. We never store it on
+                                                our servers; it clears when you close the tab.
                                             </div>
                                             {AI_PROVIDER_CONFIGS[aiProvider].apiKeyUrl && (
                                                 <div className="mt-1 text-[11px]">
