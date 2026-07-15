@@ -179,8 +179,9 @@ const buildChatCompletionsPayload = (args: {
     imageBase64: string;
     imageMediaType: string;
     maxTokens: number | null;
+    temperature?: number | null;
 }) => {
-    const { model, systemPrompt, userPrompt, imageBase64, imageMediaType, maxTokens } = args;
+    const { model, systemPrompt, userPrompt, imageBase64, imageMediaType, maxTokens, temperature } = args;
     const hasImage = Boolean(imageBase64);
     const userMessageContent: unknown = hasImage
         ? [
@@ -200,7 +201,7 @@ const buildChatCompletionsPayload = (args: {
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userMessageContent },
         ],
-        temperature: 0,
+        ...(typeof temperature === 'number' && Number.isFinite(temperature) ? { temperature } : {}),
     };
     if (maxTokens) {
         payload.max_tokens = maxTokens;
@@ -244,6 +245,11 @@ export async function handleOpenAiCompatibleRequest(provider: OpenAiCompatiblePr
             pdfFilename,
             maxTokens,
         } = normalized;
+        // Only send `temperature` when the caller explicitly provides one, to stay
+        // compatible with models that reject a non-default temperature.
+        const temperatureRaw = body?.temperature;
+        const temperatureNum = Number(temperatureRaw);
+        const includeTemperature = temperatureRaw != null && Number.isFinite(temperatureNum);
 
         if (!apiKey || !model || (!promptText && !prompt)) {
             return tracedJson({ error: 'Missing apiKey, model, or prompt/promptText.' }, { status: 400 });
@@ -282,7 +288,7 @@ export async function handleOpenAiCompatibleRequest(provider: OpenAiCompatiblePr
                 model,
                 instructions: systemPrompt,
                 input: responseInput,
-                temperature: 0,
+                ...(includeTemperature ? { temperature: temperatureNum } : {}),
             };
             if (maxTokens) {
                 responsePayload.max_output_tokens = maxTokens;
@@ -315,6 +321,7 @@ export async function handleOpenAiCompatibleRequest(provider: OpenAiCompatiblePr
             imageBase64,
             imageMediaType,
             maxTokens,
+            temperature: includeTemperature ? temperatureNum : undefined,
         });
         const chatResponse = await fetch(`${config.baseUrl}/chat/completions`, {
             method: 'POST',

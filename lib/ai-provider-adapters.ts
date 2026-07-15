@@ -186,6 +186,7 @@ export type RequestAiTextDirectArgs = {
     promptText: string;
     systemPrompt: string;
     maxTokens: number | null;
+    temperature?: number | null;
     image?: TextImageAttachment | null;
     pdf?: TextPdfAttachment | null;
 };
@@ -376,11 +377,16 @@ export async function requestAiTextDirect({
     promptText,
     systemPrompt,
     maxTokens,
+    temperature = null,
     image = null,
     pdf = null,
 }: RequestAiTextDirectArgs): Promise<string> {
     const hasImage = Boolean(image?.base64);
     const hasPdf = Boolean(pdf?.base64);
+    // Only send `temperature` when a caller explicitly provides one; newer models
+    // (opus-4-8, gpt-5.x) reject a non-default temperature.
+    const temperatureNum = Number(temperature);
+    const includeTemperature = temperature != null && Number.isFinite(temperatureNum);
     const imageDataUrl = hasImage ? `data:${image!.mediaType};base64,${image!.base64}` : '';
     const pdfDataUrl = hasPdf ? `data:${pdf!.mediaType};base64,${pdf!.base64}` : '';
 
@@ -412,7 +418,7 @@ export async function requestAiTextDirect({
                 model,
                 instructions: systemPrompt,
                 input: responseInput,
-                temperature: 0,
+                ...(includeTemperature ? { temperature: temperatureNum } : {}),
             };
             if (maxTokens) {
                 responsePayload.max_output_tokens = maxTokens;
@@ -446,7 +452,7 @@ export async function requestAiTextDirect({
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: userMessageContent },
                 ],
-                temperature: 0,
+                ...(includeTemperature ? { temperature: temperatureNum } : {}),
             };
             if (maxTokens) {
                 fallbackPayload.max_tokens = maxTokens;
@@ -479,7 +485,7 @@ export async function requestAiTextDirect({
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userMessageContent },
             ],
-            temperature: 0,
+            ...(includeTemperature ? { temperature: temperatureNum } : {}),
         };
         if (maxTokens) {
             payload.max_tokens = maxTokens;
@@ -532,7 +538,7 @@ export async function requestAiTextDirect({
             body: JSON.stringify({
                 model,
                 max_tokens: maxTokens ?? DEFAULT_MAX_TOKENS_BY_PROVIDER.anthropic,
-                temperature: 0,
+                ...(includeTemperature ? { temperature: temperatureNum } : {}),
                 system: systemPrompt,
                 messages: [{ role: 'user', content: anthropicContent }],
             }),
@@ -574,7 +580,7 @@ export async function requestAiTextDirect({
             },
         ],
         generationConfig: {
-            temperature: 0,
+            ...(includeTemperature ? { temperature: temperatureNum } : {}),
         },
     };
     if (maxTokens) {

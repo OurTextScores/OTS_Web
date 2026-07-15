@@ -76,6 +76,11 @@ export async function POST(request: Request) {
         const maxTokensRaw = body?.maxTokens;
         const maxTokensValue = Number(maxTokensRaw);
         const maxTokens = Number.isFinite(maxTokensValue) && maxTokensValue > 0 ? maxTokensValue : null;
+        // Only send `temperature` when the caller explicitly provides one. Newer
+        // models (e.g. gpt-5.x reasoning models) reject a non-default temperature.
+        const temperatureRaw = body?.temperature;
+        const temperatureNum = Number(temperatureRaw);
+        const includeTemperature = temperatureRaw != null && Number.isFinite(temperatureNum);
 
         if (!apiKey || !model || (!promptText && !prompt)) {
             return tracedJson({ error: 'Missing apiKey, model, or prompt/promptText.' }, { status: 400 });
@@ -120,7 +125,7 @@ export async function POST(request: Request) {
             model,
             instructions: systemPrompt,
             input: responseInput,
-            temperature: 0,
+            ...(includeTemperature ? { temperature: temperatureNum } : {}),
         };
         if (maxTokens) {
             responsePayload.max_output_tokens = maxTokens;
@@ -158,7 +163,7 @@ export async function POST(request: Request) {
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: userMessageContent },
                 ],
-                temperature: 0,
+                ...(includeTemperature ? { temperature: temperatureNum } : {}),
             };
             if (maxTokens) {
                 fallbackPayload.max_tokens = maxTokens;

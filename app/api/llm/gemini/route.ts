@@ -75,6 +75,11 @@ export async function POST(request: Request) {
         const maxTokensRaw = body?.maxTokens;
         const maxTokensValue = Number(maxTokensRaw);
         const maxTokens = Number.isFinite(maxTokensValue) && maxTokensValue > 0 ? maxTokensValue : null;
+        // Only send `temperature` when the caller explicitly provides one, so we
+        // stay compatible with models that reject a non-default temperature.
+        const temperatureRaw = body?.temperature;
+        const temperatureNum = Number(temperatureRaw);
+        const includeTemperature = temperatureRaw != null && Number.isFinite(temperatureNum);
 
         if (!apiKey || !model || (!promptText && !prompt)) {
             return tracedJson({ error: 'Missing apiKey, model, or prompt/promptText.' }, { status: 400 });
@@ -111,9 +116,10 @@ export async function POST(request: Request) {
             });
         }
 
-        const generationConfig: Record<string, unknown> = {
-            temperature: 0,
-        };
+        const generationConfig: Record<string, unknown> = {};
+        if (includeTemperature) {
+            generationConfig.temperature = temperatureNum;
+        }
         if (maxTokens) {
             generationConfig.maxOutputTokens = maxTokens;
         }
