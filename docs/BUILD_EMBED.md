@@ -231,6 +231,59 @@ NEXT_PUBLIC_SCORE_EDITOR_API_BASE=/api/score-editor
 
 These keep the browser on same-origin `/score-editor/*` assets while routing dynamic editor API calls through the host app's `/api/score-editor/*` proxy.
 
+## VPS Compose Files Are Environment-Specific (Do NOT Auto-Sync)
+
+**The `docker-compose*.yml` files on the OurTextScores prod VPS are hand-maintained and are
+NOT copies of the repo files. Do not sync them from git — the repo versions are dev-oriented
+and will break (or silently degrade the security of) production.** This is a deliberate
+decision, made after an auto-sync attempt broke a deploy.
+
+### Why the repo compose ≠ prod compose
+
+`/opt/ourtextscores/` on the VPS is **not a git checkout**. Its compose files were authored
+for production and differ from the repo's dev-oriented ones in ways that matter:
+
+| Aspect | Repo `docker-compose.yml` (dev) | Prod VPS `docker-compose.yml` |
+|---|---|---|
+| Backend | `build: ./backend` (needs source tree) | `image: ghcr.io/…/ourtextscores-backend` (pinned) |
+| Port binding | `0.0.0.0` (e.g. `4000:4000`, `7700:7700`) | **`127.0.0.1:…`** (behind the reverse proxy) |
+| Services present | frontend, mailpit, minio, mongo, meili, … (full dev stack) | reduced set (no `frontend` — it's on Vercel — no mailpit) |
+| Meili | `MEILI_MASTER_KEY` defaulted | `MEILI_MASTER_KEY` required, `MEILI_ENV=production` |
+| Volumes | `../mongo_data`, `../fossil_data`, … | prod paths (`./volumes/…`, `/mnt/pdmx`) + healthchecks |
+
+Two of these are actively dangerous to overwrite: the VPS has **no `./backend` source**, so a
+build-based backend service fails with `path ".../backend" not found`; and the repo's
+`0.0.0.0` bindings would **publicly expose** ports the VPS deliberately keeps on `127.0.0.1`.
+
+### What this means operationally
+
+- **`deploy-backend.yml`** (OurTextScores) only builds/pushes the **backend** image and runs
+  `docker compose up -d backend` on the VPS. It does **not** copy compose files, and it does
+  **not** touch `score_editor_api`.
+- **Committing a `docker-compose*.yml` change to `main` does NOT deploy it.** Compose changes
+  must be applied **by hand** on the VPS.
+- The editor API image is likewise a **manual** rollout (see "Updating the Editor API Docker
+  Image" above).
+
+### How to change prod compose safely
+
+1. `cd /opt/ourtextscores`
+2. **Back up first:** `sudo cp docker-compose.score-editor-image.yml docker-compose.score-editor-image.yml.bk`
+   (do the same for `docker-compose.yml` if editing it).
+3. Edit **in place** — apply only the specific delta (e.g. adding the three API-auth env vars),
+   never wholesale-replace with the repo file.
+4. Recreate the affected service **with both files**:
+   `docker compose -f docker-compose.yml -f docker-compose.score-editor-image.yml up -d --force-recreate score_editor_api`
+5. Verify the running container: `docker compose … exec score_editor_api printenv | grep OTS_API_AUTH_TOKEN`
+
+> **We evaluated auto-syncing compose via CI and rejected it.** The `.yml` files carry no
+> secrets (only `${VAR}` interpolation from the VPS `.env`), so shipping them is *possible*,
+> but the prod files are a genuinely different, hardened artifact that the repo does not model.
+> Auto-copying the repo versions broke the backend deploy and would have exposed internal
+> ports. If repo/prod parity is ever needed, the correct approach is to commit the **actual
+> prod** compose as a dedicated `docker-compose.prod.yml` and deploy that — not to sync the
+> dev files.
+
 ## Soundfont Configuration
 
 ### Using the Recommended CDN (MuseScore_General)
