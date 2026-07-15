@@ -23,6 +23,7 @@ import {
   createScoreOpsSession,
   getScoreOpsSession,
   updateScoreOpsSession,
+  ScoreOpsSessionError,
   type ScoreOpsSessionState,
   type ScoreOpsSessionMetadata,
 } from './scoreops-session-store';
@@ -36,6 +37,7 @@ type ScoreOpsErrorCode =
   | 'unsupported_op'
   | 'invalid_scope'
   | 'target_not_found'
+  | 'content_too_large'
   | 'execution_failure';
 
 type ScoreScope = {
@@ -2897,16 +2899,25 @@ export async function runMusicScoreOpsService(
   }
 
   const payload = parsed.data;
-  if (payload.action === 'open') {
-    return openSession(payload);
+  try {
+    if (payload.action === 'open') {
+      return await openSession(payload);
+    }
+    if (payload.action === 'inspect') {
+      return await inspectSession(payload);
+    }
+    if (payload.action === 'apply') {
+      return await applyOps(payload);
+    }
+    return await syncSession(payload);
+  } catch (error) {
+    if (error instanceof ScoreOpsSessionError) {
+      // Store-level rejection (e.g. content exceeds the session size cap) — surface it as a
+      // structured error instead of letting it bubble to an unhandled 500.
+      return errorResult(error.status, error.code as ScoreOpsErrorCode, error.message);
+    }
+    throw error;
   }
-  if (payload.action === 'inspect') {
-    return inspectSession(payload);
-  }
-  if (payload.action === 'apply') {
-    return applyOps(payload);
-  }
-  return syncSession(payload);
 }
 
 const MAJOR_KEY_TO_FIFTHS: Record<string, number> = {
