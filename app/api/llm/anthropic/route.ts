@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireSensitiveApiAccess } from '../../../../lib/api-access-control';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../../lib/trace-http';
 import { augmentPromptWithSourceRag } from '../_lib/source-rag';
+import { detectUnsupportedAiRequestParameter, getDiscoveredAiModelDescriptor, validateAiModelRequest } from '../../../../lib/ai-model-capabilities';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,7 +67,8 @@ export async function POST(request: Request) {
         const pdfMediaType = typeof body?.pdfMediaType === 'string' ? body.pdfMediaType.trim() : 'application/pdf';
         const maxTokensRaw = body?.maxTokens;
         const maxTokensValue = Number(maxTokensRaw);
-        const maxTokens = Number.isFinite(maxTokensValue) && maxTokensValue > 0 ? maxTokensValue : DEFAULT_MAX_TOKENS;
+        const requestedMaxTokens = Number.isFinite(maxTokensValue) && maxTokensValue > 0 ? maxTokensValue : null;
+        const maxTokens = requestedMaxTokens ?? DEFAULT_MAX_TOKENS;
         // Only send `temperature` when the caller explicitly provides one. Newer
         // models (e.g. claude-opus-4-8) reject the parameter entirely.
         const temperatureRaw = body?.temperature;
@@ -86,6 +88,15 @@ export async function POST(request: Request) {
             prompt,
         });
         const userPrompt = sourceRagResult.promptText || basePrompt;
+        const capabilityValidation = validateAiModelRequest('anthropic', model, {
+            maxTokens: requestedMaxTokens,
+            temperature: includeTemperature ? temperatureNum : null,
+            hasImage: Boolean(imageBase64),
+            hasPdf: Boolean(pdfBase64),
+        }, getDiscoveredAiModelDescriptor('anthropic', model));
+        if (!capabilityValidation.ok) {
+            return tracedJson({ error: capabilityValidation.error }, { status: 400 });
+        }
         const userContent: Array<Record<string, unknown>> = [
             { type: 'text', text: userPrompt },
         ];
@@ -129,8 +140,13 @@ export async function POST(request: Request) {
         });
 
         if (!response.ok) {
-            await response.text().catch(() => '');
-            return tracedJson({ error: 'Anthropic request failed.', providerStatus: response.status }, { status: response.status });
+            const providerError = await response.text().catch(() => '');
+            const unsupportedParameter = detectUnsupportedAiRequestParameter(providerError);
+            return tracedJson({
+                error: 'Anthropic request failed.',
+                providerStatus: response.status,
+                ...(unsupportedParameter ? { unsupportedParameter } : {}),
+            }, { status: response.status });
         }
 
         const data = await response.json();

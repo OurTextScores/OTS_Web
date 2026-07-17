@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireSensitiveApiAccess } from '../../../../lib/api-access-control';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../../lib/trace-http';
 import { augmentPromptWithSourceRag } from '../_lib/source-rag';
+import { detectUnsupportedAiRequestParameter, getDiscoveredAiModelDescriptor, validateAiModelRequest } from '../../../../lib/ai-model-capabilities';
 
 export const dynamic = 'force-dynamic';
 
@@ -98,6 +99,15 @@ export async function POST(request: Request) {
         if (!normalizedModel) {
             return tracedJson({ error: 'Missing model.' }, { status: 400 });
         }
+        const capabilityValidation = validateAiModelRequest('gemini', model, {
+            maxTokens,
+            temperature: includeTemperature ? temperatureNum : null,
+            hasImage: Boolean(imageBase64),
+            hasPdf: Boolean(pdfBase64),
+        }, getDiscoveredAiModelDescriptor('gemini', model));
+        if (!capabilityValidation.ok) {
+            return tracedJson({ error: capabilityValidation.error }, { status: 400 });
+        }
         const parts: Array<Record<string, unknown>> = [{ text: userPrompt }];
         if (imageBase64) {
             parts.push({
@@ -145,8 +155,13 @@ export async function POST(request: Request) {
         });
 
         if (!response.ok) {
-            await response.text().catch(() => '');
-            return tracedJson({ error: 'Gemini request failed.', providerStatus: response.status }, { status: response.status });
+            const providerError = await response.text().catch(() => '');
+            const unsupportedParameter = detectUnsupportedAiRequestParameter(providerError);
+            return tracedJson({
+                error: 'Gemini request failed.',
+                providerStatus: response.status,
+                ...(unsupportedParameter ? { unsupportedParameter } : {}),
+            }, { status: response.status });
         }
 
         const data = await response.json();

@@ -1,0 +1,312 @@
+{
+  "version": "2026-07-17.2",
+  "rules": [
+    {
+      "id": "openai-gpt-4-multimodal",
+      "provider": "openai",
+      "modelPattern": "^gpt-(?:4o|4\\.1)(?:[-.]|$)",
+      "capabilities": {
+        "inputs": { "text": "supported", "image": "supported", "pdf": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1 },
+          "temperature": { "support": "supported", "min": 0, "max": 2 }
+        }
+      },
+      "evidence": {
+        "url": "https://developers.openai.com/api/docs/models",
+        "verifiedAt": "2026-07-17"
+      }
+    },
+    {
+      "id": "openai-gpt-5-reasoning",
+      "provider": "openai",
+      "modelPattern": "^gpt-5(?:[-.]|$)",
+      "capabilities": {
+        "inputs": { "text": "supported", "image": "supported", "pdf": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1 },
+          "temperature": { "support": "unsupported" },
+          "reasoning": { "support": "supported" }
+        }
+      },
+      "evidence": {
+        "url": "https://developers.openai.com/api/docs/models",
+        "verifiedAt": "2026-07-17",
+        "note": "Sampling controls are omitted for GPT-5 reasoning models unless a later exact-model rule allows them."
+      }
+    },
+    {
+      "id": "openai-o-series-reasoning",
+      "provider": "openai",
+      "modelPattern": "^o[1-9](?:[-.]|$)",
+      "capabilities": {
+        "inputs": { "text": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1 },
+          "temperature": { "support": "unsupported" },
+          "reasoning": { "support": "supported" }
+        }
+      },
+      "evidence": {
+        "url": "https://developers.openai.com/api/docs/models",
+        "verifiedAt": "2026-07-17"
+      }
+    },
+    {
+      "id": "anthropic-claude-3-and-4",
+      "provider": "anthropic",
+      "modelPattern": "^claude-(?:3|sonnet-4|haiku-4)(?:[-.]|$)",
+      "capabilities": {
+        "inputs": { "text": "supported", "image": "supported", "pdf": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1 },
+          "temperature": { "support": "supported", "min": 0, "max": 1 }
+        }
+      },
+      "evidence": {
+        "url": "https://platform.claude.com/docs/en/api/messages/create",
+        "verifiedAt": "2026-07-17"
+      }
+    },
+    {
+      "id": "anthropic-opus-4-7-4-8",
+      "provider": "anthropic",
+      "modelPattern": "^claude-opus-4-(?:7|8)(?:[-.]|$)",
+      "capabilities": {
+        "inputs": { "text": "supported", "image": "supported", "pdf": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1 },
+          "temperature": { "support": "unsupported" },
+          "reasoning": { "support": "supported" }
+        }
+      },
+      "evidence": {
+        "url": "https://platform.claude.com/docs/en/about-claude/models/whats-new-claude-4-8",
+        "verifiedAt": "2026-07-17"
+      }
+    },
+    {
+      "id": "anthropic-opus-4-6",
+      "provider": "anthropic",
+      "modelPattern": "^claude-opus-4-6$",
+      "capabilities": {
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072,
+        "inputs": { "text": "supported", "image": "supported", "pdf": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1, "max": 131072 },
+          "temperature": { "support": "supported", "min": 0, "max": 1 },
+          "reasoning": { "support": "supported", "modes": ["off", "enabled", "adaptive"] }
+        }
+      },
+      "evidence": {
+        "url": "https://platform.claude.com/docs/en/about-claude/models/migration-guide",
+        "verifiedAt": "2026-07-17",
+        "note": "Opus 4.6 predates Anthropic's removal of non-default sampling parameters. Live Models API metadata may refine its limits and capability flags."
+      }
+    },
+    {
+      "id": "anthropic-sonnet-5",
+      "provider": "anthropic",
+      "modelPattern": "^claude-sonnet-5$",
+      "capabilities": {
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072,
+        "inputs": { "text": "supported", "image": "supported", "pdf": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1, "max": 131072 },
+          "temperature": { "support": "unsupported" },
+          "reasoning": { "support": "supported", "modes": ["off", "adaptive"], "default": "adaptive" }
+        }
+      },
+      "evidence": {
+        "url": "https://platform.claude.com/docs/en/about-claude/models/whats-new-sonnet-5",
+        "verifiedAt": "2026-07-17",
+        "note": "OTS omits temperature because non-default sampling values return 400; the backwards-compatible default value does not provide a useful control."
+      }
+    },
+    {
+      "id": "anthropic-fable-5",
+      "provider": "anthropic",
+      "modelPattern": "^claude-fable-5$",
+      "capabilities": {
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072,
+        "inputs": { "text": "supported", "image": "supported", "pdf": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1, "max": 131072 },
+          "temperature": { "support": "unsupported" },
+          "reasoning": { "support": "supported", "modes": ["adaptive"], "default": "adaptive" }
+        }
+      },
+      "evidence": {
+        "url": "https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5-and-claude-mythos-5",
+        "verifiedAt": "2026-07-17",
+        "note": "Fable 5 has always-on adaptive thinking. OTS omits the deprecated temperature parameter used only for backwards compatibility."
+      }
+    },
+    {
+      "id": "gemini-generative-multimodal",
+      "provider": "gemini",
+      "modelPattern": "^gemini-(?:1\\.5|2(?:\\.0|\\.5)?|3(?:\\.0|\\.1)?)-",
+      "capabilities": {
+        "inputs": { "text": "supported", "image": "supported", "pdf": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1 },
+          "temperature": { "support": "supported", "min": 0 }
+        }
+      },
+      "evidence": {
+        "url": "https://ai.google.dev/api/models",
+        "verifiedAt": "2026-07-17"
+      }
+    },
+    {
+      "id": "gemini-3-5-flash",
+      "provider": "gemini",
+      "modelPattern": "^gemini-3\\.5-flash$",
+      "capabilities": {
+        "contextWindow": 1048576,
+        "maxOutputTokens": 65536,
+        "inputs": { "text": "supported", "image": "supported", "pdf": "supported", "video": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1, "max": 65536 },
+          "temperature": { "support": "supported", "min": 0 },
+          "reasoning": { "support": "supported" }
+        }
+      },
+      "evidence": {
+        "url": "https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash",
+        "verifiedAt": "2026-07-17",
+        "note": "Live Gemini metadata remains authoritative for the default and maximum temperature."
+      }
+    },
+    {
+      "id": "grok-3-4-generative",
+      "provider": "grok",
+      "modelPattern": "^grok-(?:3|4)(?:[-.]|$)",
+      "capabilities": {
+        "inputs": { "text": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1 },
+          "temperature": { "support": "supported", "min": 0, "max": 2 }
+        }
+      },
+      "evidence": {
+        "url": "https://docs.x.ai/developers/rest-api-reference/inference/chat",
+        "verifiedAt": "2026-07-17"
+      }
+    },
+    {
+      "id": "deepseek-chat",
+      "provider": "deepseek",
+      "modelPattern": "^deepseek-chat$",
+      "capabilities": {
+        "inputs": { "text": "supported", "image": "unsupported", "pdf": "unsupported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1 },
+          "temperature": { "support": "supported", "min": 0, "max": 2 },
+          "reasoning": { "support": "supported", "modes": ["off", "on"] }
+        }
+      },
+      "evidence": {
+        "url": "https://api-docs.deepseek.com/api/create-chat-completion",
+        "verifiedAt": "2026-07-17"
+      }
+    },
+    {
+      "id": "deepseek-reasoner",
+      "provider": "deepseek",
+      "modelPattern": "^deepseek-reasoner$",
+      "capabilities": {
+        "inputs": { "text": "supported", "image": "unsupported", "pdf": "unsupported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1 },
+          "temperature": { "support": "unsupported" },
+          "reasoning": { "support": "supported", "default": "on" }
+        }
+      },
+      "evidence": {
+        "url": "https://api-docs.deepseek.com/guides/reasoning_model",
+        "verifiedAt": "2026-07-17"
+      }
+    },
+    {
+      "id": "deepseek-v4",
+      "provider": "deepseek",
+      "modelPattern": "^deepseek-v4-(?:flash|pro)$",
+      "capabilities": {
+        "contextWindow": 1000000,
+        "maxOutputTokens": 393216,
+        "inputs": { "text": "supported", "image": "unsupported", "pdf": "unsupported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1, "max": 393216 },
+          "temperature": { "support": "supported", "min": 0, "max": 2, "default": 1 },
+          "reasoning": { "support": "supported", "modes": ["off", "on"], "default": "on" }
+        }
+      },
+      "evidence": {
+        "url": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "verifiedAt": "2026-07-17",
+        "note": "Both V4 variants share the documented 1M context, 384K maximum output, and default-on thinking contract."
+      }
+    },
+    {
+      "id": "kimi-k2-5-2-6",
+      "provider": "kimi",
+      "modelPattern": "^kimi-k2\\.(?:5|6)(?:[-.]|$)",
+      "capabilities": {
+        "inputs": { "text": "supported", "image": "supported", "pdf": "unsupported", "video": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1 },
+          "temperature": { "support": "unsupported" },
+          "reasoning": { "support": "supported", "modes": ["off", "on"] }
+        }
+      },
+      "evidence": {
+        "url": "https://platform.kimi.ai/docs/guide/migrating-from-openai-to-kimi",
+        "verifiedAt": "2026-07-17",
+        "note": "OTS omits temperature until it exposes Kimi thinking mode because the permitted value depends on that mode."
+      }
+    },
+    {
+      "id": "kimi-k2-7-code",
+      "provider": "kimi",
+      "modelPattern": "^kimi-k2\\.7-code(?:-highspeed)?$",
+      "capabilities": {
+        "contextWindow": 262144,
+        "inputs": { "text": "supported", "image": "supported", "pdf": "unsupported", "video": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1 },
+          "temperature": { "support": "supported", "fixed": 1 },
+          "reasoning": { "support": "supported", "modes": ["on"], "default": "on" }
+        }
+      },
+      "evidence": {
+        "url": "https://platform.kimi.ai/docs/guide/kimi-k2-7-code-quickstart",
+        "verifiedAt": "2026-07-17",
+        "note": "The high-speed ID is the same model with identical limits. OTS hides temperature because it is fixed at 1.0."
+      }
+    },
+    {
+      "id": "kimi-k3",
+      "provider": "kimi",
+      "modelPattern": "^kimi-k3$",
+      "capabilities": {
+        "contextWindow": 1048576,
+        "maxOutputTokens": 1048576,
+        "inputs": { "text": "supported", "image": "supported", "pdf": "unsupported", "video": "supported" },
+        "parameters": {
+          "maxOutputTokens": { "support": "supported", "min": 1, "max": 1048576, "default": 131072 },
+          "temperature": { "support": "supported", "fixed": 1 },
+          "reasoning": { "support": "supported", "modes": ["max"], "default": "max" }
+        }
+      },
+      "evidence": {
+        "url": "https://platform.kimi.ai/docs/guide/kimi-k3-quickstart",
+        "verifiedAt": "2026-07-17",
+        "note": "K3 always reasons at the currently fixed max effort. OTS hides temperature because it is fixed at 1.0."
+      }
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireSensitiveApiAccess } from '../../../../../lib/api-access-control';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../../../lib/trace-http';
+import { buildAiModelDescriptorsFromProviderResponse, rememberDiscoveredAiModelDescriptors } from '../../../../../lib/ai-model-capabilities';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,12 +41,10 @@ export async function POST(request: Request) {
         }
 
         const data = await response.json();
-        const models = Array.isArray(data?.data)
-            ? data.data
-                  .map((item: any) => item?.id)
-                  .filter((id: unknown) => typeof id === 'string')
-            : [];
-        return tracedJson({ models });
+        const modelDescriptors = buildAiModelDescriptorsFromProviderResponse('openai', data);
+        rememberDiscoveredAiModelDescriptors(modelDescriptors);
+        const models = modelDescriptors.map((descriptor) => descriptor.id);
+        return tracedJson({ models, modelDescriptors });
     } catch (err) {
         console.error('OpenAI models proxy error', err);
         return tracedJson({ error: 'OpenAI models proxy error.' }, { status: 500 });

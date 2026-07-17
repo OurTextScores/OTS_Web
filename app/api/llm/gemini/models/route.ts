@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireSensitiveApiAccess } from '../../../../../lib/api-access-control';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../../../lib/trace-http';
+import { buildAiModelDescriptorsFromProviderResponse, rememberDiscoveredAiModelDescriptors } from '../../../../../lib/ai-model-capabilities';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,18 +41,10 @@ export async function POST(request: Request) {
         }
 
         const data = await response.json();
-        const rawModels = Array.isArray(data?.models) ? data.models : [];
-        const ids: string[] = [];
-        for (const item of rawModels) {
-            if (typeof item?.baseModelId === 'string') {
-                ids.push(item.baseModelId);
-            }
-            if (typeof item?.name === 'string') {
-                ids.push(String(item.name).replace(/^models\//, ''));
-            }
-        }
-        const models = ids.filter((id) => typeof id === 'string');
-        return tracedJson({ models });
+        const modelDescriptors = buildAiModelDescriptorsFromProviderResponse('gemini', data);
+        rememberDiscoveredAiModelDescriptors(modelDescriptors);
+        const models = modelDescriptors.map((descriptor) => descriptor.id);
+        return tracedJson({ models, modelDescriptors });
     } catch (err) {
         console.error('Gemini models proxy error', err);
         return tracedJson({ error: 'Gemini models proxy error.' }, { status: 500 });

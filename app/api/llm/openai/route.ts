@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireSensitiveApiAccess } from '../../../../lib/api-access-control';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../../lib/trace-http';
 import { augmentPromptWithSourceRag } from '../_lib/source-rag';
+import { detectUnsupportedAiRequestParameter, getDiscoveredAiModelDescriptor, validateAiModelRequest } from '../../../../lib/ai-model-capabilities';
 
 export const dynamic = 'force-dynamic';
 
@@ -97,6 +98,15 @@ export async function POST(request: Request) {
         const userPrompt = sourceRagResult.promptText || basePrompt;
         const hasImage = Boolean(imageBase64);
         const hasPdf = Boolean(pdfBase64);
+        const capabilityValidation = validateAiModelRequest('openai', model, {
+            maxTokens,
+            temperature: includeTemperature ? temperatureNum : null,
+            hasImage,
+            hasPdf,
+        }, getDiscoveredAiModelDescriptor('openai', model));
+        if (!capabilityValidation.ok) {
+            return tracedJson({ error: capabilityValidation.error }, { status: 400 });
+        }
         const imageDataUrl = hasImage ? `data:${imageMediaType};base64,${imageBase64}` : '';
         const pdfDataUrl = hasPdf ? `data:${pdfMediaType};base64,${pdfBase64}` : '';
         const userContent: Record<string, unknown>[] = [
@@ -141,9 +151,14 @@ export async function POST(request: Request) {
         });
 
         if (!response.ok) {
-            await response.text().catch(() => '');
+            const providerError = await response.text().catch(() => '');
             if (hasPdf) {
-                return tracedJson({ error: 'OpenAI request failed.', providerStatus: response.status }, { status: response.status });
+                const unsupportedParameter = detectUnsupportedAiRequestParameter(providerError);
+                return tracedJson({
+                    error: 'OpenAI request failed.',
+                    providerStatus: response.status,
+                    ...(unsupportedParameter ? { unsupportedParameter } : {}),
+                }, { status: response.status });
             }
             const userMessageContent: unknown = hasImage
                 ? [
@@ -178,8 +193,14 @@ export async function POST(request: Request) {
             });
 
             if (!fallbackResponse.ok) {
-                await fallbackResponse.text().catch(() => '');
-                return tracedJson({ error: 'OpenAI request failed.', providerStatus: fallbackResponse.status }, { status: fallbackResponse.status });
+                const fallbackError = await fallbackResponse.text().catch(() => '');
+                const unsupportedParameter = detectUnsupportedAiRequestParameter(fallbackError)
+                    ?? detectUnsupportedAiRequestParameter(providerError);
+                return tracedJson({
+                    error: 'OpenAI request failed.',
+                    providerStatus: fallbackResponse.status,
+                    ...(unsupportedParameter ? { unsupportedParameter } : {}),
+                }, { status: fallbackResponse.status });
             }
 
             const fallbackData = await fallbackResponse.json();

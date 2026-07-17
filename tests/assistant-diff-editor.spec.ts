@@ -110,7 +110,7 @@ const openAssistantProposalCompare = async (page: Parameters<typeof test>[0]['pa
   await page.getByRole('button', { name: 'Generate Patch' }).click();
 
   await waitForDiffReviewReady(page);
-  await expect(page.getByText('Assistant Proposal vs Current')).toBeVisible();
+  await expect(page.getByText('Current vs Assistant Proposal')).toBeVisible();
   await expect(page.getByTestId('compare-pane-right').getByText('Loading checkpoint score...')).toHaveCount(0, { timeout: 20_000 });
 };
 
@@ -147,7 +147,7 @@ test.describe('Assistant diff editor flow', () => {
       + await page.getByTestId('compare-right-highlight').count()
     ), { timeout: 20_000 }).toBeGreaterThan(0);
 
-    await page.getByRole('button', { name: 'Accept All AI Changes' }).click();
+    await page.getByRole('button', { name: 'Apply All AI Changes' }).click();
 
     await expect.poll(async () => (
       await page.getByTestId('compare-left-highlight').count()
@@ -177,7 +177,7 @@ test.describe('Assistant diff editor flow', () => {
     await expect(page.getByTestId('checkpoint-compare-modal')).toHaveCount(0);
   });
 
-  test('per-block accept applies the reviewed block immediately', async ({ page }) => {
+  test('per-block apply applies the reviewed block immediately', async ({ page }) => {
     await page.route('**/api/llm/openai', async (route) => {
       await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
     });
@@ -185,7 +185,8 @@ test.describe('Assistant diff editor flow', () => {
     await openAssistantProposalCompare(page);
     await expect.poll(() => countHighlights(page), { timeout: 20_000 }).toBeGreaterThan(0);
 
-    await page.getByRole('button', { name: 'Accept' }).first().click();
+    const applyButton = page.getByRole('button', { name: 'Apply', exact: true }).first();
+    await applyButton.click();
 
     await expect.poll(() => countHighlights(page), { timeout: 20_000 }).toBe(0);
   });

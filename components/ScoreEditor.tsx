@@ -20,16 +20,21 @@ import { CodeMirrorEditor, type CodeEditorThemeMode } from './CodeMirrorEditor';
 import { Toolbar, type MeasureInsertTarget } from './Toolbar';
 import { LeftSidebar, type LeftSidebarTab } from './score-editor/LeftSidebar';
 import {
-    AI_PROVIDER_CAPABILITIES,
     AI_PROVIDER_CONFIGS,
     AI_PROVIDER_LABELS,
-    DEFAULT_MAX_TOKENS_BY_PROVIDER,
     DEFAULT_MODEL_BY_PROVIDER,
-    isOpenAiCompatibleProvider,
-    loadAiModelsDirect,
+    loadAiModelDescriptorsDirect,
     requestAiTextDirect,
     type AiProvider,
 } from '../lib/ai-provider-adapters';
+import {
+    parseAiModelDescriptors,
+    resolveAiModelDescriptor,
+    detectUnsupportedAiRequestParameter,
+    AI_MODEL_CAPABILITY_REGISTRY_VERSION,
+    type OptionalAiRequestParameter,
+    type AiModelDescriptor,
+} from '../lib/ai-model-capabilities';
 import {
     getLegacyLlmProxyBase,
     getScoreEditorApiBase,
@@ -1304,6 +1309,8 @@ export default function ScoreEditor() {
     const [aiIncludeRenderedImage, setAiIncludeRenderedImage] = useState(false);
     const [aiMaxTokensMode, setAiMaxTokensMode] = useState<'auto' | 'custom'>('auto');
     const [aiMaxTokens, setAiMaxTokens] = useState(4096);
+    const [aiTemperatureMode, setAiTemperatureMode] = useState<'auto' | 'custom'>('auto');
+    const [aiTemperature, setAiTemperature] = useState(1);
     const [aiChatInput, setAiChatInput] = useState('');
     const [aiChatMessages, setAiChatMessages] = useState<AiChatMessage[]>([]);
     const [aiChatSourceRagHintDismissed, setAiChatSourceRagHintDismissed] = useState(false);
@@ -1315,8 +1322,10 @@ export default function ScoreEditor() {
     const [aiBusy, setAiBusy] = useState(false);
     const [aiError, setAiError] = useState<string | null>(null);
     const [aiModels, setAiModels] = useState<string[]>([]);
+    const [aiModelDescriptors, setAiModelDescriptors] = useState<AiModelDescriptor[]>([]);
     const [aiModelsLoading, setAiModelsLoading] = useState(false);
     const [aiModelsError, setAiModelsError] = useState<string | null>(null);
+    const aiUnsupportedParametersRef = useRef<Map<string, Set<OptionalAiRequestParameter>>>(new Map());
     const [currentPage, setCurrentPage] = useState(0);
     const [pageCount, setPageCount] = useState(1);
     const [progressivePagingActive, setProgressivePagingActive] = useState(false);
@@ -4513,25 +4522,60 @@ ${partsBodyXml}
         }
     }, [xmlSidebarTab, aiIncludeXml, musicAgentIncludeCurrentXml, aiMode, xmlText, loadXmlFromScore]);
 
-    const aiProviderCapabilities = AI_PROVIDER_CAPABILITIES[aiProvider];
+    const selectedAiModelDescriptor = useMemo(() => {
+        const discovered = aiModelDescriptors.find((descriptor) => (
+            descriptor.provider === aiProvider && descriptor.id === aiModel.trim().replace(/^models\//, '')
+        ));
+        return discovered ?? resolveAiModelDescriptor(aiProvider, aiModel);
+    }, [aiModel, aiModelDescriptors, aiProvider]);
+    const aiSupportsImageContext = selectedAiModelDescriptor.inputs.image === 'supported';
+    const aiSupportsPdfContext = selectedAiModelDescriptor.inputs.pdf === 'supported';
+    const aiSupportsCustomMaxTokens = selectedAiModelDescriptor.parameters.maxOutputTokens.support === 'supported';
+    const aiSupportsTemperature = selectedAiModelDescriptor.parameters.temperature.support === 'supported'
+        && selectedAiModelDescriptor.parameters.temperature.fixed === undefined;
 
     useEffect(() => {
-        if (!aiProviderCapabilities.supportsPdfContext && aiIncludePdf) {
+        if (!aiSupportsPdfContext && aiIncludePdf) {
             setAiIncludePdf(false);
         }
-        if (!aiProviderCapabilities.supportsRenderedImageContext && aiIncludeRenderedImage) {
+        if (!aiSupportsImageContext && aiIncludeRenderedImage) {
             setAiIncludeRenderedImage(false);
+        }
+        if (!aiSupportsCustomMaxTokens && aiMaxTokensMode === 'custom') {
+            setAiMaxTokensMode('auto');
+        }
+        if (!aiSupportsTemperature && aiTemperatureMode === 'custom') {
+            setAiTemperatureMode('auto');
+        }
+        const maxOutputTokens = selectedAiModelDescriptor.maxOutputTokens
+            ?? selectedAiModelDescriptor.parameters.maxOutputTokens.max;
+        if (maxOutputTokens !== undefined && aiMaxTokens > maxOutputTokens) {
+            setAiMaxTokens(maxOutputTokens);
+        }
+        const temperatureCapability = selectedAiModelDescriptor.parameters.temperature;
+        if (temperatureCapability.min !== undefined && aiTemperature < temperatureCapability.min) {
+            setAiTemperature(temperatureCapability.min);
+        } else if (temperatureCapability.max !== undefined && aiTemperature > temperatureCapability.max) {
+            setAiTemperature(temperatureCapability.max);
         }
     }, [
         aiIncludePdf,
         aiIncludeRenderedImage,
-        aiProviderCapabilities.supportsPdfContext,
-        aiProviderCapabilities.supportsRenderedImageContext,
+        aiMaxTokens,
+        aiMaxTokensMode,
+        aiSupportsCustomMaxTokens,
+        aiSupportsImageContext,
+        aiSupportsPdfContext,
+        aiSupportsTemperature,
+        aiTemperature,
+        aiTemperatureMode,
+        selectedAiModelDescriptor,
     ]);
 
     useEffect(() => {
         if (!aiEnabled) {
             setAiModels([]);
+            setAiModelDescriptors([]);
             setAiModelsError(null);
             setAiModelsLoading(false);
             return;
@@ -4539,6 +4583,7 @@ ${partsBodyXml}
         const trimmedKey = aiApiKey.trim();
         if (!trimmedKey) {
             setAiModels([]);
+            setAiModelDescriptors([]);
             setAiModelsError(null);
             setAiModelsLoading(false);
             return;
@@ -4549,6 +4594,7 @@ ${partsBodyXml}
         const loadModels = async () => {
             try {
                 let models: string[] = [];
+                let descriptors: AiModelDescriptor[] = [];
                 let proxyResponse: Response | null = null;
                 if (useLlmProxy) {
                     const nextProxyResponse = await fetch(proxyUrlFor(`/api/llm/${aiProvider}/models`), {
@@ -4571,11 +4617,13 @@ ${partsBodyXml}
                     models = Array.isArray(data?.models)
                         ? data.models.filter((id: unknown): id is string => typeof id === 'string')
                         : [];
+                    descriptors = parseAiModelDescriptors(data?.modelDescriptors);
                 } else {
-                    models = await loadAiModelsDirect({
+                    descriptors = await loadAiModelDescriptorsDirect({
                         provider: aiProvider,
                         apiKey: trimmedKey,
                     });
+                    models = descriptors.map((descriptor) => descriptor.id);
                 }
 
                 if (canceled) {
@@ -4585,7 +4633,12 @@ ${partsBodyXml}
                     ? models.filter((id: string) => /^gpt-|^o/.test(id))
                     : models;
                 const sorted = [...new Set(filtered.length ? filtered : models)].sort();
+                const descriptorsById = new Map(descriptors.map((descriptor) => [descriptor.id, descriptor]));
+                const sortedDescriptors = sorted.map((id) => (
+                    descriptorsById.get(id) ?? resolveAiModelDescriptor(aiProvider, id)
+                ));
                 setAiModels(sorted);
+                setAiModelDescriptors(sortedDescriptors);
                 // Keep the user's current selection if it is still valid; only
                 // pick a default when the selection is empty or no longer offered.
                 // Uses a functional update so this effect need not depend on
@@ -4603,6 +4656,7 @@ ${partsBodyXml}
                 if (!canceled) {
                     console.error(`Failed to load ${AI_PROVIDER_LABELS[aiProvider]} models`, err);
                     setAiModels([]);
+                    setAiModelDescriptors([]);
                     const message = errorMessage(err);
                     setAiModelsError(message || 'Failed to load models. Check your API key or enter a model manually.');
                 }
@@ -8199,6 +8253,7 @@ ${partsBodyXml}
         image?: AiImageAttachment | null;
         pdf?: AiPdfAttachment | null;
         maxTokens: number | null;
+        temperature?: number | null;
         enableSourceRag?: boolean;
     }) => {
         const {
@@ -8212,33 +8267,77 @@ ${partsBodyXml}
             image = null,
             pdf = null,
             maxTokens,
+            temperature = null,
             enableSourceRag = false,
         } = payload;
         const systemPrompt = systemPromptOverride.trim() || AI_PATCH_SYSTEM_PROMPT;
         const userPrompt = promptText.trim() || buildPromptWithSections(prompt, xml.trim() ? [{ title: 'Current MusicXML', content: xml }] : []);
+        const capabilityCacheKey = `${provider}:${model.trim().replace(/^models\//, '')}`;
+        const knownUnsupported = aiUnsupportedParametersRef.current.get(capabilityCacheKey) ?? new Set<OptionalAiRequestParameter>();
+        let effectiveMaxTokens = knownUnsupported.has('maxOutputTokens') ? null : maxTokens;
+        let effectiveTemperature = knownUnsupported.has('temperature') ? null : temperature;
+        const rememberUnsupported = (parameter: OptionalAiRequestParameter) => {
+            const next = new Set(aiUnsupportedParametersRef.current.get(capabilityCacheKey) ?? []);
+            const isNewObservation = !next.has(parameter);
+            next.add(parameter);
+            aiUnsupportedParametersRef.current.set(capabilityCacheKey, next);
+            if (isNewObservation) {
+                console.warn('[AI] Optional model parameter rejected; retrying without it.', {
+                    provider,
+                    model,
+                    parameter,
+                    registryVersion: AI_MODEL_CAPABILITY_REGISTRY_VERSION,
+                });
+            }
+            if (parameter === 'temperature') {
+                effectiveTemperature = null;
+                setAiTemperatureMode('auto');
+            } else {
+                effectiveMaxTokens = null;
+                setAiMaxTokensMode('auto');
+            }
+        };
+        const requestDescriptor = aiModelDescriptors.find((descriptor) => (
+            descriptor.provider === provider && descriptor.id === model.trim().replace(/^models\//, '')
+        )) ?? resolveAiModelDescriptor(provider, model);
 
         if (useLlmProxy) {
-            const response = await fetch(proxyUrlFor(`/api/llm/${provider}`), {
+            const requestBody: Record<string, unknown> = {
+                apiKey,
+                model,
+                prompt,
+                xml,
+                sourceContext: activeLaunchContext || undefined,
+                enableSourceRag,
+                systemPrompt: systemPrompt || undefined,
+                promptText: userPrompt,
+                imageBase64: image?.base64 ?? '',
+                imageMediaType: image?.mediaType ?? '',
+                pdfBase64: pdf?.base64 ?? '',
+                pdfMediaType: pdf?.mediaType ?? '',
+                pdfFilename: pdf?.filename ?? '',
+                maxTokens: effectiveMaxTokens ?? undefined,
+                temperature: effectiveTemperature ?? undefined,
+            };
+            const sendProxyRequest = () => fetch(proxyUrlFor(`/api/llm/${provider}`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    apiKey,
-                    model,
-                    prompt,
-                    xml,
-                    sourceContext: activeLaunchContext || undefined,
-                    enableSourceRag,
-                    systemPrompt: systemPrompt || undefined,
-                    promptText: userPrompt,
-                    imageBase64: image?.base64 ?? '',
-                    imageMediaType: image?.mediaType ?? '',
-                    pdfBase64: pdf?.base64 ?? '',
-                    pdfMediaType: pdf?.mediaType ?? '',
-                    pdfFilename: pdf?.filename ?? '',
-                    maxTokens: maxTokens ?? undefined,
-                }),
+                body: JSON.stringify(requestBody),
             });
+            let response = await sendProxyRequest();
             captureApiTraceContext(response.headers);
+            let responseErrorText = response.ok ? '' : await response.text();
+            const unsupportedParameter = detectUnsupportedAiRequestParameter(responseErrorText);
+            const canRetryWithoutParameter = unsupportedParameter === 'temperature'
+                ? effectiveTemperature != null
+                : unsupportedParameter === 'maxOutputTokens' && effectiveMaxTokens != null;
+            if (!response.ok && unsupportedParameter && canRetryWithoutParameter) {
+                rememberUnsupported(unsupportedParameter);
+                delete requestBody[unsupportedParameter === 'temperature' ? 'temperature' : 'maxTokens'];
+                response = await sendProxyRequest();
+                captureApiTraceContext(response.headers);
+                responseErrorText = response.ok ? '' : await response.text();
+            }
             if (response.ok) {
                 const data = await response.json();
                 return {
@@ -8253,21 +8352,36 @@ ${partsBodyXml}
             }
             const canFallbackDirect = provider !== 'anthropic' && isEmbedBuild && !llmProxyBase && isMissingProxyStatus(response.status);
             if (!canFallbackDirect) {
-                const errorText = await response.text();
-                throw new Error(errorText || 'Request failed.');
+                throw new Error(responseErrorText || 'Request failed.');
             }
         }
 
-        const text = await requestAiTextDirect({
+        const sendDirectRequest = () => requestAiTextDirect({
             provider,
             apiKey,
             model,
             promptText: userPrompt,
             systemPrompt,
-            maxTokens,
+            maxTokens: effectiveMaxTokens,
+            temperature: effectiveTemperature,
+            modelDescriptor: requestDescriptor,
             image,
             pdf,
         });
+        let text: string;
+        try {
+            text = await sendDirectRequest();
+        } catch (err) {
+            const unsupportedParameter = detectUnsupportedAiRequestParameter(errorMessage(err) || String(err));
+            const canRetryWithoutParameter = unsupportedParameter === 'temperature'
+                ? effectiveTemperature != null
+                : unsupportedParameter === 'maxOutputTokens' && effectiveMaxTokens != null;
+            if (!unsupportedParameter || !canRetryWithoutParameter) {
+                throw err;
+            }
+            rememberUnsupported(unsupportedParameter);
+            text = await sendDirectRequest();
+        }
         return { text, sourceRag: null };
     };
 
@@ -8525,6 +8639,7 @@ ${partsBodyXml}
                 image: imageAttachment,
                 pdf: pdfAttachment,
                 maxTokens,
+                temperature: aiTemperatureMode === 'custom' ? aiTemperature : null,
             });
             if (!patchResponse.extracted) {
                 const missingPatchMessage = patchResponse.retried
@@ -8686,6 +8801,7 @@ ${partsBodyXml}
                 image: imageAttachment,
                 pdf: pdfAttachment,
                 maxTokens,
+                temperature: aiTemperatureMode === 'custom' ? aiTemperature : null,
                 enableSourceRag: shouldUseSourceRag,
             });
             const responseText = result.text.trim();
@@ -14177,7 +14293,7 @@ ${partsBodyXml}
                                                     )}
                                                     {aiModels.map((modelId) => (
                                                         <option key={modelId} value={modelId}>
-                                                            {modelId}
+                                                            {aiModelDescriptors.find((descriptor) => descriptor.id === modelId)?.displayName || modelId}
                                                         </option>
                                                     ))}
                                                 </select>
@@ -14267,23 +14383,47 @@ ${partsBodyXml}
                                         >
                                             Agent
                                         </button>
-                                        <div className="ml-auto flex items-center gap-2 text-xs text-gray-600">
+                                        <div className="ml-auto flex flex-wrap items-center justify-end gap-2 text-xs text-gray-600">
                                             <span>Max output</span>
                                             <select
                                                 value={aiMaxTokensMode}
                                                 onChange={(event) => setAiMaxTokensMode(event.target.value as 'auto' | 'custom')}
                                                 className="rounded border border-gray-300 px-2 py-1 text-xs"
+                                                title={aiSupportsCustomMaxTokens ? 'Configure maximum output tokens' : 'Custom output is not confirmed for this model'}
                                             >
                                                 <option value="auto">Auto</option>
-                                                <option value="custom">Custom</option>
+                                                <option value="custom" disabled={!aiSupportsCustomMaxTokens}>Custom</option>
                                             </select>
                                             {aiMaxTokensMode === 'custom' && (
                                                 <input
                                                     type="number"
                                                     min={256}
+                                                    max={selectedAiModelDescriptor.maxOutputTokens ?? selectedAiModelDescriptor.parameters.maxOutputTokens.max}
                                                     value={aiMaxTokens}
                                                     onChange={(event) => setAiMaxTokens(Number(event.target.value) || 0)}
                                                     className="w-20 rounded border border-gray-300 px-2 py-1 text-xs"
+                                                />
+                                            )}
+                                            <span>Temperature</span>
+                                            <select
+                                                value={aiTemperatureMode}
+                                                onChange={(event) => setAiTemperatureMode(event.target.value as 'auto' | 'custom')}
+                                                className="rounded border border-gray-300 px-2 py-1 text-xs"
+                                                title={aiSupportsTemperature ? 'Configure sampling temperature' : 'Temperature is unavailable for this model'}
+                                            >
+                                                <option value="auto">Auto</option>
+                                                <option value="custom" disabled={!aiSupportsTemperature}>Custom</option>
+                                            </select>
+                                            {aiTemperatureMode === 'custom' && (
+                                                <input
+                                                    type="number"
+                                                    step={0.1}
+                                                    min={selectedAiModelDescriptor.parameters.temperature.min}
+                                                    max={selectedAiModelDescriptor.parameters.temperature.max}
+                                                    value={aiTemperature}
+                                                    onChange={(event) => setAiTemperature(Number(event.target.value))}
+                                                    className="w-20 rounded border border-gray-300 px-2 py-1 text-xs"
+                                                    aria-label="Temperature"
                                                 />
                                             )}
                                         </div>
@@ -14315,7 +14455,7 @@ ${partsBodyXml}
                                                         type="checkbox"
                                                         checked={aiIncludeRenderedImage}
                                                         onChange={(event) => setAiIncludeRenderedImage(event.target.checked)}
-                                                        disabled={!aiProviderCapabilities.supportsRenderedImageContext}
+                                                        disabled={!aiSupportsImageContext}
                                                     />
                                                     Include rendered image
                                                 </label>
@@ -14324,7 +14464,7 @@ ${partsBodyXml}
                                                         type="checkbox"
                                                         checked={aiIncludePdf}
                                                         onChange={(event) => setAiIncludePdf(event.target.checked)}
-                                                        disabled={!aiProviderCapabilities.supportsPdfContext}
+                                                        disabled={!aiSupportsPdfContext}
                                                     />
                                                     Include score PDF
                                                 </label>
@@ -14350,14 +14490,14 @@ ${partsBodyXml}
                                                     PNG capture is not available in this build. The request will continue without image context.
                                                 </div>
                                             )}
-                                            {!aiProviderCapabilities.supportsRenderedImageContext && (
+                                            {!aiSupportsImageContext && (
                                                 <div className="text-[11px] text-gray-500">
-                                                    {AI_PROVIDER_LABELS[aiProvider]} image attachments are disabled in this integration.
+                                                    Image input is not confirmed for {selectedAiModelDescriptor.id || 'this model'}.
                                                 </div>
                                             )}
-                                            {!aiProviderCapabilities.supportsPdfContext && (
+                                            {!aiSupportsPdfContext && (
                                                 <div className="text-[11px] text-gray-500">
-                                                    {AI_PROVIDER_LABELS[aiProvider]} PDF attachments are not yet enabled in this integration.
+                                                    PDF input is not confirmed for {selectedAiModelDescriptor.id || 'this model'}.
                                                 </div>
                                             )}
                                             {aiIncludePdf && (

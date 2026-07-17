@@ -2,6 +2,13 @@ import { NextResponse } from 'next/server';
 import { requireSensitiveApiAccess } from '../../../lib/api-access-control';
 import { applyTraceHeaders, resolveTraceContext, withTraceHeaders } from '../../../lib/trace-http';
 import { augmentPromptWithSourceRag } from './_lib/source-rag';
+import {
+    buildAiModelDescriptorsFromProviderResponse,
+    detectUnsupportedAiRequestParameter,
+    getDiscoveredAiModelDescriptor,
+    rememberDiscoveredAiModelDescriptors,
+    validateAiModelRequest,
+} from '../../../lib/ai-model-capabilities';
 
 export type OpenAiCompatibleProvider = 'openai' | 'grok' | 'deepseek' | 'kimi';
 
@@ -173,6 +180,7 @@ const parseRequestBody = (body: unknown): NormalizedRequest => {
 };
 
 const buildChatCompletionsPayload = (args: {
+    provider: OpenAiCompatibleProvider;
     model: string;
     systemPrompt: string;
     userPrompt: string;
@@ -181,7 +189,7 @@ const buildChatCompletionsPayload = (args: {
     maxTokens: number | null;
     temperature?: number | null;
 }) => {
-    const { model, systemPrompt, userPrompt, imageBase64, imageMediaType, maxTokens, temperature } = args;
+    const { provider, model, systemPrompt, userPrompt, imageBase64, imageMediaType, maxTokens, temperature } = args;
     const hasImage = Boolean(imageBase64);
     const userMessageContent: unknown = hasImage
         ? [
@@ -204,7 +212,7 @@ const buildChatCompletionsPayload = (args: {
         ...(typeof temperature === 'number' && Number.isFinite(temperature) ? { temperature } : {}),
     };
     if (maxTokens) {
-        payload.max_tokens = maxTokens;
+        payload[provider === 'kimi' ? 'max_completion_tokens' : 'max_tokens'] = maxTokens;
     }
     return payload;
 };
@@ -265,6 +273,15 @@ export async function handleOpenAiCompatibleRequest(provider: OpenAiCompatiblePr
         const userPrompt = sourceRagResult.promptText || basePrompt;
         const hasImage = Boolean(imageBase64);
         const hasPdf = Boolean(pdfBase64);
+        const capabilityValidation = validateAiModelRequest(provider, model, {
+            maxTokens,
+            temperature: includeTemperature ? temperatureNum : null,
+            hasImage,
+            hasPdf,
+        }, getDiscoveredAiModelDescriptor(provider, model));
+        if (!capabilityValidation.ok) {
+            return tracedJson({ error: capabilityValidation.error }, { status: 400 });
+        }
         if (hasPdf && !config.supportsPdfAttachments) {
             return tracedJson({ error: `${config.label} proxy does not support PDF attachments yet.` }, { status: 400 });
         }
@@ -308,13 +325,19 @@ export async function handleOpenAiCompatibleRequest(provider: OpenAiCompatiblePr
                 return tracedJson({ text: parseResponsesText(data), sourceRag: sourceRagResult.sourceRag });
             }
 
-            await response.text().catch(() => '');
+            const providerError = await response.text().catch(() => '');
             if (hasPdf) {
-                return tracedJson({ error: `${config.label} request failed.`, providerStatus: response.status }, { status: response.status });
+                const unsupportedParameter = detectUnsupportedAiRequestParameter(providerError);
+                return tracedJson({
+                    error: `${config.label} request failed.`,
+                    providerStatus: response.status,
+                    ...(unsupportedParameter ? { unsupportedParameter } : {}),
+                }, { status: response.status });
             }
         }
 
         const chatPayload = buildChatCompletionsPayload({
+            provider,
             model,
             systemPrompt,
             userPrompt,
@@ -333,8 +356,13 @@ export async function handleOpenAiCompatibleRequest(provider: OpenAiCompatiblePr
         });
 
         if (!chatResponse.ok) {
-            await chatResponse.text().catch(() => '');
-            return tracedJson({ error: `${config.label} request failed.`, providerStatus: chatResponse.status }, { status: chatResponse.status });
+            const providerError = await chatResponse.text().catch(() => '');
+            const unsupportedParameter = detectUnsupportedAiRequestParameter(providerError);
+            return tracedJson({
+                error: `${config.label} request failed.`,
+                providerStatus: chatResponse.status,
+                ...(unsupportedParameter ? { unsupportedParameter } : {}),
+            }, { status: chatResponse.status });
         }
 
         const chatData = await chatResponse.json();
@@ -369,12 +397,20 @@ export async function handleOpenAiCompatibleModelsRequest(provider: OpenAiCompat
             return tracedJson({ error: 'Missing apiKey.' }, { status: 400 });
         }
 
-        const response = await fetch(`${config.baseUrl}/models`, {
+        const fetchModels = (path: string) => fetch(`${config.baseUrl}${path}`, {
             headers: withTraceHeaders(trace, {
                 Authorization: `Bearer ${apiKey}`,
                 'Content-Type': 'application/json',
             }),
         });
+
+        let response = provider === 'grok'
+            ? await fetchModels('/language-models')
+            : await fetchModels('/models');
+        if (provider === 'grok' && !response.ok) {
+            await response.text().catch(() => '');
+            response = await fetchModels('/models');
+        }
 
         if (!response.ok) {
             await response.text().catch(() => '');
@@ -382,18 +418,10 @@ export async function handleOpenAiCompatibleModelsRequest(provider: OpenAiCompat
         }
 
         const data = await response.json();
-        const models = Array.isArray(data?.data)
-            ? data.data.map((item: unknown) => {
-                const record = asRecord(item);
-                return record?.id;
-            }).filter((id: unknown): id is string => typeof id === 'string')
-            : Array.isArray(data?.models)
-                ? data.models.map((item: unknown) => {
-                    const record = asRecord(item);
-                    return record?.id ?? item;
-                }).filter((id: unknown): id is string => typeof id === 'string')
-                : [];
-        return tracedJson({ models });
+        const modelDescriptors = buildAiModelDescriptorsFromProviderResponse(provider, data);
+        rememberDiscoveredAiModelDescriptors(modelDescriptors);
+        const models = modelDescriptors.map((descriptor) => descriptor.id);
+        return tracedJson({ models, modelDescriptors });
     } catch (err) {
         console.error(`${config.label} models proxy error`, err);
         return tracedJson({ error: `${config.label} models proxy error.` }, { status: 500 });

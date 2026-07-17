@@ -1,3 +1,9 @@
+import {
+    buildAiModelDescriptorsFromProviderResponse,
+    type AiModelDescriptor,
+    validateAiModelRequest,
+} from './ai-model-capabilities';
+
 export type AiProvider = 'openai' | 'anthropic' | 'gemini' | 'grok' | 'deepseek' | 'kimi';
 export type OpenAiCompatibleAiProvider = 'openai' | 'grok' | 'deepseek' | 'kimi';
 export type AiProviderKind = 'openai-compatible' | 'anthropic' | 'gemini';
@@ -187,6 +193,7 @@ export type RequestAiTextDirectArgs = {
     systemPrompt: string;
     maxTokens: number | null;
     temperature?: number | null;
+    modelDescriptor?: AiModelDescriptor | null;
     image?: TextImageAttachment | null;
     pdf?: TextPdfAttachment | null;
 };
@@ -277,39 +284,31 @@ const normalizeGeminiModel = (model: string) => {
     return `models/${trimmed}`;
 };
 
-export async function loadAiModelsDirect({ provider, apiKey }: LoadAiModelsDirectArgs): Promise<string[]> {
+export async function loadAiModelDescriptorsDirect({ provider, apiKey }: LoadAiModelsDirectArgs): Promise<AiModelDescriptor[]> {
     if (!apiKey.trim()) {
         return [];
     }
     if (isOpenAiCompatibleProvider(provider)) {
         const baseUrl = OPENAI_COMPATIBLE_PROVIDER_BASE_URL[provider];
-        const response = await fetch(`${baseUrl}/models`, {
+        const fetchModels = (path: string) => fetch(`${baseUrl}${path}`, {
             headers: {
                 Authorization: `Bearer ${apiKey}`,
                 'Content-Type': 'application/json',
             },
         });
+        let response = provider === 'grok'
+            ? await fetchModels('/language-models')
+            : await fetchModels('/models');
+        if (provider === 'grok' && !response.ok) {
+            await response.text().catch(() => '');
+            response = await fetchModels('/models');
+        }
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(errorText || 'Failed to load models.');
         }
         const data = await response.json();
-        if (Array.isArray(data?.data)) {
-            return data.data
-                .map((item: unknown) => asRecord(item)?.id)
-                .filter((id: unknown): id is string => typeof id === 'string');
-        }
-        if (Array.isArray(data?.models)) {
-            return data.models
-                .map((item: unknown) => {
-                    if (typeof item === 'string') {
-                        return item;
-                    }
-                    return asRecord(item)?.id;
-                })
-                .filter((id: unknown): id is string => typeof id === 'string');
-        }
-        return [];
+        return buildAiModelDescriptorsFromProviderResponse(provider, data);
     }
 
     if (provider === 'anthropic') {
@@ -325,17 +324,10 @@ export async function loadAiModelsDirect({ provider, apiKey }: LoadAiModelsDirec
             throw new Error(errorText || 'Failed to load models.');
         }
         const data = await response.json();
-        if (Array.isArray(data?.models)) {
-            return data.models
-                .map((item: unknown) => asRecord(item)?.id)
-                .filter((id: unknown): id is string => typeof id === 'string');
-        }
-        if (Array.isArray(data?.data)) {
-            return data.data
-                .map((item: unknown) => asRecord(item)?.id)
-                .filter((id: unknown): id is string => typeof id === 'string');
-        }
-        return [];
+        const normalizedData = Array.isArray(data?.models) && !Array.isArray(data?.data)
+            ? { data: data.models }
+            : data;
+        return buildAiModelDescriptorsFromProviderResponse(provider, normalizedData);
     }
 
     const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
@@ -349,25 +341,12 @@ export async function loadAiModelsDirect({ provider, apiKey }: LoadAiModelsDirec
         throw new Error(errorText || 'Failed to load models.');
     }
     const data = await response.json();
-    const rawModels = Array.isArray(data?.models) ? data.models : [];
-    const filtered = rawModels.filter((item: unknown) => {
-        const record = asRecord(item);
-        const methods = Array.isArray(record?.supportedGenerationMethods)
-            ? record.supportedGenerationMethods
-            : [];
-        return methods.length === 0 || methods.includes('generateContent');
-    });
-    const ids: string[] = [];
-    for (const item of filtered) {
-        const record = asRecord(item);
-        if (typeof record?.baseModelId === 'string') {
-            ids.push(record.baseModelId);
-        }
-        if (typeof record?.name === 'string') {
-            ids.push(record.name.replace(/^models\//, ''));
-        }
-    }
-    return ids;
+    return buildAiModelDescriptorsFromProviderResponse(provider, data);
+}
+
+export async function loadAiModelsDirect(args: LoadAiModelsDirectArgs): Promise<string[]> {
+    const descriptors = await loadAiModelDescriptorsDirect(args);
+    return descriptors.map((descriptor) => descriptor.id);
 }
 
 export async function requestAiTextDirect({
@@ -378,6 +357,7 @@ export async function requestAiTextDirect({
     systemPrompt,
     maxTokens,
     temperature = null,
+    modelDescriptor = null,
     image = null,
     pdf = null,
 }: RequestAiTextDirectArgs): Promise<string> {
@@ -387,6 +367,15 @@ export async function requestAiTextDirect({
     // (opus-4-8, gpt-5.x) reject a non-default temperature.
     const temperatureNum = Number(temperature);
     const includeTemperature = temperature != null && Number.isFinite(temperatureNum);
+    const capabilityValidation = validateAiModelRequest(provider, model, {
+        maxTokens,
+        temperature: includeTemperature ? temperatureNum : null,
+        hasImage,
+        hasPdf,
+    }, modelDescriptor);
+    if (!capabilityValidation.ok) {
+        throw new Error(capabilityValidation.error || `Unsupported request options for ${model}.`);
+    }
     const imageDataUrl = hasImage ? `data:${image!.mediaType};base64,${image!.base64}` : '';
     const pdfDataUrl = hasPdf ? `data:${pdf!.mediaType};base64,${pdf!.base64}` : '';
 
@@ -488,7 +477,7 @@ export async function requestAiTextDirect({
             ...(includeTemperature ? { temperature: temperatureNum } : {}),
         };
         if (maxTokens) {
-            payload.max_tokens = maxTokens;
+            payload[provider === 'kimi' ? 'max_completion_tokens' : 'max_tokens'] = maxTokens;
         }
         const response = await fetch(`${providerBaseUrl}/chat/completions`, {
             method: 'POST',

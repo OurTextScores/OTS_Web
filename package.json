@@ -22,6 +22,7 @@
     "check:wasm": "node scripts/check-wasm-cli.js",
     "sync:wasm": "node scripts/sync-wasm-cli.js",
     "generate:data": "node scripts/generate-static-data.js",
+    "audit:ai-models": "node scripts/audit-ai-models.mjs",
     "package:release": "node scripts/package-release.js",
     "release:prepare": "npm run build:embed && npm run package:release",
     "test:embed": "node test-embed/server.js",
