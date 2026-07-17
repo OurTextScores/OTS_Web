@@ -535,6 +535,26 @@ type BlockReview = {
     commentCommitted: boolean;
 };
 
+// Measure-level discussion threads on the AI proposal diff (ephemeral, in-session).
+type AiThreadComment = {
+    id: string;
+    author: 'you' | 'assistant';
+    text: string;
+    createdAt: string;
+};
+
+type AiMeasureAnchor = {
+    key: string;
+    partIndex: number;
+    measureNumber: number;
+    leftIndex: number | null;
+    rightIndex: number | null;
+};
+
+type AiMeasureThread = AiMeasureAnchor & {
+    comments: AiThreadComment[];
+};
+
 type AiDiffBlockRef = Pick<BlockReview, 'partIndex' | 'blockIndex' | 'blockKey' | 'measureRange'>;
 
 type EditorTraceContext = {
@@ -1125,6 +1145,12 @@ export default function ScoreEditor() {
     const [changeReviewFocusedAnchorId, setChangeReviewFocusedAnchorId] = useState<string | null>(null);
     const [compareClickedMeasures, setCompareClickedMeasures] = useState<{ leftIndex: number | null; rightIndex: number | null; partIndex: number | null } | null>(null);
     const [aiDiffReviews, setAiDiffReviews] = useState<BlockReview[]>([]);
+    // Ephemeral, in-session measure-level threads on the AI proposal diff. Keyed by
+    // `${partIndex}:${rightIndex}:${leftIndex}` so one thread tracks a logical measure across
+    // both panes. Persists across feedback regenerations; cleared on a fresh proposal or close.
+    const [aiMeasureThreads, setAiMeasureThreads] = useState<Record<string, AiMeasureThread>>({});
+    const [aiFocusedMeasureAnchor, setAiFocusedMeasureAnchor] = useState<AiMeasureAnchor | null>(null);
+    const [aiMeasureThreadDraft, setAiMeasureThreadDraft] = useState('');
     const [aiDiffIteration, setAiDiffIteration] = useState(0);
     const [aiDiffGlobalComment, setAiDiffGlobalComment] = useState('');
     const [aiDiffFeedbackBusy, setAiDiffFeedbackBusy] = useState(false);
@@ -3032,6 +3058,44 @@ export default function ScoreEditor() {
             return;
         }
 
+        if (isAiCompareMode) {
+            // Anchor an ephemeral measure-level thread at the clicked measure (toggle on repeat).
+            let clickedPartIndex = 0;
+            if (comparePartCount > 1 && wrapperRef.current && positions) {
+                const el = positions.elements[measureIndex];
+                if (el) {
+                    const h = typeof el.sy === 'number' ? el.sy : (el as any).height ?? 0;
+                    const pageHeight = positions.pageSize?.height ?? 0;
+                    const needsPageOffset = pageHeight > 0 && el.page > 0 && (el.y + h) <= (pageHeight * 1.2);
+                    const pageOffset = needsPageOffset ? el.page * pageHeight : 0;
+                    const rect = wrapperRef.current.getBoundingClientRect();
+                    const scoreY = (event.clientY - rect.top) / compareEffectiveZoom;
+                    const relativeY = scoreY - (el.y + pageOffset);
+                    clickedPartIndex = Math.min(Math.max(Math.floor((relativeY / h) * comparePartCount), 0), comparePartCount - 1);
+                }
+            }
+            let leftIndex: number | null = side === 'left' ? measureIndex : null;
+            let rightIndex: number | null = side === 'right' ? measureIndex : null;
+            const alignment = compareAlignmentByPart.get(clickedPartIndex);
+            if (alignment) {
+                for (const row of alignment.rows) {
+                    const rowIdx = side === 'left' ? row.leftIndex : row.rightIndex;
+                    if (rowIdx === measureIndex) {
+                        leftIndex = row.leftIndex ?? null;
+                        rightIndex = row.rightIndex ?? null;
+                        break;
+                    }
+                }
+            }
+            const measureNumber = (rightIndex ?? leftIndex ?? measureIndex) + 1;
+            const key = `${clickedPartIndex}:${rightIndex ?? 'x'}:${leftIndex ?? 'x'}`;
+            setAiFocusedMeasureAnchor((prev) => (prev?.key === key
+                ? null
+                : { key, partIndex: clickedPartIndex, measureNumber, leftIndex, rightIndex }));
+            setAiMeasureThreadDraft('');
+            return;
+        }
+
         // Plain compare mode: focus the gutter block that contains this measure
         for (const [partIndex, alignment] of compareAlignmentByPart) {
             const blocks = buildMismatchBlocks(alignment.rows);
@@ -3065,6 +3129,7 @@ export default function ScoreEditor() {
         compareEffectiveZoom,
         hitTestMeasure,
         isChangeReviewCompareMode,
+        isAiCompareMode,
         compareSwapped,
         comparePartCount,
         changeReviewDiff,
@@ -6264,6 +6329,45 @@ ${partsBodyXml}
         setAiDiffBlockStatus,
     ]);
 
+    const handleAddAiMeasureComment = useCallback(() => {
+        const anchor = aiFocusedMeasureAnchor;
+        const text = aiMeasureThreadDraft.trim();
+        if (!anchor || !text) {
+            return;
+        }
+        const comment: AiThreadComment = {
+            id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            author: 'you',
+            text,
+            createdAt: new Date().toISOString(),
+        };
+        setAiMeasureThreads((prev) => {
+            const existing = prev[anchor.key];
+            const thread: AiMeasureThread = existing
+                ? { ...existing, comments: [...existing.comments, comment] }
+                : { ...anchor, comments: [comment] };
+            return { ...prev, [anchor.key]: thread };
+        });
+        setAiMeasureThreadDraft('');
+    }, [aiFocusedMeasureAnchor, aiMeasureThreadDraft]);
+
+    const handleRemoveAiMeasureComment = useCallback((key: string, commentId: string) => {
+        setAiMeasureThreads((prev) => {
+            const thread = prev[key];
+            if (!thread) {
+                return prev;
+            }
+            const comments = thread.comments.filter((entry) => entry.id !== commentId);
+            const next = { ...prev };
+            if (comments.length === 0) {
+                delete next[key];
+            } else {
+                next[key] = { ...thread, comments };
+            }
+            return next;
+        });
+    }, []);
+
     const handleSendDiffFeedback = useCallback(async () => {
         if (!compareView || !isAiCompareMode || aiDiffFeedbackBusy) {
             return;
@@ -6313,10 +6417,30 @@ ${partsBodyXml}
             status: block.status,
             ...(block.status === 'comment' ? { comment: (block.comment || '').trim() } : {}),
         }));
+        // Fold measure-level thread notes into the feedback as per-measure comment blocks so
+        // the model sees them on the next regeneration.
+        const threadFeedbackBlocks = Object.values(aiMeasureThreads)
+            .map((thread) => {
+                const userText = thread.comments
+                    .filter((entry) => entry.author === 'you')
+                    .map((entry) => entry.text.trim())
+                    .filter(Boolean)
+                    .join('\n');
+                return userText
+                    ? {
+                        partIndex: thread.partIndex,
+                        measureRange: String(thread.measureNumber),
+                        status: 'comment' as const,
+                        comment: userText,
+                    }
+                    : null;
+            })
+            .filter((block): block is { partIndex: number; measureRange: string; status: 'comment'; comment: string } => block !== null);
+        const allFeedbackBlocks = [...feedbackBlocks, ...threadFeedbackBlocks];
         const commentBlockKeys = feedbackEntries
             .filter((block) => block.status === 'comment')
             .map((block) => block.blockKey);
-        if (!feedbackBlocks.length) {
+        if (!allFeedbackBlocks.length) {
             return;
         }
 
@@ -6346,7 +6470,7 @@ ${partsBodyXml}
                 },
                 body: JSON.stringify({
                     content: currentXml,
-                    blocks: feedbackBlocks,
+                    blocks: allFeedbackBlocks,
                     globalComment: aiDiffGlobalComment,
                     iteration: aiDiffIteration,
                     provider: aiProvider,
@@ -6433,6 +6557,7 @@ ${partsBodyXml}
         aiModel,
         aiProvider,
         aiDiffReviews,
+        aiMeasureThreads,
         aiDiffCurrentBlocks,
         aiDiffReviewByKey,
         aiDiffReviewByRange,
@@ -7321,6 +7446,9 @@ ${partsBodyXml}
             setCompareRightCheckpointLabel('');
             if (!aiDiffFeedbackBusy) {
                 setAiDiffReviews([]);
+                setAiMeasureThreads({});
+                setAiFocusedMeasureAnchor(null);
+                setAiMeasureThreadDraft('');
                 setAiDiffIteration(0);
                 setAiDiffGlobalComment('');
                 setAiDiffFeedbackError(null);
@@ -8168,6 +8296,9 @@ ${partsBodyXml}
         setCompareSwapped(true);
         setAiDiffIteration(0);
         setAiDiffReviews([]);
+        setAiMeasureThreads({});
+        setAiFocusedMeasureAnchor(null);
+        setAiMeasureThreadDraft('');
         setAiDiffGlobalComment('');
         setAiDiffFeedbackBusy(false);
         setAiDiffFeedbackError(null);
@@ -16175,7 +16306,7 @@ ${partsBodyXml}
                                                             }}
                                                         />
                                                     )}
-                                                    {(isChangeReviewCompareMode || !isAiCompareMode) && compareLeftMeasurePositions && (
+                                                    {compareLeftMeasurePositions && (
                                                         <div
                                                             className="absolute inset-0 cursor-pointer"
                                                             style={{ pointerEvents: 'auto' }}
@@ -16213,6 +16344,98 @@ ${partsBodyXml}
                                         className={`flex min-h-0 flex-none flex-col items-stretch gap-2 ${(isAiCompareMode || isChangeReviewCompareMode) ? '' : 'w-44'}`}
                                         style={(isAiCompareMode || isChangeReviewCompareMode) ? { width: `${aiDiffGutterWidth}px` } : undefined}
                                     >
+                                        {isAiCompareMode && (aiFocusedMeasureAnchor || Object.keys(aiMeasureThreads).length > 0) && (
+                                            <div className="flex-none rounded border border-sky-200 bg-sky-50 p-2 text-[10px] text-gray-600">
+                                                <div className="mb-1 flex items-center justify-between">
+                                                    <span className="font-semibold text-sky-700">Measure notes</span>
+                                                    {aiFocusedMeasureAnchor && (
+                                                        <button
+                                                            type="button"
+                                                            className="text-sky-600 hover:underline"
+                                                            onClick={() => { setAiFocusedMeasureAnchor(null); setAiMeasureThreadDraft(''); }}
+                                                        >
+                                                            Close
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                {aiFocusedMeasureAnchor ? (
+                                                    <div className="space-y-1">
+                                                        <div className="text-[10px] text-gray-500">
+                                                            Part {aiFocusedMeasureAnchor.partIndex + 1} · Measure {aiFocusedMeasureAnchor.measureNumber}
+                                                        </div>
+                                                        {(aiMeasureThreads[aiFocusedMeasureAnchor.key]?.comments ?? []).map((entry) => (
+                                                            <div key={entry.id} className="rounded border border-gray-200 bg-white px-2 py-1">
+                                                                <div className="flex items-center justify-between text-[9px] text-gray-400">
+                                                                    <span className={entry.author === 'assistant' ? 'text-emerald-600' : 'text-sky-600'}>
+                                                                        {entry.author === 'assistant' ? 'Assistant' : 'You'}
+                                                                    </span>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="text-gray-400 hover:text-rose-500"
+                                                                        onClick={() => handleRemoveAiMeasureComment(aiFocusedMeasureAnchor.key, entry.id)}
+                                                                        aria-label="Remove note"
+                                                                    >
+                                                                        ×
+                                                                    </button>
+                                                                </div>
+                                                                <div className="whitespace-pre-wrap text-[10px] text-gray-700">{entry.text}</div>
+                                                            </div>
+                                                        ))}
+                                                        <textarea
+                                                            value={aiMeasureThreadDraft}
+                                                            onChange={(event) => setAiMeasureThreadDraft(event.target.value)}
+                                                            onKeyDown={(event) => {
+                                                                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                                                                    event.preventDefault();
+                                                                    handleAddAiMeasureComment();
+                                                                }
+                                                            }}
+                                                            placeholder="Add a note for this measure…"
+                                                            className="w-full rounded border border-gray-200 px-2 py-1 text-[10px]"
+                                                            rows={2}
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            disabled={!aiMeasureThreadDraft.trim()}
+                                                            onClick={handleAddAiMeasureComment}
+                                                            className="w-full rounded border border-sky-300 bg-white px-2 py-1 text-[10px] text-sky-700 hover:bg-sky-100 disabled:opacity-50"
+                                                        >
+                                                            Add note
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-[10px] text-gray-500">Click a measure in either pane to add a note.</div>
+                                                )}
+                                                {Object.keys(aiMeasureThreads).length > 0 && (
+                                                    <div className="mt-2 border-t border-sky-200 pt-1">
+                                                        <div className="mb-1 text-[9px] uppercase tracking-wide text-gray-400">Threads</div>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {Object.values(aiMeasureThreads)
+                                                                .sort((a, b) => a.measureNumber - b.measureNumber)
+                                                                .map((thread) => (
+                                                                    <button
+                                                                        key={thread.key}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setAiFocusedMeasureAnchor({
+                                                                                key: thread.key,
+                                                                                partIndex: thread.partIndex,
+                                                                                measureNumber: thread.measureNumber,
+                                                                                leftIndex: thread.leftIndex,
+                                                                                rightIndex: thread.rightIndex,
+                                                                            });
+                                                                            setAiMeasureThreadDraft('');
+                                                                        }}
+                                                                        className={`rounded border px-1 py-0.5 text-[9px] ${aiFocusedMeasureAnchor?.key === thread.key ? 'border-sky-400 bg-sky-100 text-sky-700' : 'border-gray-200 bg-white text-gray-600'}`}
+                                                                    >
+                                                                        m{thread.measureNumber} · {thread.comments.length}
+                                                                    </button>
+                                                                ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                         <div
                                             ref={compareGutterScrollRef}
                                             className="flex min-h-0 w-full flex-1 flex-col gap-3 overflow-x-visible overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2 text-[10px] text-gray-500"
@@ -16963,7 +17186,7 @@ ${partsBodyXml}
                                                             }}
                                                         />
                                                     )}
-                                                    {(isChangeReviewCompareMode || !isAiCompareMode) && compareRightMeasurePositions && (
+                                                    {compareRightMeasurePositions && (
                                                         <div
                                                             className="absolute inset-0 cursor-pointer"
                                                             style={{ pointerEvents: 'auto' }}
