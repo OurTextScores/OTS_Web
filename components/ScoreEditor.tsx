@@ -6383,7 +6383,9 @@ ${partsBodyXml}
             setAiPatchError(null);
             setAiPatchedXml(proposedXml);
             setAiBaseXml(currentXml);
-            setCompareSwapped(false);
+            // Keep the standard orientation (Current left/red, Proposal right/green) so Apply
+            // writes the proposal into the document. See openAiProposalCompare.
+            setCompareSwapped(true);
             setCompareView({
                 title: 'Assistant Proposal',
                 currentXml,
@@ -7275,9 +7277,6 @@ ${partsBodyXml}
         }
     };
 
-    const handleCompareSwapSides = useCallback(() => {
-        setCompareSwapped((prev) => !prev);
-    }, []);
 
     const handleOpenScoreInEditor = useCallback((side: 'left' | 'right') => {
         if (!compareView) return;
@@ -8163,7 +8162,10 @@ ${partsBodyXml}
         if (!trimmedBase || !trimmedProposed) {
             return false;
         }
-        setCompareSwapped(false);
+        // Standard diff orientation: Current on the LEFT (red/removed), Assistant Proposal on
+        // the RIGHT (green/added). compareSwapped=true selects that mapping and makes the
+        // per-block Apply / Apply-All handlers write the proposal INTO the document.
+        setCompareSwapped(true);
         setAiDiffIteration(0);
         setAiDiffReviews([]);
         setAiDiffGlobalComment('');
@@ -16009,7 +16011,7 @@ ${partsBodyXml}
                                             disabled={compareSwapBusy || aiDiffFeedbackBusy}
                                             className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                                         >
-                                            Accept All AI Changes
+                                            Apply All AI Changes
                                         </button>
                                         <button
                                             type="button"
@@ -16211,21 +16213,6 @@ ${partsBodyXml}
                                         className={`flex min-h-0 flex-none flex-col items-stretch gap-2 ${(isAiCompareMode || isChangeReviewCompareMode) ? '' : 'w-44'}`}
                                         style={(isAiCompareMode || isChangeReviewCompareMode) ? { width: `${aiDiffGutterWidth}px` } : undefined}
                                     >
-                                        <button
-                                            type="button"
-                                            onClick={handleCompareSwapSides}
-                                            disabled={isAiCompareMode || isChangeReviewCompareMode}
-                                            className="self-center rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                                            title={
-                                                isAiCompareMode
-                                                    ? 'Swap is disabled for assistant diff review.'
-                                                    : isChangeReviewCompareMode
-                                                        ? 'Swap is disabled for change review.'
-                                                        : 'Swap left and right panes'
-                                            }
-                                        >
-                                            ⇄ Swap
-                                        </button>
                                         <div
                                             ref={compareGutterScrollRef}
                                             className="flex min-h-0 w-full flex-1 flex-col gap-3 overflow-x-visible overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2 text-[10px] text-gray-500"
@@ -16627,7 +16614,7 @@ ${partsBodyXml}
                                                                                         } disabled:opacity-50`}
                                                                                         onClick={() => void handleAcceptAiDiffBlock(aiBlock, pairs)}
                                                                                     >
-                                                                                        Accept
+                                                                                        Apply
                                                                                     </button>
                                                                                     <button
                                                                                         type="button"
