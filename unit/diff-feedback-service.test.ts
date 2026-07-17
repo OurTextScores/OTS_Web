@@ -63,11 +63,14 @@ describe('diff-feedback-service', () => {
           }],
         },
         model: 'gpt-5.5',
+        proposedXml: '<score-partwise version="4.0"><part-list/></score-partwise>',
+        verification: {
+          level: 'patch_apply',
+          attempts: 1,
+          llmCalls: 1,
+          elapsedMs: 10,
+        },
       },
-    });
-    mocked.applyMusicXmlPatch.mockResolvedValue({
-      xml: '<score-partwise version="4.0"><part-list/></score-partwise>',
-      error: '',
     });
 
     const result = await runDiffFeedbackService({
@@ -99,7 +102,11 @@ describe('diff-feedback-service', () => {
       },
       proposedXml: '<score-partwise version="4.0"><part-list/></score-partwise>',
       model: 'gpt-5.5',
+      verification: {
+        level: 'patch_apply',
+      },
     });
+    expect(mocked.applyMusicXmlPatch).not.toHaveBeenCalled();
   });
 
   it('returns 400 for malformed block payloads', async () => {

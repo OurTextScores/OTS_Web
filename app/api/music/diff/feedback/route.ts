@@ -54,7 +54,7 @@ export async function POST(request: Request) {
         return access.response;
       }
     }
-    const result = await runDiffFeedbackService(body, { traceContext: trace });
+    const result = await runDiffFeedbackService(body, { traceContext: trace, signal: request.signal });
     status = result.status;
     const response = NextResponse.json(result.body, { status: result.status });
     applyTraceHeaders(response.headers, trace);

@@ -30,8 +30,17 @@ describe('runMusicRenderService', () => {
     }));
   });
 
-  it('fails if content is missing', async () => {
-    await expect(runMusicRenderService({ content: '' }))
-      .rejects.toThrow('Missing content');
+  it('returns a 400 result if content is missing', async () => {
+    const result = await runMusicRenderService({ content: '' });
+
+    expect(result).toMatchObject({
+      status: 400,
+      body: {
+        error: {
+          code: 'invalid_request',
+          message: 'Missing score content, session, or input artifact.',
+        },
+      },
+    });
   });
 });

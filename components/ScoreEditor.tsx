@@ -625,13 +625,6 @@ const AI_PDF_ATTACHMENT_MAX_BYTES = 15 * 1024 * 1024;
 const AI_CHAT_CONTEXT_MAX_CHARS = 40_000;
 const AI_CHAT_CONTEXT_MAX_MESSAGES = 24;
 const AI_PATCH_SYSTEM_PROMPT = 'You are a MusicXML editor. Return only a single JSON object (musicxml-patch@1) — the patch and an optional "annotations" array. No markdown or prose outside the JSON.';
-const AI_PATCH_STRICT_RETRY_SUFFIX = [
-    'IMPORTANT RETRY INSTRUCTIONS:',
-    'Return ONLY the raw JSON object for a musicxml-patch@1 payload.',
-    'Do not wrap in markdown fences.',
-    'Do not include commentary before or after the JSON.',
-].join('\n');
-const AI_PATCH_REQUEST_RETRY_DELAY_MS = 600;
 const AI_DIFF_GUTTER_DEFAULT_WIDTH = 360;
 const AI_DIFF_GUTTER_MIN_WIDTH = 360;
 const AI_DIFF_GUTTER_MAX_WIDTH = 1280;
@@ -984,28 +977,6 @@ const formatAiDiffFeedbackError = (message: string) => {
     }
     return trimmed;
 };
-
-const shouldRetryAiPatchRequestError = (err: unknown) => {
-    const message = errorMessage(err).toLowerCase();
-    if (!message) {
-        return true;
-    }
-    if (
-        message.includes('missing api') ||
-        message.includes('invalid api') ||
-        message.includes('unauthorized') ||
-        message.includes('forbidden') ||
-        message.includes('unsupported') ||
-        message.includes('does not support pdf') ||
-        message.includes('select a model') ||
-        message.includes('missing model')
-    ) {
-        return false;
-    }
-    return true;
-};
-
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export default function ScoreEditor() {
     const searchParams = useSearchParams();
@@ -3887,14 +3858,6 @@ ${partsBodyXml}
         return () => clearTimeout(timer);
     }, [score, openScoreSession]);
 
-    const extractJsonFromResponse = (responseText: string) => {
-        const fenced = responseText.match(/```(?:json)?\s*([\s\S]*?)```/i);
-        if (fenced) {
-            return fenced[1].trim();
-        }
-        return responseText.trim();
-    };
-
     const parseMusicXmlPatch = (text: string) => {
         if (!text.trim()) {
             return { patch: null as MusicXmlPatch | null, error: 'AI response is empty.' };
@@ -4122,41 +4085,31 @@ ${partsBodyXml}
                     error = '';
                 }
             }
-            if (op.op === 'delete' && nodes.length === 0 && !error) {
-                continue;
-            }
             if (error || nodes.length === 0) {
                 return { xml: '', error: `Patch op ${i + 1} failed: ${error || 'Target not found.'}` };
-            }
-            if (op.op === 'setText') {
-                for (const node of nodes) {
-                    node.textContent = op.value ?? '';
-                }
-                continue;
-            }
-            if (op.op === 'setAttr') {
-                for (const node of nodes) {
-                    if (node.nodeType !== Node.ELEMENT_NODE) {
-                        return { xml: '', error: `Patch op ${i + 1} targets a non-element node.` };
-                    }
-                    (node as Element).setAttribute(op.name ?? '', op.value ?? '');
-                }
-                continue;
-            }
-            if (op.op === 'delete') {
-                for (let nodeIndex = nodes.length - 1; nodeIndex >= 0; nodeIndex -= 1) {
-                    const node = nodes[nodeIndex];
-                    if (!node.parentNode) {
-                        continue;
-                    }
-                    node.parentNode.removeChild(node);
-                }
-                continue;
             }
             if (nodes.length !== 1) {
                 return { xml: '', error: `Patch op ${i + 1} failed: XPath "${op.path}" matched ${nodes.length} nodes.` };
             }
             const node = nodes[0];
+            if (op.op === 'setText') {
+                node.textContent = op.value ?? '';
+                continue;
+            }
+            if (op.op === 'setAttr') {
+                if (node.nodeType !== Node.ELEMENT_NODE) {
+                    return { xml: '', error: `Patch op ${i + 1} targets a non-element node.` };
+                }
+                (node as Element).setAttribute(op.name ?? '', op.value ?? '');
+                continue;
+            }
+            if (op.op === 'delete') {
+                if (!node.parentNode) {
+                    return { xml: '', error: `Patch op ${i + 1} target has no parent.` };
+                }
+                node.parentNode.removeChild(node);
+                continue;
+            }
             const fragment = parseFragment(op.value ?? '');
             if (fragment.error || !fragment.node) {
                 return { xml: '', error: `Patch op ${i + 1} failed: ${fragment.error || 'Invalid value.'}` };
@@ -8385,82 +8338,6 @@ ${partsBodyXml}
         return { text, sourceRag: null };
     };
 
-    const requestAiPatchTextWithRetry = async (payload: Parameters<typeof requestAiText>[0]) => {
-        const requestPatchAttempt = async (attemptLabel: string) => {
-            try {
-                return await requestAiText(payload);
-            } catch (err) {
-                if (!shouldRetryAiPatchRequestError(err)) {
-                    throw err;
-                }
-                console.warn('[AI] Patch request failed; retrying once on the same provider.', {
-                    provider: payload.provider,
-                    model: payload.model,
-                    attempt: attemptLabel,
-                    error: errorMessage(err) || String(err),
-                });
-                await sleep(AI_PATCH_REQUEST_RETRY_DELAY_MS);
-                return requestAiText(payload);
-            }
-        };
-
-        const firstResult = await requestPatchAttempt('initial');
-        const firstRawText = firstResult.text;
-        const firstExtracted = extractJsonFromResponse(firstRawText);
-        const firstParsed = firstExtracted ? parseMusicXmlPatch(firstExtracted) : { patch: null, error: 'missing' };
-        if (firstExtracted && !firstParsed.error && firstParsed.patch) {
-            return {
-                rawText: firstRawText,
-                extracted: firstExtracted,
-                retried: false,
-            };
-        }
-
-        console.warn('[AI] Patch response did not contain JSON patch payload on first attempt. Retrying with stricter JSON instructions.', {
-            provider: payload.provider,
-            model: payload.model,
-        });
-
-        const retryHint = firstParsed.error && firstParsed.error !== 'missing'
-            ? [
-                'PREVIOUS PATCH ERROR:',
-                firstParsed.error,
-                'Fix the patch structure and return valid JSON only.',
-            ].join('\n')
-            : '';
-        const retryPromptText = [payload.promptText.trim(), retryHint, AI_PATCH_STRICT_RETRY_SUFFIX]
-            .filter(Boolean)
-            .join('\n\n');
-        const retryPayload = {
-            ...payload,
-            promptText: retryPromptText,
-            systemPrompt: AI_PATCH_SYSTEM_PROMPT,
-        };
-        const retryResult = await (async () => {
-            try {
-                return await requestAiText(retryPayload);
-            } catch (err) {
-                if (!shouldRetryAiPatchRequestError(err)) {
-                    throw err;
-                }
-                console.warn('[AI] Strict-JSON patch retry request failed; retrying once on the same provider.', {
-                    provider: payload.provider,
-                    model: payload.model,
-                    error: errorMessage(err) || String(err),
-                });
-                await sleep(AI_PATCH_REQUEST_RETRY_DELAY_MS);
-                return requestAiText(retryPayload);
-            }
-        })();
-        const retryRawText = retryResult.text;
-        const retryExtracted = extractJsonFromResponse(retryRawText);
-        return {
-            rawText: retryRawText,
-            extracted: retryExtracted,
-            retried: true,
-        };
-    };
-
     const openAiProposalCompare = useCallback((baseXml: string, proposedXml: string) => {
         const trimmedBase = baseXml.trim();
         const trimmedProposed = proposedXml.trim();
@@ -8623,46 +8500,71 @@ ${partsBodyXml}
                 console.warn('Rendered image context requested, but PNG capture is unavailable.');
             }
             const baseXml = aiIncludeXml ? xmlContext : await resolveXmlContext();
+            if (!baseXml.trim()) {
+                failureReason = 'Unable to load MusicXML for patch verification.';
+                setAiError(failureReason);
+                return;
+            }
             setAiBaseXml(baseXml);
             const maxTokens = aiMaxTokensMode === 'custom' ? aiMaxTokens : null;
             const promptText = buildAiPrompt(aiPrompt, promptSections);
             requestIssued = true;
             telemetryCountersRef.current.aiRequests += 1;
-            const patchResponse = await requestAiPatchTextWithRetry({
-                provider: aiProvider,
-                apiKey: aiApiKey,
-                model: aiModel,
-                promptText,
-                systemPrompt: AI_PATCH_SYSTEM_PROMPT,
-                prompt: aiPrompt,
-                xml: aiIncludeXml ? xmlContext : '',
-                image: imageAttachment,
-                pdf: pdfAttachment,
-                maxTokens,
-                temperature: aiTemperatureMode === 'custom' ? aiTemperature : null,
+            const response = await fetch(resolveScoreEditorApiPath('/api/music/patch'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    content: baseXml,
+                    promptText,
+                    provider: aiProvider,
+                    apiKey: aiApiKey.trim(),
+                    model: aiModel.trim(),
+                    image: imageAttachment,
+                    pdf: pdfAttachment,
+                    maxTokens,
+                    temperature: aiTemperatureMode === 'custom' ? aiTemperature : null,
+                }),
             });
-            if (!patchResponse.extracted) {
-                const missingPatchMessage = patchResponse.retried
-                    ? 'No patch was returned by the model after a retry with stricter JSON instructions.'
-                    : 'No patch was returned by the model.';
-                failureReason = missingPatchMessage;
-                setAiOutput(patchResponse.rawText || '');
-                setAiError(missingPatchMessage);
-                return;
+            captureApiTraceContext(response.headers);
+            const payload = await response.json().catch(() => ({}));
+            const result = asRecord(payload) || {};
+            if (!response.ok) {
+                const message = typeof result.error === 'string'
+                    ? result.error
+                    : `Patch request failed: ${response.status}`;
+                throw new Error(message);
             }
-            const updated = await updateAiOutput(patchResponse.extracted, baseXml);
-            if (!updated.ok) {
-                failureReason = updated.error || 'Failed to build proposed MusicXML from patch.';
-                setAiError(failureReason);
-                return;
+
+            const verification = asRecord(result.verification);
+            if (verification?.level !== 'patch_apply') {
+                throw new Error('Patch service returned an unverified proposal.');
             }
-            if (!openAiProposalCompare(updated.baseXml, updated.proposedXml)) {
+            const patchPayload = asRecord(result.patch);
+            const parsedPatch = parseMusicXmlPatch(JSON.stringify(patchPayload || {}));
+            if (parsedPatch.error || !parsedPatch.patch) {
+                throw new Error(parsedPatch.error || 'Patch service returned an invalid patch payload.');
+            }
+            const proposedXml = typeof result.proposedXml === 'string' ? result.proposedXml.trim() : '';
+            if (!proposedXml) {
+                throw new Error('Patch service returned empty proposed MusicXML.');
+            }
+
+            const annotations = extractPatchAnnotations({ annotations: result.annotations });
+            setAiOutput(JSON.stringify({
+                ...parsedPatch.patch,
+                ...(annotations.length ? { annotations } : {}),
+            }, null, 2));
+            setAiPatch(parsedPatch.patch);
+            setAiPatchError(null);
+            setAiPatchedXml(proposedXml);
+            setAiLastAnnotations(annotations);
+            if (!openAiProposalCompare(baseXml, proposedXml)) {
                 failureReason = 'Unable to open compare view for AI proposal.';
                 setAiError(failureReason);
                 return;
             }
             // openAiProposalCompare resets threads, so seed the assistant annotations after it.
-            mergeAiAnnotations(updated.annotations);
+            mergeAiAnnotations(annotations);
             outcome = 'success';
         } catch (err) {
             console.error('AI request failed', err);

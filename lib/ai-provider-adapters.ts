@@ -174,12 +174,12 @@ export const isOpenAiCompatibleProvider = (provider: AiProvider): provider is Op
     OPENAI_COMPATIBLE_PROVIDERS.has(provider as OpenAiCompatibleAiProvider)
 );
 
-type TextImageAttachment = {
+export type TextImageAttachment = {
     mediaType: string;
     base64: string;
 };
 
-type TextPdfAttachment = {
+export type TextPdfAttachment = {
     mediaType: string;
     base64: string;
     filename?: string;
@@ -196,6 +196,8 @@ export type RequestAiTextDirectArgs = {
     modelDescriptor?: AiModelDescriptor | null;
     image?: TextImageAttachment | null;
     pdf?: TextPdfAttachment | null;
+    signal?: AbortSignal;
+    onRequest?: () => void;
 };
 
 export type LoadAiModelsDirectArgs = {
@@ -360,6 +362,8 @@ export async function requestAiTextDirect({
     modelDescriptor = null,
     image = null,
     pdf = null,
+    signal,
+    onRequest,
 }: RequestAiTextDirectArgs): Promise<string> {
     const hasImage = Boolean(image?.base64);
     const hasPdf = Boolean(pdf?.base64);
@@ -412,6 +416,7 @@ export async function requestAiTextDirect({
             if (maxTokens) {
                 responsePayload.max_output_tokens = maxTokens;
             }
+            onRequest?.();
             const response = await fetch(`${providerBaseUrl}/responses`, {
                 method: 'POST',
                 headers: {
@@ -419,6 +424,7 @@ export async function requestAiTextDirect({
                     Authorization: `Bearer ${apiKey}`,
                 },
                 body: JSON.stringify(responsePayload),
+                signal,
             });
             if (response.ok) {
                 const data = await response.json();
@@ -446,6 +452,7 @@ export async function requestAiTextDirect({
             if (maxTokens) {
                 fallbackPayload.max_tokens = maxTokens;
             }
+            onRequest?.();
             const fallbackResponse = await fetch(`${providerBaseUrl}/chat/completions`, {
                 method: 'POST',
                 headers: {
@@ -453,6 +460,7 @@ export async function requestAiTextDirect({
                     Authorization: `Bearer ${apiKey}`,
                 },
                 body: JSON.stringify(fallbackPayload),
+                signal,
             });
             if (!fallbackResponse.ok) {
                 const fallbackError = await fallbackResponse.text();
@@ -479,6 +487,7 @@ export async function requestAiTextDirect({
         if (maxTokens) {
             payload[provider === 'kimi' ? 'max_completion_tokens' : 'max_tokens'] = maxTokens;
         }
+        onRequest?.();
         const response = await fetch(`${providerBaseUrl}/chat/completions`, {
             method: 'POST',
             headers: {
@@ -486,6 +495,7 @@ export async function requestAiTextDirect({
                 Authorization: `Bearer ${apiKey}`,
             },
             body: JSON.stringify(payload),
+            signal,
         });
         if (!response.ok) {
             const errorText = await response.text();
@@ -517,6 +527,7 @@ export async function requestAiTextDirect({
                 },
             });
         }
+        onRequest?.();
         const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
@@ -531,6 +542,7 @@ export async function requestAiTextDirect({
                 system: systemPrompt,
                 messages: [{ role: 'user', content: anthropicContent }],
             }),
+            signal,
         });
         if (!response.ok) {
             const errorText = await response.text();
@@ -575,6 +587,7 @@ export async function requestAiTextDirect({
     if (maxTokens) {
         (geminiPayload.generationConfig as Record<string, unknown>).maxOutputTokens = maxTokens;
     }
+    onRequest?.();
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${normalizedModel}:generateContent`, {
         method: 'POST',
         headers: {
@@ -582,6 +595,7 @@ export async function requestAiTextDirect({
             'x-goog-api-key': apiKey,
         },
         body: JSON.stringify(geminiPayload),
+        signal,
     });
     if (!response.ok) {
         const errorText = await response.text();

@@ -1,10 +1,7 @@
 import { asRecord, normalizeScoreSessionId, resolveScoreContent, type ServiceResult } from './common';
 import {
-  applyMusicXmlPatch,
-  parseMusicXmlPatch,
   resolveProvider,
   runMusicPatchService,
-  type MusicXmlPatch,
 } from './patch-service';
 import { type TraceContext } from '../trace-http';
 
@@ -161,7 +158,7 @@ export function buildFeedbackPrompt(args: {
 
 export async function runDiffFeedbackService(
   body: unknown,
-  options?: { traceContext?: TraceContext },
+  options?: { traceContext?: TraceContext; signal?: AbortSignal },
 ): Promise<ServiceResult> {
   const data = asRecord(body);
   const parsedBlocks = parseBlocks(data?.blocks);
@@ -227,26 +224,15 @@ export async function runDiffFeedbackService(
   }
 
   const patchPayload = asRecord(patchResult.body.patch);
-  const parsedPatch = parseMusicXmlPatch(JSON.stringify(patchPayload || {}));
-  if (parsedPatch.error || !parsedPatch.patch) {
+  const proposedXml = typeof patchResult.body.proposedXml === 'string'
+    ? patchResult.body.proposedXml.trim()
+    : '';
+  if (patchPayload?.format !== 'musicxml-patch@1' || !Array.isArray(patchPayload.ops) || !proposedXml) {
     // TODO: emit `assistant_diff_feedback_response_failure` telemetry.
     return {
       status: 422,
       body: {
-        error: parsedPatch.error || 'Generated patch payload was invalid.',
-        feedbackPrompt,
-      },
-    };
-  }
-
-  const applied = await applyMusicXmlPatch(resolution.xml, parsedPatch.patch as MusicXmlPatch);
-  if (applied.error || !applied.xml.trim()) {
-    // TODO: emit `assistant_diff_feedback_response_failure` telemetry.
-    return {
-      status: 422,
-      body: {
-        error: applied.error || 'Failed to apply revised patch to current score XML.',
-        patch: parsedPatch.patch,
+        error: 'Patch service did not return an apply-verified proposal.',
         feedbackPrompt,
       },
     };
@@ -259,13 +245,13 @@ export async function runDiffFeedbackService(
       scoreSessionId: resolution.session?.scoreSessionId ?? normalizeScoreSessionId(data),
       baseRevision: resolution.session?.revision ?? (typeof data?.baseRevision === 'number' ? data.baseRevision : null),
       iteration: iteration + 1,
-      patch: parsedPatch.patch,
+      patch: patchPayload,
       annotations: Array.isArray(patchResult.body.annotations) ? patchResult.body.annotations : [],
-      proposedXml: applied.xml,
+      proposedXml,
+      verification: patchResult.body.verification,
       feedbackPrompt,
       provider,
       model: typeof patchResult.body.model === 'string' ? patchResult.body.model : model,
-      retried: Boolean(patchResult.body.retried),
     },
   };
 }

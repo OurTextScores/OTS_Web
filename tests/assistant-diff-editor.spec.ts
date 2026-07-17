@@ -7,7 +7,7 @@ const OPENAI_MODELS_RESPONSE = {
 const SCORE_SESSION_ID = 'sess_assistant_diff_test';
 
 const PATCH_RESPONSE = {
-  text: JSON.stringify({
+  patch: {
     format: 'musicxml-patch@1',
     ops: [
       {
@@ -16,7 +16,15 @@ const PATCH_RESPONSE = {
         value: 'G',
       },
     ],
-  }),
+  },
+  annotations: [],
+  proposedXml: '',
+  verification: {
+    level: 'patch_apply',
+    attempts: 1,
+    llmCalls: 1,
+    elapsedMs: 5,
+  },
 };
 
 const buildThreeNotesXml = (firstStep: string) => `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
@@ -70,6 +78,8 @@ const buildThreeNotesXml = (firstStep: string) => `<?xml version="1.0" encoding=
   </part>
 </score-partwise>`;
 
+PATCH_RESPONSE.proposedXml = buildThreeNotesXml('G');
+
 const buildDiffFeedbackResponse = (step: string, iteration: number) => ({
   scoreSessionId: SCORE_SESSION_ID,
   baseRevision: iteration,
@@ -85,6 +95,12 @@ const buildDiffFeedbackResponse = (step: string, iteration: number) => ({
     ],
   },
   proposedXml: buildThreeNotesXml(step),
+  verification: {
+    level: 'patch_apply',
+    attempts: 1,
+    llmCalls: 1,
+    elapsedMs: 5,
+  },
   feedbackPrompt: `PATCH REVISION FEEDBACK (iteration ${Math.max(0, iteration - 1)})`,
 });
 
@@ -136,11 +152,21 @@ test.describe('Assistant diff editor flow', () => {
   });
 
   test('patch generation opens compare modal and supports accept-all', async ({ page }) => {
-    await page.route('**/api/llm/openai', async (route) => {
+    let patchRequest: Record<string, unknown> | null = null;
+    await page.route('**/api/music/patch', async (route) => {
+      patchRequest = route.request().postDataJSON();
       await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
     });
 
     await openAssistantProposalCompare(page);
+
+    expect(patchRequest).toMatchObject({
+      provider: 'openai',
+      model: 'gpt-test-model',
+      apiKey: 'test-key',
+    });
+    expect(String(patchRequest?.content)).toContain('<score-partwise');
+    expect(String(patchRequest?.promptText)).toContain('Change the first note to G.');
 
     await expect.poll(async () => (
       await page.getByTestId('compare-left-highlight').count()
@@ -156,10 +182,10 @@ test.describe('Assistant diff editor flow', () => {
   });
 
   test('invalid patch response shows error and does not open compare modal', async ({ page }) => {
-    await page.route('**/api/llm/openai', async (route) => {
+    await page.route('**/api/music/patch', async (route) => {
       await route.fulfill({
-        status: 200,
-        body: JSON.stringify({ text: 'not-json' }),
+        status: 422,
+        body: JSON.stringify({ error: 'AI response is not valid JSON.' }),
       });
     });
 
@@ -177,8 +203,32 @@ test.describe('Assistant diff editor flow', () => {
     await expect(page.getByTestId('checkpoint-compare-modal')).toHaveCount(0);
   });
 
-  test('per-block apply applies the reviewed block immediately', async ({ page }) => {
+  test('missing verified patch endpoint does not fall back to a direct LLM proxy', async ({ page }) => {
+    let genericLlmCalls = 0;
+    await page.route('**/api/music/patch', async (route) => {
+      await route.fulfill({ status: 404, body: '{}' });
+    });
     await page.route('**/api/llm/openai', async (route) => {
+      genericLlmCalls += 1;
+      await route.fulfill({ status: 200, body: JSON.stringify({ text: 'unverified' }) });
+    });
+
+    await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
+    await page.waitForSelector('svg .Note', { timeout: 60_000 });
+    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('tab-ai').click();
+    await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
+    await page.getByPlaceholder('Paste your key').fill('test-key');
+    await page.getByPlaceholder('Describe the change you want in the MusicXML.').fill('Change the first note to G.');
+    await page.getByRole('button', { name: 'Generate Patch' }).click();
+
+    await expect(page.getByText('Patch request failed: 404').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('checkpoint-compare-modal')).toHaveCount(0);
+    expect(genericLlmCalls).toBe(0);
+  });
+
+  test('per-block apply applies the reviewed block immediately', async ({ page }) => {
+    await page.route('**/api/music/patch', async (route) => {
       await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
     });
 
@@ -192,7 +242,7 @@ test.describe('Assistant diff editor flow', () => {
   });
 
   test('per-block reject marks block and leaves score unchanged', async ({ page }) => {
-    await page.route('**/api/llm/openai', async (route) => {
+    await page.route('**/api/music/patch', async (route) => {
       await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
     });
 
@@ -206,7 +256,7 @@ test.describe('Assistant diff editor flow', () => {
   });
 
   test('per-block comment reveals input and stores text', async ({ page }) => {
-    await page.route('**/api/llm/openai', async (route) => {
+    await page.route('**/api/music/patch', async (route) => {
       await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
     });
 
@@ -230,7 +280,7 @@ test.describe('Assistant diff editor flow', () => {
       releaseFeedback = resolve;
     });
 
-    await page.route('**/api/llm/openai', async (route) => {
+    await page.route('**/api/music/patch', async (route) => {
       await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
     });
     await page.route('**/api/music/diff/feedback', async (route) => {
@@ -264,7 +314,7 @@ test.describe('Assistant diff editor flow', () => {
   test('global comment is sent in diff feedback request', async ({ page }) => {
     let capturedGlobalComment = '';
 
-    await page.route('**/api/llm/openai', async (route) => {
+    await page.route('**/api/music/patch', async (route) => {
       await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
     });
     await page.route('**/api/music/diff/feedback', async (route) => {
@@ -290,7 +340,7 @@ test.describe('Assistant diff editor flow', () => {
     let callCount = 0;
     const requests: any[] = [];
 
-    await page.route('**/api/llm/openai', async (route) => {
+    await page.route('**/api/music/patch', async (route) => {
       await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
     });
     await page.route('**/api/music/diff/feedback', async (route) => {

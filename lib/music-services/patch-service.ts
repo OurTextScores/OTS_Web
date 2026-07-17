@@ -1,13 +1,16 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   type AiProvider,
+  type RequestAiTextDirectArgs,
+  type TextImageAttachment,
+  type TextPdfAttachment,
   requestAiTextDirect,
 } from '../ai-provider-adapters';
 import { allowServerCredentialFallback } from '../api-access-control';
 import { extractPatchAnnotations, PATCH_ANNOTATIONS_INSTRUCTION } from '../patch-annotations';
 import { summarizeScoreArtifact } from '../score-artifacts';
 import { type TraceContext } from '../trace-http';
-import { asRecord, resolveScoreContent } from './common';
+import { asRecord, looksLikeMusicXml, resolveScoreContent } from './common';
 
 type PatchServiceResult = {
   status: number;
@@ -27,13 +30,21 @@ export type MusicXmlPatch = {
 };
 
 const AI_PATCH_SYSTEM_PROMPT = 'You are a MusicXML editor. Return only a single JSON object (musicxml-patch@1) — the patch and an optional "annotations" array. No markdown or prose outside the JSON.';
-const AI_PATCH_STRICT_RETRY_SUFFIX = [
-  'IMPORTANT RETRY INSTRUCTIONS:',
-  'Return ONLY the raw JSON object for a musicxml-patch@1 payload.',
-  'Do not wrap in markdown fences.',
-  'Do not include commentary before or after the JSON.',
-].join('\n');
 const AI_PATCH_REQUEST_RETRY_DELAY_MS = 600;
+
+const DEFAULT_PATCH_MAX_ATTEMPTS = 3;
+const DEFAULT_PATCH_TRANSPORT_RETRIES = 1;
+const DEFAULT_PATCH_BUDGET_MS = 120_000;
+const DEFAULT_AI_REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_PATCH_MAX_CONTENT_BYTES = 10 * 1024 * 1024;
+const DEFAULT_PATCH_MAX_PROMPT_CHARS = 12 * 1024 * 1024;
+const DEFAULT_PATCH_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const DEFAULT_PATCH_MAX_PDF_BYTES = 15 * 1024 * 1024;
+const DEFAULT_PATCH_MAX_CANDIDATE_CHARS = 200_000;
+const DEFAULT_PATCH_MAX_OUTPUT_BYTES = 15 * 1024 * 1024;
+const MAX_PATCH_ATTEMPTS = 8;
+const MAX_PATCH_TRANSPORT_RETRIES = 3;
+const MAX_PATCH_BUDGET_MS = 10 * 60_000;
 
 type XmlDomBindings = {
   DOMParser: new () => DOMParser;
@@ -418,41 +429,31 @@ export async function applyMusicXmlPatch(baseXml: string, patch: MusicXmlPatch) 
         error = '';
       }
     }
-    if (op.op === 'delete' && nodes.length === 0 && !error) {
-      continue;
-    }
     if (error || nodes.length === 0) {
       return { xml: '', error: `Patch op ${i + 1} failed: ${error || 'Target not found.'}` };
-    }
-    if (op.op === 'setText') {
-      for (const node of nodes) {
-        node.textContent = op.value ?? '';
-      }
-      continue;
-    }
-    if (op.op === 'setAttr') {
-      for (const node of nodes) {
-        if (node.nodeType !== bindings.Node.ELEMENT_NODE) {
-          return { xml: '', error: `Patch op ${i + 1} targets a non-element node.` };
-        }
-        (node as Element).setAttribute(op.name ?? '', op.value ?? '');
-      }
-      continue;
-    }
-    if (op.op === 'delete') {
-      for (let nodeIndex = nodes.length - 1; nodeIndex >= 0; nodeIndex -= 1) {
-        const node = nodes[nodeIndex];
-        if (!node.parentNode) {
-          continue;
-        }
-        node.parentNode.removeChild(node);
-      }
-      continue;
     }
     if (nodes.length !== 1) {
       return { xml: '', error: `Patch op ${i + 1} failed: XPath "${op.path}" matched ${nodes.length} nodes.` };
     }
     const node = nodes[0];
+    if (op.op === 'setText') {
+      node.textContent = op.value ?? '';
+      continue;
+    }
+    if (op.op === 'setAttr') {
+      if (node.nodeType !== bindings.Node.ELEMENT_NODE) {
+        return { xml: '', error: `Patch op ${i + 1} targets a non-element node.` };
+      }
+      (node as Element).setAttribute(op.name ?? '', op.value ?? '');
+      continue;
+    }
+    if (op.op === 'delete') {
+      if (!node.parentNode) {
+        return { xml: '', error: `Patch op ${i + 1} target has no parent.` };
+      }
+      node.parentNode.removeChild(node);
+      continue;
+    }
     const fragment = parseFragment(op.value ?? '');
     if (fragment.error || !fragment.node) {
       return { xml: '', error: `Patch op ${i + 1} failed: ${fragment.error || 'Invalid value.'}` };
@@ -478,94 +479,282 @@ export async function applyMusicXmlPatch(baseXml: string, patch: MusicXmlPatch) 
   return { xml: serializer.serializeToString(doc), error: '' };
 }
 
-type RequestPatchTextArgs = {
+export type PatchApplyVerification = {
+  level: 'patch_apply';
+  attempts: number;
+  llmCalls: number;
+  elapsedMs: number;
+};
+
+export type PatchAttemptFailure = {
+  attempt: number;
+  category: 'parse' | 'apply' | 'output_size';
+  error: string;
+};
+
+export type GenerateApplyVerifiedPatchArgs = {
   provider: AiProvider;
   apiKey: string;
   model: string;
+  baseXml: string;
   promptText: string;
   maxTokens: number | null;
+  temperature?: number | null;
+  image?: TextImageAttachment | null;
+  pdf?: TextPdfAttachment | null;
+  signal?: AbortSignal;
+  requestText?: (args: RequestAiTextDirectArgs) => Promise<string>;
 };
 
-async function requestAiPatchTextWithRetry(args: RequestPatchTextArgs) {
-  const requestPatchAttempt = async (attemptLabel: string) => {
-    try {
-      return await requestAiTextDirect({
-        provider: args.provider,
-        apiKey: args.apiKey,
-        model: args.model,
-        promptText: args.promptText,
-        systemPrompt: AI_PATCH_SYSTEM_PROMPT,
-        maxTokens: args.maxTokens,
-      });
-    } catch (error) {
-      const message = errorMessage(error).toLowerCase();
-      const shouldRetryRequest = !(
-        message.includes('missing api')
-        || message.includes('invalid api')
-        || message.includes('unauthorized')
-        || message.includes('forbidden')
-      );
-      if (!shouldRetryRequest) {
-        throw error;
+export type GenerateApplyVerifiedPatchResult = {
+  ok: true;
+  patch: MusicXmlPatch;
+  annotations: ReturnType<typeof extractPatchAnnotations>;
+  proposedXml: string;
+  verification: PatchApplyVerification;
+} | {
+  ok: false;
+  status: 422 | 502 | 504;
+  error: string;
+  failures: PatchAttemptFailure[];
+  verification: PatchApplyVerification;
+};
+
+const readClampedEnvInteger = (name: string, fallback: number, minimum: number, maximum: number) => {
+  const value = Number(process.env[name]);
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(maximum, Math.max(minimum, Math.floor(value)));
+};
+
+const byteLength = (value: string) => new TextEncoder().encode(value).byteLength;
+
+const estimateBase64Bytes = (value: string) => {
+  const normalized = value.replace(/^data:[^,]*,/, '').replace(/\s+/g, '');
+  if (!normalized) {
+    return 0;
+  }
+  const padding = normalized.endsWith('==') ? 2 : normalized.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
+};
+
+const boundCandidate = (value: string, maximum: number) => {
+  if (value.length <= maximum) {
+    return value;
+  }
+  return `${value.slice(0, maximum)}\n[Previous candidate truncated at ${maximum} characters.]`;
+};
+
+const buildRepairContext = (candidate: string, failure: string, maximumCandidateChars: number) => [
+  'PATCH REPAIR REQUIRED:',
+  'The previous candidate did not apply to the supplied base MusicXML.',
+  '',
+  'PREVIOUS CANDIDATE:',
+  boundCandidate(candidate, maximumCandidateChars),
+  '',
+  'EXACT PARSE/APPLY ERROR:',
+  failure,
+  '',
+  'Return the full corrected musicxml-patch@1 JSON object only. Do not return a partial diff, markdown, or commentary.',
+].join('\n');
+
+const isRetryableTransportError = (error: unknown) => {
+  const message = errorMessage(error).toLowerCase();
+  return !(
+    message.includes('missing api')
+    || message.includes('invalid api')
+    || message.includes('unauthorized')
+    || message.includes('forbidden')
+    || message.includes('unsupported')
+    || message.includes('not supported')
+    || message.includes('not confirmed')
+    || message.includes('invalid request')
+    || message.includes('content policy')
+  );
+};
+
+const verificationFor = (startedAt: number, attempts: number, llmCalls: number): PatchApplyVerification => ({
+  level: 'patch_apply',
+  attempts,
+  llmCalls,
+  elapsedMs: Math.max(0, Date.now() - startedAt),
+});
+
+export async function generateApplyVerifiedPatch(
+  args: GenerateApplyVerifiedPatchArgs,
+): Promise<GenerateApplyVerifiedPatchResult> {
+  const startedAt = Date.now();
+  const maximumAttempts = readClampedEnvInteger('MUSIC_PATCH_MAX_ATTEMPTS', DEFAULT_PATCH_MAX_ATTEMPTS, 1, MAX_PATCH_ATTEMPTS);
+  const transportRetries = readClampedEnvInteger(
+    'MUSIC_PATCH_TRANSPORT_RETRIES',
+    DEFAULT_PATCH_TRANSPORT_RETRIES,
+    0,
+    MAX_PATCH_TRANSPORT_RETRIES,
+  );
+  const budgetMs = readClampedEnvInteger('MUSIC_PATCH_BUDGET_MS', DEFAULT_PATCH_BUDGET_MS, 1, MAX_PATCH_BUDGET_MS);
+  const requestTimeoutMs = readClampedEnvInteger(
+    'MUSIC_AI_REQUEST_TIMEOUT_MS',
+    DEFAULT_AI_REQUEST_TIMEOUT_MS,
+    1,
+    MAX_PATCH_BUDGET_MS,
+  );
+  const transportRetryDelayMs = readClampedEnvInteger(
+    'MUSIC_PATCH_TRANSPORT_RETRY_DELAY_MS',
+    AI_PATCH_REQUEST_RETRY_DELAY_MS,
+    0,
+    10_000,
+  );
+  const maximumCandidateChars = readClampedEnvInteger(
+    'MUSIC_PATCH_MAX_CANDIDATE_CHARS',
+    DEFAULT_PATCH_MAX_CANDIDATE_CHARS,
+    1_000,
+    5_000_000,
+  );
+  const maximumOutputBytes = readClampedEnvInteger(
+    'MUSIC_PATCH_MAX_OUTPUT_BYTES',
+    DEFAULT_PATCH_MAX_OUTPUT_BYTES,
+    1_000,
+    50 * 1024 * 1024,
+  );
+  const deadlineAt = startedAt + budgetMs;
+  const requestText = args.requestText ?? requestAiTextDirect;
+  const failures: PatchAttemptFailure[] = [];
+  let attempts = 0;
+  let llmCalls = 0;
+  let previousCandidate = '';
+  let previousError = '';
+
+  const requestCandidate = async (promptText: string) => {
+    let lastError: unknown = null;
+    for (let transportAttempt = 0; transportAttempt <= transportRetries; transportAttempt += 1) {
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0 || args.signal?.aborted) {
+        return { text: '', error: 'Music patch generation exceeded its request budget.', status: 504 as const };
       }
-      console.warn('[patch-service] Patch request failed; retrying once.', {
-        provider: args.provider,
-        model: args.model,
-        attempt: attemptLabel,
-        error: message || String(error),
-      });
-      await sleep(AI_PATCH_REQUEST_RETRY_DELAY_MS);
-      return requestAiTextDirect({
-        provider: args.provider,
-        apiKey: args.apiKey,
-        model: args.model,
-        promptText: args.promptText,
-        systemPrompt: AI_PATCH_SYSTEM_PROMPT,
-        maxTokens: args.maxTokens,
-      });
+
+      const controller = new AbortController();
+      let timedOut = false;
+      const abortFromParent = () => controller.abort(args.signal?.reason);
+      args.signal?.addEventListener('abort', abortFromParent, { once: true });
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort(new Error('AI provider request timed out.'));
+      }, Math.min(remainingMs, requestTimeoutMs));
+      let observedProviderCalls = 0;
+      try {
+        const text = await requestText({
+          provider: args.provider,
+          apiKey: args.apiKey,
+          model: args.model,
+          promptText,
+          systemPrompt: AI_PATCH_SYSTEM_PROMPT,
+          maxTokens: args.maxTokens,
+          temperature: args.temperature,
+          image: args.image,
+          pdf: args.pdf,
+          signal: controller.signal,
+          onRequest: () => {
+            observedProviderCalls += 1;
+            llmCalls += 1;
+          },
+        });
+        if (observedProviderCalls === 0) {
+          llmCalls += 1;
+        }
+        return { text, error: '', status: 200 as const };
+      } catch (error) {
+        if (observedProviderCalls === 0) {
+          llmCalls += 1;
+        }
+        lastError = error;
+        const deadlineExpired = Date.now() >= deadlineAt || args.signal?.aborted;
+        if (deadlineExpired) {
+          return { text: '', error: 'Music patch generation exceeded its request budget.', status: 504 as const };
+        }
+        const canRetry = transportAttempt < transportRetries && (timedOut || isRetryableTransportError(error));
+        if (!canRetry) {
+          return {
+            text: '',
+            error: timedOut ? 'AI provider request timed out.' : 'AI provider request failed.',
+            status: timedOut ? 504 as const : 502 as const,
+          };
+        }
+        await sleep(Math.min(transportRetryDelayMs, Math.max(0, deadlineAt - Date.now())));
+      } finally {
+        clearTimeout(timeout);
+        args.signal?.removeEventListener('abort', abortFromParent);
+      }
     }
+    return {
+      text: '',
+      error: lastError ? 'AI provider request failed.' : 'Music patch generation failed.',
+      status: 502 as const,
+    };
   };
 
-  const firstRawText = await requestPatchAttempt('initial');
-  const firstExtracted = extractJsonFromResponse(firstRawText);
-  const firstParsed = firstExtracted ? parseMusicXmlPatch(firstExtracted) : { patch: null, error: 'missing' };
-  if (firstExtracted && !firstParsed.error && firstParsed.patch) {
+  while (attempts < maximumAttempts) {
+    const repairContext = attempts === 0
+      ? ''
+      : buildRepairContext(previousCandidate, previousError, maximumCandidateChars);
+    const candidatePrompt = [args.promptText.trim(), repairContext].filter(Boolean).join('\n\n');
+    const response = await requestCandidate(candidatePrompt);
+    if (response.status !== 200) {
+      return {
+        ok: false,
+        status: response.status,
+        error: response.error,
+        failures,
+        verification: verificationFor(startedAt, attempts, llmCalls),
+      };
+    }
+
+    attempts += 1;
+    const rawText = response.text;
+    const extracted = extractJsonFromResponse(rawText);
+    const parsed = parseMusicXmlPatch(extracted);
+    if (parsed.error || !parsed.patch) {
+      previousCandidate = rawText;
+      previousError = parsed.error || 'Model response is not a musicxml-patch@1 payload.';
+      failures.push({ attempt: attempts, category: 'parse', error: previousError });
+      continue;
+    }
+
+    const applied = await applyMusicXmlPatch(args.baseXml, parsed.patch);
+    if (applied.error || !applied.xml.trim()) {
+      previousCandidate = extracted;
+      previousError = applied.error || 'Patch application returned empty MusicXML.';
+      failures.push({ attempt: attempts, category: 'apply', error: previousError });
+      continue;
+    }
+    if (byteLength(applied.xml) > maximumOutputBytes) {
+      previousCandidate = extracted;
+      previousError = `Applied MusicXML exceeds the ${maximumOutputBytes} byte output limit.`;
+      failures.push({ attempt: attempts, category: 'output_size', error: previousError });
+      continue;
+    }
+
     return {
-      rawText: firstRawText,
-      extracted: firstExtracted,
-      retried: false,
+      ok: true,
+      patch: parsed.patch,
+      annotations: parsed.annotations ?? [],
+      proposedXml: applied.xml,
+      verification: verificationFor(startedAt, attempts, llmCalls),
     };
   }
 
-  const retryHint = firstParsed.error && firstParsed.error !== 'missing'
-    ? [
-      'PREVIOUS PATCH ERROR:',
-      firstParsed.error,
-      'Fix the patch structure and return valid JSON only.',
-    ].join('\n')
-    : '';
-  const retryPromptText = [args.promptText.trim(), retryHint, AI_PATCH_STRICT_RETRY_SUFFIX]
-    .filter(Boolean)
-    .join('\n\n');
-  const retryRawText = await requestAiTextDirect({
-    provider: args.provider,
-    apiKey: args.apiKey,
-    model: args.model,
-    promptText: retryPromptText,
-    systemPrompt: AI_PATCH_SYSTEM_PROMPT,
-    maxTokens: args.maxTokens,
-  });
-  const retryExtracted = extractJsonFromResponse(retryRawText);
   return {
-    rawText: retryRawText,
-    extracted: retryExtracted,
-    retried: true,
+    ok: false,
+    status: 422,
+    error: previousError || 'No apply-verified MusicXML patch was produced.',
+    failures,
+    verification: verificationFor(startedAt, attempts, llmCalls),
   };
 }
 
 export async function runMusicPatchService(
   body: unknown,
-  _options?: { traceContext?: TraceContext },
+  options?: { traceContext?: TraceContext; signal?: AbortSignal },
 ): Promise<PatchServiceResult> {
   const data = asRecord(body);
   const prompt = typeof data?.prompt === 'string' ? data.prompt.trim() : '';
@@ -576,6 +765,8 @@ export async function runMusicPatchService(
     : (DEFAULT_MODEL_BY_PROVIDER[provider] || DEFAULT_MODEL_BY_PROVIDER.openai);
   const maxTokensValue = Number(data?.maxTokens ?? data?.max_tokens);
   const maxTokens = Number.isFinite(maxTokensValue) && maxTokensValue > 0 ? maxTokensValue : null;
+  const temperatureValue = Number(data?.temperature);
+  const temperature = data?.temperature != null && Number.isFinite(temperatureValue) ? temperatureValue : null;
   const dryRun = Boolean(data?.dryRun || data?.dry_run);
   const apiKeyInput = (typeof data?.apiKey === 'string' ? data.apiKey : (typeof data?.api_key === 'string' ? data.api_key : '')).trim();
 
@@ -608,6 +799,93 @@ export async function runMusicPatchService(
   }
 
   const { xml, artifact: resolutionArtifact, session } = resolution;
+  const maximumContentBytes = readClampedEnvInteger(
+    'MUSIC_PATCH_MAX_CONTENT_BYTES',
+    DEFAULT_PATCH_MAX_CONTENT_BYTES,
+    1_000,
+    50 * 1024 * 1024,
+  );
+  const maximumPromptChars = readClampedEnvInteger(
+    'MUSIC_PATCH_MAX_PROMPT_CHARS',
+    DEFAULT_PATCH_MAX_PROMPT_CHARS,
+    1_000,
+    50 * 1024 * 1024,
+  );
+  const maximumImageBytes = readClampedEnvInteger(
+    'MUSIC_PATCH_MAX_IMAGE_BYTES',
+    DEFAULT_PATCH_MAX_IMAGE_BYTES,
+    1_000,
+    50 * 1024 * 1024,
+  );
+  const maximumPdfBytes = readClampedEnvInteger(
+    'MUSIC_PATCH_MAX_PDF_BYTES',
+    DEFAULT_PATCH_MAX_PDF_BYTES,
+    1_000,
+    50 * 1024 * 1024,
+  );
+  if (!looksLikeMusicXml(xml) || !/<score-(?:partwise|timewise)\b/i.test(xml)) {
+    return {
+      status: 400,
+      body: { error: 'Base content must be MusicXML.' },
+    };
+  }
+  if (byteLength(xml) > maximumContentBytes) {
+    return {
+      status: 413,
+      body: { error: `Base MusicXML exceeds the ${maximumContentBytes} byte limit.` },
+    };
+  }
+  const baseValidation = await applyMusicXmlPatch(xml, { format: 'musicxml-patch@1', ops: [] });
+  if (baseValidation.error || !baseValidation.xml.trim()) {
+    return {
+      status: 400,
+      body: { error: baseValidation.error || 'Base MusicXML is not well-formed.' },
+    };
+  }
+
+  const parseAttachment = <T extends TextImageAttachment | TextPdfAttachment>(
+    value: unknown,
+    label: 'Image' | 'PDF',
+    maximumBytes: number,
+  ): { attachment: T | null; error?: PatchServiceResult } => {
+    if (value == null) {
+      return { attachment: null };
+    }
+    const record = asRecord(value);
+    const mediaType = typeof record?.mediaType === 'string' ? record.mediaType.trim() : '';
+    const base64 = typeof record?.base64 === 'string' ? record.base64.trim() : '';
+    if (!mediaType || !base64) {
+      return {
+        attachment: null,
+        error: { status: 400, body: { error: `${label} attachment requires mediaType and base64.` } },
+      };
+    }
+    const size = estimateBase64Bytes(base64);
+    if (size > maximumBytes) {
+      return {
+        attachment: null,
+        error: { status: 413, body: { error: `${label} attachment exceeds the ${maximumBytes} byte limit.` } },
+      };
+    }
+    return {
+      attachment: {
+        mediaType,
+        base64,
+        ...(label === 'PDF' && typeof record?.filename === 'string' && record.filename.trim()
+          ? { filename: record.filename.trim().slice(0, 255) }
+          : {}),
+      } as T,
+    };
+  };
+  const parsedImage = parseAttachment<TextImageAttachment>(data?.image, 'Image', maximumImageBytes);
+  if (parsedImage.error) {
+    return parsedImage.error;
+  }
+  const parsedPdf = parseAttachment<TextPdfAttachment>(data?.pdf, 'PDF', maximumPdfBytes);
+  if (parsedPdf.error) {
+    return parsedPdf.error;
+  }
+
   const apiKey = resolveApiKeyForProvider(provider, apiKeyInput);
   if (!apiKey) {
     const providerLabel = provider === 'openai'
@@ -621,32 +899,31 @@ export async function runMusicPatchService(
 
   try {
     const builtPromptText = promptText || buildAiPatchPrompt(prompt, xml);
-    const patchResponse = await requestAiPatchTextWithRetry({
+    if (builtPromptText.length > maximumPromptChars) {
+      return {
+        status: 413,
+        body: { error: `Patch prompt exceeds the ${maximumPromptChars} character limit.` },
+      };
+    }
+    const generated = await generateApplyVerifiedPatch({
       provider,
       apiKey,
       model,
+      baseXml: xml,
       promptText: builtPromptText,
       maxTokens,
+      temperature,
+      image: parsedImage.attachment,
+      pdf: parsedPdf.attachment,
+      signal: options?.signal,
     });
-    if (!patchResponse.extracted) {
+    if (!generated.ok) {
       return {
-        status: 422,
+        status: generated.status,
         body: {
-          error: 'Model response is not a musicxml-patch@1 payload.',
-          retried: patchResponse.retried,
-          text: patchResponse.rawText,
-        },
-      };
-    }
-
-    const parsed = parseMusicXmlPatch(patchResponse.extracted);
-    if (parsed.error || !parsed.patch) {
-      return {
-        status: 422,
-        body: {
-          error: parsed.error || 'Model response is not a musicxml-patch@1 payload.',
-          retried: patchResponse.retried,
-          text: patchResponse.extracted,
+          error: generated.error,
+          verification: generated.verification,
+          failures: generated.failures,
         },
       };
     }
@@ -663,18 +940,21 @@ export async function runMusicPatchService(
         revision: session?.revision ?? null,
         inputArtifactId: resolutionArtifact?.id || null,
         inputArtifact: resolutionArtifact ? summarizeScoreArtifact(resolutionArtifact) : null,
-        patch: parsed.patch,
-        annotations: parsed.annotations ?? [],
-        text: patchResponse.extracted,
-        rawText: patchResponse.rawText,
-        retried: patchResponse.retried,
+        patch: generated.patch,
+        annotations: generated.annotations,
+        proposedXml: generated.proposedXml,
+        verification: generated.verification,
       },
     };
   } catch (error) {
-    console.error('[patch-service] Request failed:', error);
+    console.error('[patch-service] Request failed.', {
+      provider,
+      model,
+      error: error instanceof Error ? error.name : 'unknown_error',
+    });
     return {
       status: 502,
-      body: { error: errorMessage(error) || 'Internal patch service error.' },
+      body: { error: 'Internal patch service error.' },
     };
   }
 }

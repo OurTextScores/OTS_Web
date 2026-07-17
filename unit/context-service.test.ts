@@ -15,7 +15,6 @@ vi.mock('../lib/score-artifacts', () => ({
   summarizeScoreArtifact: mocked.summarizeScoreArtifact,
 }));
 
-import { MusicServiceError } from '../lib/music-services/errors';
 import { runMusicContextService } from '../lib/music-services/context-service';
 
 type ContextResponse = {
@@ -47,31 +46,42 @@ describe('runMusicContextService', () => {
     vi.clearAllMocks();
   });
 
-  it('throws a 400 error for invalid measure ranges', async () => {
-    await expect(
-      runMusicContextService({
-        content: SAMPLE_XML,
-        measureStart: 4,
-        measureEnd: 2,
-      }),
-    ).rejects.toMatchObject<Partial<MusicServiceError>>({
-      status: 400,
+  it('returns an empty result for reversed measure ranges', async () => {
+    const result = await runMusicContextService({
+      content: SAMPLE_XML,
+      measureStart: 4,
+      measureEnd: 2,
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      context: {
+        measureRange: {
+          start: 4,
+          end: 2,
+          results: [],
+        },
+      },
     });
   });
 
-  it('throws a 400 error for non-MusicXML source artifacts', async () => {
+  it('returns a 400 result for non-MusicXML source artifacts', async () => {
     mocked.getScoreArtifact.mockResolvedValue({
       id: 'a1',
       format: 'abc',
       content: 'X:1\nM:4/4\nK:C\nCDEF|',
     });
 
-    await expect(
-      runMusicContextService({
-        inputArtifactId: 'a1',
-      }),
-    ).rejects.toMatchObject<Partial<MusicServiceError>>({
+    const result = await runMusicContextService({ inputArtifactId: 'a1' });
+
+    expect(result).toMatchObject({
       status: 400,
+      body: {
+        error: {
+          code: 'invalid_request',
+          message: 'Input artifact must be musicxml format.',
+        },
+      },
     });
   });
 
@@ -108,7 +118,7 @@ describe('runMusicContextService', () => {
     expect(context.fullXml).toBeNull();
   });
 
-  it('persists an input artifact by default and can return truncated full xml', async () => {
+  it('persists an input artifact when requested and can return truncated full XML', async () => {
     mocked.createScoreArtifact.mockResolvedValue({
       id: 'ctx-input-1',
       format: 'musicxml',
@@ -117,6 +127,7 @@ describe('runMusicContextService', () => {
 
     const result = await runMusicContextService({
       content: SAMPLE_XML,
+      persistArtifact: true,
       includeFullXml: true,
       maxChars: 80,
     });
