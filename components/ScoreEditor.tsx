@@ -53,6 +53,7 @@ import {
 } from '../lib/ourtextscores-api-client';
 import { appendMusicXmlMeasures, appendMusicXmlParts } from '../lib/musicxml-append-parts';
 import { sanitizeEngineSvg } from '../lib/sanitize-svg';
+import { extractPatchAnnotations, PATCH_ANNOTATIONS_INSTRUCTION, type PatchAnnotation } from '../lib/patch-annotations';
 import {
     extractTraceContextFromHeaders,
     getOrCreateEditorSessionId,
@@ -618,7 +619,7 @@ const AI_SELECTION_BOX_CONTEXT_LIMIT = 24;
 const AI_PDF_ATTACHMENT_MAX_BYTES = 15 * 1024 * 1024;
 const AI_CHAT_CONTEXT_MAX_CHARS = 40_000;
 const AI_CHAT_CONTEXT_MAX_MESSAGES = 24;
-const AI_PATCH_SYSTEM_PROMPT = 'You are a MusicXML editor. Return only a JSON patch payload (musicxml-patch@1), no markdown or commentary.';
+const AI_PATCH_SYSTEM_PROMPT = 'You are a MusicXML editor. Return only a single JSON object (musicxml-patch@1) — the patch and an optional "annotations" array. No markdown or prose outside the JSON.';
 const AI_PATCH_STRICT_RETRY_SUFFIX = [
     'IMPORTANT RETRY INSTRUCTIONS:',
     'Return ONLY the raw JSON object for a musicxml-patch@1 payload.',
@@ -791,7 +792,9 @@ const buildAiPrompt = (prompt: string, sections: AiPromptSection[] = []) => {
 Use ONLY these ops: replace, setText, setAttr, insertBefore, insertAfter, delete.
 Each XPath must match exactly one node.
 Each replace/insertBefore/insertAfter value must contain exactly one XML element.
-If you need to add multiple sibling elements, use multiple ops (for example: replace one node, then insertAfter additional nodes).`;
+If you need to add multiple sibling elements, use multiple ops (for example: replace one node, then insertAfter additional nodes).
+
+${PATCH_ANNOTATIONS_INSTRUCTION}`;
     const promptWithContext = buildPromptWithSections(prompt, sections);
     if (!promptWithContext) {
         return patchSpec;
@@ -3088,7 +3091,7 @@ export default function ScoreEditor() {
                 }
             }
             const measureNumber = (rightIndex ?? leftIndex ?? measureIndex) + 1;
-            const key = `${clickedPartIndex}:${rightIndex ?? 'x'}:${leftIndex ?? 'x'}`;
+            const key = `${clickedPartIndex}:m${measureNumber}`;
             setAiFocusedMeasureAnchor((prev) => (prev?.key === key
                 ? null
                 : { key, partIndex: clickedPartIndex, measureNumber, leftIndex, rightIndex }));
@@ -3979,7 +3982,7 @@ ${partsBodyXml}
             }
             ops.push(nextOp);
         }
-        return { patch: { format: 'musicxml-patch@1', ops }, error: '' };
+        return { patch: { format: 'musicxml-patch@1', ops }, annotations: extractPatchAnnotations(parsed), error: '' };
     };
 
     const applyMusicXmlPatch = (baseXml: string, patch: MusicXmlPatch) => {
@@ -6368,6 +6371,43 @@ ${partsBodyXml}
         });
     }, []);
 
+    const mergeAiAnnotations = useCallback((annotations: PatchAnnotation[] | undefined | null) => {
+        if (!annotations || annotations.length === 0) {
+            return;
+        }
+        setAiMeasureThreads((prev) => {
+            const next = { ...prev };
+            for (const annotation of annotations) {
+                const comment = annotation.comment.trim();
+                if (!comment) {
+                    continue;
+                }
+                const key = `${annotation.partIndex}:m${annotation.measure}`;
+                const existing = next[key];
+                if (existing?.comments.some((entry) => entry.author === 'assistant' && entry.text === comment)) {
+                    continue; // avoid duplicating the same note across re-parses/regenerations
+                }
+                const threadComment: AiThreadComment = {
+                    id: `a_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    author: 'assistant',
+                    text: comment,
+                    createdAt: new Date().toISOString(),
+                };
+                next[key] = existing
+                    ? { ...existing, comments: [...existing.comments, threadComment] }
+                    : {
+                        key,
+                        partIndex: annotation.partIndex,
+                        measureNumber: annotation.measure,
+                        leftIndex: null,
+                        rightIndex: annotation.measure - 1,
+                        comments: [threadComment],
+                    };
+            }
+            return next;
+        });
+    }, []);
+
     const handleSendDiffFeedback = useCallback(async () => {
         if (!compareView || !isAiCompareMode || aiDiffFeedbackBusy) {
             return;
@@ -6522,6 +6562,8 @@ ${partsBodyXml}
             setAiDiffGlobalComment('');
             setAiDiffFeedbackError(null);
             setAiDiffBlockErrors({});
+            // Surface the assistant's annotations for this revision as measure-thread notes.
+            mergeAiAnnotations(extractPatchAnnotations({ annotations: (result as Record<string, unknown>).annotations }));
             setCompareAlignmentRevision((value) => value + 1);
         } catch (err) {
             const rawMessage = errorMessage(err) || 'Failed to request revised proposal.';
@@ -6558,6 +6600,7 @@ ${partsBodyXml}
         aiProvider,
         aiDiffReviews,
         aiMeasureThreads,
+        mergeAiAnnotations,
         aiDiffCurrentBlocks,
         aiDiffReviewByKey,
         aiDiffReviewByRange,
@@ -8317,7 +8360,7 @@ ${partsBodyXml}
     const updateAiOutput = useCallback(async (
         nextText: string,
         baseXmlOverride?: string,
-    ): Promise<{ ok: boolean; baseXml: string; proposedXml: string; error: string }> => {
+    ): Promise<{ ok: boolean; baseXml: string; proposedXml: string; error: string; annotations: PatchAnnotation[] }> => {
         setAiOutput(nextText);
         setAiPatch(null);
         setAiPatchError(null);
@@ -8325,30 +8368,31 @@ ${partsBodyXml}
         if (!nextText.trim()) {
             const error = 'AI output is empty.';
             setAiPatchError(error);
-            return { ok: false, baseXml: '', proposedXml: '', error };
+            return { ok: false, baseXml: '', proposedXml: '', error, annotations: [] };
         }
         const parsed = parseMusicXmlPatch(nextText);
         if (parsed.error || !parsed.patch) {
             const error = parsed.error || 'Invalid patch payload.';
             setAiPatchError(error);
-            return { ok: false, baseXml: '', proposedXml: '', error };
+            return { ok: false, baseXml: '', proposedXml: '', error, annotations: [] };
         }
+        const annotations = parsed.annotations ?? [];
         setAiPatch(parsed.patch);
         const baseXml = baseXmlOverride ?? aiBaseXml ?? await resolveXmlContext();
         if (!baseXml.trim()) {
             const error = 'Unable to apply patch without MusicXML.';
             setAiPatchError(error);
-            return { ok: false, baseXml: '', proposedXml: '', error };
+            return { ok: false, baseXml: '', proposedXml: '', error, annotations };
         }
         const applied = applyMusicXmlPatch(baseXml, parsed.patch);
         if (applied.error || !applied.xml.trim()) {
             const error = applied.error || 'Failed to apply patch to MusicXML.';
             setAiPatchError(error);
-            return { ok: false, baseXml: baseXml.trim(), proposedXml: '', error };
+            return { ok: false, baseXml: baseXml.trim(), proposedXml: '', error, annotations };
         }
         setAiPatchError(null);
         setAiPatchedXml(applied.xml);
-        return { ok: true, baseXml: baseXml.trim(), proposedXml: applied.xml.trim(), error: '' };
+        return { ok: true, baseXml: baseXml.trim(), proposedXml: applied.xml.trim(), error: '', annotations };
     }, [aiBaseXml, resolveXmlContext]);
 
     const handleAiRequest = async () => {
@@ -8481,6 +8525,8 @@ ${partsBodyXml}
                 setAiError(failureReason);
                 return;
             }
+            // openAiProposalCompare resets threads, so seed the assistant annotations after it.
+            mergeAiAnnotations(updated.annotations);
             outcome = 'success';
         } catch (err) {
             console.error('AI request failed', err);

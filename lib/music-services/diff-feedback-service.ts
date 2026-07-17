@@ -251,6 +251,7 @@ export async function runDiffFeedbackService(
       baseRevision: resolution.session?.revision ?? (typeof data?.baseRevision === 'number' ? data.baseRevision : null),
       iteration: iteration + 1,
       patch: parsedPatch.patch,
+      annotations: Array.isArray(patchResult.body.annotations) ? patchResult.body.annotations : [],
       proposedXml: applied.xml,
       feedbackPrompt,
       provider,

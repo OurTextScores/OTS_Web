@@ -4,6 +4,7 @@ import {
   requestAiTextDirect,
 } from '../ai-provider-adapters';
 import { allowServerCredentialFallback } from '../api-access-control';
+import { extractPatchAnnotations, PATCH_ANNOTATIONS_INSTRUCTION } from '../patch-annotations';
 import { summarizeScoreArtifact } from '../score-artifacts';
 import { type TraceContext } from '../trace-http';
 import { asRecord, resolveScoreContent } from './common';
@@ -25,7 +26,7 @@ export type MusicXmlPatch = {
   ops: MusicXmlPatchOp[];
 };
 
-const AI_PATCH_SYSTEM_PROMPT = 'You are a MusicXML editor. Return only a JSON patch payload (musicxml-patch@1), no markdown or commentary.';
+const AI_PATCH_SYSTEM_PROMPT = 'You are a MusicXML editor. Return only a single JSON object (musicxml-patch@1) — the patch and an optional "annotations" array. No markdown or prose outside the JSON.';
 const AI_PATCH_STRICT_RETRY_SUFFIX = [
   'IMPORTANT RETRY INSTRUCTIONS:',
   'Return ONLY the raw JSON object for a musicxml-patch@1 payload.',
@@ -136,7 +137,9 @@ const buildAiPatchPrompt = (prompt: string, xml: string) => {
 Use ONLY these ops: replace, setText, setAttr, insertBefore, insertAfter, delete.
 Each XPath must match exactly one node.
 Each replace/insertBefore/insertAfter value must contain exactly one XML element.
-If you need to add multiple sibling elements, use multiple ops (for example: replace one node, then insertAfter additional nodes).`;
+If you need to add multiple sibling elements, use multiple ops (for example: replace one node, then insertAfter additional nodes).
+
+${PATCH_ANNOTATIONS_INSTRUCTION}`;
 
   return buildPromptWithSections(prompt, xml.trim()
     ? [{ title: 'Current MusicXML', content: xml }, { title: 'Patch Format Requirements', content: patchSpec }]
@@ -261,7 +264,7 @@ export const parseMusicXmlPatch = (text: string) => {
     }
     ops.push(nextOp);
   }
-  return { patch: { format: 'musicxml-patch@1', ops }, error: '' };
+  return { patch: { format: 'musicxml-patch@1', ops }, annotations: extractPatchAnnotations(parsed), error: '' };
 };
 
 async function getXmlDomBindings(): Promise<XmlDomBindings | null> {
@@ -661,6 +664,7 @@ export async function runMusicPatchService(
         inputArtifactId: resolutionArtifact?.id || null,
         inputArtifact: resolutionArtifact ? summarizeScoreArtifact(resolutionArtifact) : null,
         patch: parsed.patch,
+        annotations: parsed.annotations ?? [],
         text: patchResponse.extracted,
         rawText: patchResponse.rawText,
         retried: patchResponse.retried,
