@@ -2910,30 +2910,38 @@ export default function ScoreEditor() {
         () => aiDiffReviews.filter((review) => getReviewStatusForFeedback(review) === 'accepted').length,
         [aiDiffReviews, getReviewStatusForFeedback],
     );
+    // Measure-thread notes with at least one user comment are also sent as feedback.
+    const aiMeasureNoteCount = useMemo(
+        () => Object.values(aiMeasureThreads).filter(
+            (thread) => thread.comments.some((entry) => entry.author === 'you' && entry.text.trim()),
+        ).length,
+        [aiMeasureThreads],
+    );
+    const aiDiffCommentTotal = aiDiffCommentCount + aiMeasureNoteCount;
     const canSendDiffFeedback = useMemo(
         () => !aiDiffFeedbackBusy
             && !compareSwapBusy
             && (
-                (aiDiffRejectedCount + aiDiffCommentCount > 0)
+                (aiDiffRejectedCount + aiDiffCommentTotal > 0)
                 || (aiDiffPendingCount > 0 && aiDiffAcceptedCount > 0)
             ),
-        [aiDiffFeedbackBusy, compareSwapBusy, aiDiffRejectedCount, aiDiffCommentCount, aiDiffPendingCount, aiDiffAcceptedCount],
+        [aiDiffFeedbackBusy, compareSwapBusy, aiDiffRejectedCount, aiDiffCommentTotal, aiDiffPendingCount, aiDiffAcceptedCount],
     );
     const diffFeedbackButtonLabel = useMemo(() => {
         const parts: string[] = [];
-        if (aiDiffCommentCount > 0) {
-            parts.push(`${aiDiffCommentCount} comment${aiDiffCommentCount === 1 ? '' : 's'}`);
+        if (aiDiffCommentTotal > 0) {
+            parts.push(`${aiDiffCommentTotal} comment${aiDiffCommentTotal === 1 ? '' : 's'}`);
         }
         if (aiDiffRejectedCount > 0) {
             parts.push(`${aiDiffRejectedCount} rejection${aiDiffRejectedCount === 1 ? '' : 's'}`);
         }
-        if (aiDiffPendingCount > 0 && aiDiffAcceptedCount > 0 && aiDiffRejectedCount + aiDiffCommentCount === 0) {
+        if (aiDiffPendingCount > 0 && aiDiffAcceptedCount > 0 && aiDiffRejectedCount + aiDiffCommentTotal === 0) {
             parts.push(`${aiDiffPendingCount} pending`);
         }
         return parts.length
             ? `Send Feedback (${parts.join(', ')})`
             : 'Send Feedback';
-    }, [aiDiffCommentCount, aiDiffRejectedCount, aiDiffPendingCount, aiDiffAcceptedCount]);
+    }, [aiDiffCommentTotal, aiDiffRejectedCount, aiDiffPendingCount, aiDiffAcceptedCount]);
     const compareDefaultZoom = 0.5;
     const compareEffectiveZoom = compareZoom ?? compareDefaultZoom;
 
