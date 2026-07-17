@@ -126,6 +126,12 @@ export function buildFeedbackPrompt(args: {
   const pending = args.blocks.filter((block) => block.status === 'pending');
   const globalComment = sanitizeText(args.globalComment || '', FEEDBACK_GLOBAL_COMMENT_MAX_CHARS);
   const chatSection = buildChatHistorySection(args.chatHistory || []);
+  const hasActionableBlocks = revise.length > 0 || pending.length > 0;
+  const closingInstruction = hasActionableBlocks
+    ? 'Generate a revised musicxml-patch@1 targeting only the REVISE and PENDING items.'
+    : globalComment
+      ? 'Generate a revised musicxml-patch@1 that applies the GLOBAL NOTE to the current score.'
+      : 'Generate a revised musicxml-patch@1.';
 
   return [
     `PATCH REVISION FEEDBACK (iteration ${Math.max(0, Math.floor(args.iteration))}):`,
@@ -146,7 +152,7 @@ export function buildFeedbackPrompt(args: {
     '',
     globalComment ? `GLOBAL NOTE: "${globalComment}"` : null,
     globalComment ? '' : null,
-    'Generate a revised musicxml-patch@1 targeting only the REVISE and PENDING items.',
+    closingInstruction,
     'Do not re-include REJECTED items. ACCEPTED items are already in the current score.',
   ]
     .filter((line): line is string => line !== null)
@@ -165,10 +171,13 @@ export async function runDiffFeedbackService(
       body: { error: parsedBlocks.error },
     };
   }
-  if (!parsedBlocks.blocks.length) {
+  const globalCommentInput = typeof asRecord(body)?.globalComment === 'string'
+    ? (asRecord(body)?.globalComment as string).trim()
+    : '';
+  if (!parsedBlocks.blocks.length && !globalCommentInput) {
     return {
       status: 400,
-      body: { error: 'At least one feedback block is required.' },
+      body: { error: 'Provide at least one feedback block or a global note.' },
     };
   }
 

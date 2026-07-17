@@ -2918,14 +2918,16 @@ export default function ScoreEditor() {
         [aiMeasureThreads],
     );
     const aiDiffCommentTotal = aiDiffCommentCount + aiMeasureNoteCount;
+    const hasGlobalNote = aiDiffGlobalComment.trim().length > 0;
     const canSendDiffFeedback = useMemo(
         () => !aiDiffFeedbackBusy
             && !compareSwapBusy
             && (
                 (aiDiffRejectedCount + aiDiffCommentTotal > 0)
+                || hasGlobalNote
                 || (aiDiffPendingCount > 0 && aiDiffAcceptedCount > 0)
             ),
-        [aiDiffFeedbackBusy, compareSwapBusy, aiDiffRejectedCount, aiDiffCommentTotal, aiDiffPendingCount, aiDiffAcceptedCount],
+        [aiDiffFeedbackBusy, compareSwapBusy, aiDiffRejectedCount, aiDiffCommentTotal, hasGlobalNote, aiDiffPendingCount, aiDiffAcceptedCount],
     );
     const diffFeedbackButtonLabel = useMemo(() => {
         const parts: string[] = [];
@@ -2935,13 +2937,16 @@ export default function ScoreEditor() {
         if (aiDiffRejectedCount > 0) {
             parts.push(`${aiDiffRejectedCount} rejection${aiDiffRejectedCount === 1 ? '' : 's'}`);
         }
-        if (aiDiffPendingCount > 0 && aiDiffAcceptedCount > 0 && aiDiffRejectedCount + aiDiffCommentTotal === 0) {
+        if (hasGlobalNote) {
+            parts.push('global note');
+        }
+        if (aiDiffPendingCount > 0 && aiDiffAcceptedCount > 0 && aiDiffRejectedCount + aiDiffCommentTotal === 0 && !hasGlobalNote) {
             parts.push(`${aiDiffPendingCount} pending`);
         }
         return parts.length
             ? `Send Feedback (${parts.join(', ')})`
             : 'Send Feedback';
-    }, [aiDiffCommentTotal, aiDiffRejectedCount, aiDiffPendingCount, aiDiffAcceptedCount]);
+    }, [aiDiffCommentTotal, aiDiffRejectedCount, hasGlobalNote, aiDiffPendingCount, aiDiffAcceptedCount]);
     const compareDefaultZoom = 0.5;
     const compareEffectiveZoom = compareZoom ?? compareDefaultZoom;
 
@@ -6495,7 +6500,7 @@ ${partsBodyXml}
         const commentBlockKeys = feedbackEntries
             .filter((block) => block.status === 'comment')
             .map((block) => block.blockKey);
-        if (!allFeedbackBlocks.length) {
+        if (!allFeedbackBlocks.length && !aiDiffGlobalComment.trim()) {
             return;
         }
 
