@@ -1154,6 +1154,9 @@ export default function ScoreEditor() {
     const [aiMeasureThreads, setAiMeasureThreads] = useState<Record<string, AiMeasureThread>>({});
     const [aiFocusedMeasureAnchor, setAiFocusedMeasureAnchor] = useState<AiMeasureAnchor | null>(null);
     const [aiMeasureThreadDraft, setAiMeasureThreadDraft] = useState('');
+    // Annotations from the most recent client-side patch parse, so a later "review in compare"
+    // (handleApplyAiOutput) can seed them even though it re-opens from stored XML.
+    const [aiLastAnnotations, setAiLastAnnotations] = useState<PatchAnnotation[]>([]);
     const [aiDiffIteration, setAiDiffIteration] = useState(0);
     const [aiDiffGlobalComment, setAiDiffGlobalComment] = useState('');
     const [aiDiffFeedbackBusy, setAiDiffFeedbackBusy] = useState(false);
@@ -3090,7 +3093,10 @@ export default function ScoreEditor() {
                     }
                 }
             }
-            const measureNumber = (rightIndex ?? leftIndex ?? measureIndex) + 1;
+            // Anchor on the base/current (left) measure number so it matches the numbering the
+            // AI uses in its patch/annotations (which target the current XML). Falls back to the
+            // proposal index only for inserted measures that have no base counterpart.
+            const measureNumber = (leftIndex ?? rightIndex ?? measureIndex) + 1;
             const key = `${clickedPartIndex}:m${measureNumber}`;
             setAiFocusedMeasureAnchor((prev) => (prev?.key === key
                 ? null
@@ -6399,8 +6405,9 @@ ${partsBodyXml}
                         key,
                         partIndex: annotation.partIndex,
                         measureNumber: annotation.measure,
-                        leftIndex: null,
-                        rightIndex: annotation.measure - 1,
+                        // annotation.measure is base/current numbering (matches the click anchor).
+                        leftIndex: annotation.measure - 1,
+                        rightIndex: null,
                         comments: [threadComment],
                     };
             }
@@ -8377,6 +8384,7 @@ ${partsBodyXml}
             return { ok: false, baseXml: '', proposedXml: '', error, annotations: [] };
         }
         const annotations = parsed.annotations ?? [];
+        setAiLastAnnotations(annotations);
         setAiPatch(parsed.patch);
         const baseXml = baseXmlOverride ?? aiBaseXml ?? await resolveXmlContext();
         if (!baseXml.trim()) {
@@ -8933,6 +8941,8 @@ ${partsBodyXml}
                     const baseXml = await resolveXmlContext();
                     setMusicAgentPatchedXml(proposedXml);
                     void openAiProposalCompare(baseXml, proposedXml);
+                    // Surface the agent's diff-feedback annotations as measure-thread notes.
+                    mergeAiAnnotations(extractPatchAnnotations({ annotations: bodyPayload?.annotations }));
                     if (typeof bodyPayload?.iteration === 'number') {
                         setAiDiffIteration(bodyPayload.iteration);
                     }
@@ -9928,7 +9938,10 @@ ${partsBodyXml}
         const opened = openAiProposalCompare(baseXml, aiPatchedXml);
         if (!opened) {
             alert('Unable to open compare view for AI proposal.');
+            return;
         }
+        // openAiProposalCompare resets threads; seed the last patch's annotations after it.
+        mergeAiAnnotations(aiLastAnnotations);
     };
 
     const ensureSelectionInWasm = async () => {
