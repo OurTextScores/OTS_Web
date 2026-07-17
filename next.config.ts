@@ -13,8 +13,36 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     if (process.env.BUILD_MODE === 'embed') {
+      // Static export can't emit headers; the embed host (OurTextScores / reverse proxy /
+      // Vercel) is responsible for the response CSP + hardening headers. See docs/BUILD_EMBED.md
+      // ("Recommended host security headers"). The client-side SVG sanitizer still ships here.
       return [];
     }
+    // Hardening headers for the non-embed app (served by score_editor_api, publicly reachable).
+    // `script-src` stays 'self' (blocks third-party script hosts) but keeps 'unsafe-inline'/
+    // 'unsafe-eval' because Next's App Router streams inline hydration scripts and a nonce
+    // would require middleware — which is incompatible with the `output: 'export'` embed build.
+    // The primary XSS vector (engine SVG → innerHTML) is closed in-app by sanitizeEngineSvg.
+    const contentSecurityPolicy = [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'self'",
+      "form-action 'self'",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      "style-src 'self' 'unsafe-inline'",
+      "connect-src 'self' https:",
+      "worker-src 'self' blob:",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
+    ].join('; ');
+    const securityHeaders = [
+      { key: 'Content-Security-Policy', value: contentSecurityPolicy },
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+      { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+      { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+      { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), browsing-topics=()' },
+    ];
     return [
       {
         source: '/webmscore.lib.wasm',
@@ -33,6 +61,10 @@ const nextConfig: NextConfig = {
         headers: [
           { key: 'Cache-Control', value: 'no-store' },
         ],
+      },
+      {
+        source: '/:path*',
+        headers: securityHeaders,
       },
     ];
   },

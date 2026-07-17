@@ -52,6 +52,7 @@ import {
     type SourceHistoryRevision,
 } from '../lib/ourtextscores-api-client';
 import { appendMusicXmlMeasures, appendMusicXmlParts } from '../lib/musicxml-append-parts';
+import { sanitizeEngineSvg } from '../lib/sanitize-svg';
 import {
     extractTraceContextFromHeaders,
     getOrCreateEditorSessionId,
@@ -5803,7 +5804,7 @@ ${partsBodyXml}
                 `Render page ${targetPage + 1}`,
             );
             if (svgData) {
-                containerRef.current.innerHTML = svgData;
+                containerRef.current.innerHTML = sanitizeEngineSvg(svgData);
                 return true;
             }
             return false;
@@ -5860,7 +5861,7 @@ ${partsBodyXml}
             if (!svgData) {
                 return false;
             }
-            container.innerHTML = svgData;
+            container.innerHTML = sanitizeEngineSvg(svgData);
             const svg = container.querySelector('svg');
             if (svg instanceof SVGSVGElement) {
                 svg.style.width = '100%';

@@ -284,6 +284,42 @@ build-based backend service fails with `path ".../backend" not found`; and the r
 > prod** compose as a dedicated `docker-compose.prod.yml` and deploy that — not to sync the
 > dev files.
 
+## Recommended Host Security Headers (Embed)
+
+The embed is a **static export**, so it cannot emit response headers itself (and Next.js
+middleware is incompatible with `output: 'export'`). The **hosting site** (OurTextScores /
+its reverse proxy / Vercel) must set the security headers for the `/score-editor/*` assets.
+The editor already sanitizes engine SVG output client-side (defense against a stored-XSS via
+crafted score XML), but a Content-Security-Policy is the belt-and-suspenders layer.
+
+Recommended response headers for the embedded editor's origin/path:
+
+```
+Content-Security-Policy:
+  default-src 'self';
+  base-uri 'self';
+  object-src 'none';
+  img-src 'self' data: blob: https:;
+  font-src 'self' data:;
+  style-src 'self' 'unsafe-inline';
+  connect-src 'self' https:;              # LLM proxy, soundfont CDN, HF spaces
+  worker-src 'self' blob:;
+  script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline';
+  frame-ancestors 'self' https://*.ourtextscores.com;   # allow the site to iframe it
+X-Content-Type-Options: nosniff
+Referrer-Policy: strict-origin-when-cross-origin
+Permissions-Policy: camera=(), microphone=(), geolocation=()
+```
+
+Notes:
+- `script-src` keeps `'unsafe-inline'` because a static export has no nonce mechanism; tighten
+  to a nonce/hash policy only if you move off static export. `'wasm-unsafe-eval'` is required
+  by the webmscore WASM runtime.
+- `frame-ancestors` must list every origin that embeds the iframe (e.g. `www.` and apex
+  `ourtextscores.com`), or the editor won't render inside the site.
+- The **non-embed** build (the `score_editor_api` Next.js app) sets equivalent headers itself
+  via `next.config.ts` `headers()` — no host action needed there.
+
 ## Soundfont Configuration
 
 ### Using the Recommended CDN (MuseScore_General)
