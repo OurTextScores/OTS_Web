@@ -9,7 +9,7 @@ const mocked = vi.hoisted(() => ({
   runMusicGenerateService: vi.fn(),
   runHarmonyAnalyzeService: vi.fn(),
   runMusicScoreOpsPromptService: vi.fn(),
-  runMusicScoreOpsService: vi.fn(),
+  runMusicScoreOpsPreviewService: vi.fn(),
   runMusicPatchService: vi.fn(),
   runMusicRenderService: vi.fn(),
 }));
@@ -54,7 +54,7 @@ vi.mock('../lib/music-services/harmony-service', () => ({
 
 vi.mock('../lib/music-services/scoreops-service', () => ({
   runMusicScoreOpsPromptService: mocked.runMusicScoreOpsPromptService,
-  runMusicScoreOpsService: mocked.runMusicScoreOpsService,
+  runMusicScoreOpsPreviewService: mocked.runMusicScoreOpsPreviewService,
 }));
 
 vi.mock('../lib/music-services/patch-service', () => ({
@@ -135,6 +135,9 @@ describe('runMusicAgentRouter', () => {
       body: {
         ok: true,
         analysis: { harmonyTagCount: 12, coverage: 0.9 },
+        content: {
+          musicxml: '<score-partwise version="3.1"><credit/></score-partwise>',
+        },
       },
     });
 
@@ -156,6 +159,7 @@ describe('runMusicAgentRouter', () => {
     expect(mocked.runHarmonyAnalyzeService).toHaveBeenCalledWith({
       content: '<score-partwise version="3.1"></score-partwise>',
     });
+    expect((result.body.result as Record<string, unknown>)?.proposal).toBeUndefined();
   });
 
   it('marks fallback functional harmony requests as applyable when prompt explicitly asks to add Roman numerals to the score', async () => {
@@ -164,7 +168,7 @@ describe('runMusicAgentRouter', () => {
       status: 200,
       body: {
         ok: true,
-        annotatedXml: '<score-partwise version="3.1"></score-partwise>',
+        annotatedXml: '<score-partwise version="3.1"><direction/></score-partwise>',
       },
     });
 
@@ -183,6 +187,14 @@ describe('runMusicAgentRouter', () => {
       selectedTool: 'music.functional_harmony_analyze',
       applyToScore: true,
       toolOk: true,
+      result: {
+        proposal: {
+          sourceTool: 'music.functional_harmony_analyze',
+          baseXml: '<score-partwise version="3.1"></score-partwise>',
+          proposedXml: '<score-partwise version="3.1"><direction/></score-partwise>',
+          verification: { level: 'tool_execution' },
+        },
+      },
     });
   });
 
@@ -252,6 +264,7 @@ describe('runMusicAgentRouter', () => {
       expect.objectContaining({
         prompt: 'Change key signature to G major and remove CLEAN VERSION text',
         content: '<score-partwise version="3.1"></score-partwise>',
+        mutationMode: 'proposal',
       }),
     );
   });
@@ -276,6 +289,7 @@ describe('runMusicAgentRouter', () => {
           format: 'musicxml-patch@1',
           ops: [],
         },
+        proposedXml: '<score-partwise version="3.1"><credit/></score-partwise>',
       },
     });
 
@@ -293,6 +307,12 @@ describe('runMusicAgentRouter', () => {
       mode: 'fallback',
       selectedTool: 'music.patch',
       toolOk: true,
+      result: {
+        proposal: {
+          sourceTool: 'music.patch',
+          verification: { level: 'tool_execution' },
+        },
+      },
     });
     expect(mocked.runMusicPatchService).toHaveBeenCalledTimes(1);
   });
@@ -349,7 +369,7 @@ describe('runMusicAgentRouter', () => {
         },
       },
     });
-    mocked.runMusicScoreOpsService.mockResolvedValue({
+    mocked.runMusicScoreOpsPreviewService.mockResolvedValue({
       status: 200,
       body: {
         ok: true,
@@ -375,7 +395,7 @@ describe('runMusicAgentRouter', () => {
         path: 'scoreops',
       },
     });
-    expect(mocked.runMusicScoreOpsService).toHaveBeenCalledTimes(1);
+    expect(mocked.runMusicScoreOpsPreviewService).toHaveBeenCalledTimes(1);
     expect(mocked.runMusicPatchService).toHaveBeenCalledTimes(0);
   });
 
@@ -493,7 +513,7 @@ describe('runMusicAgentRouter', () => {
 
   it('uses direct ops execution when ops array is provided in fallback mode', async () => {
     delete process.env.OPENAI_API_KEY;
-    mocked.runMusicScoreOpsService.mockResolvedValue({
+    mocked.runMusicScoreOpsPreviewService.mockResolvedValue({
       status: 200,
       body: {
         ok: true,
@@ -517,13 +537,12 @@ describe('runMusicAgentRouter', () => {
       selectedTool: 'music.scoreops',
       toolOk: true,
     });
-    expect(mocked.runMusicScoreOpsService).toHaveBeenCalledWith(
+    expect(mocked.runMusicScoreOpsPreviewService).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'apply',
         ops: [{ op: 'set_key_signature', fifths: 1 }],
         content: '<score-partwise version="3.1"></score-partwise>',
       }),
-      'apply',
     );
     expect(mocked.runMusicScoreOpsPromptService).not.toHaveBeenCalled();
   });
@@ -535,7 +554,7 @@ describe('runMusicAgentRouter', () => {
         selectedTool: 'music.scoreops',
         toolStatus: 200,
         toolOk: true,
-        response: 'Score operations applied.',
+        response: 'Score operations prepared as a proposal.',
         result: { ok: true },
       },
     });

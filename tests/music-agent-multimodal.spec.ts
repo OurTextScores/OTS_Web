@@ -2,11 +2,15 @@ import { test, expect } from '@playwright/test';
 
 test('Music Agent: can attach files and send multimodal prompt', async ({ page }) => {
   // 1. Navigate to the editor with a sample score
-  await page.goto('/?score=/test_scores/single_note_c4.musicxml', { waitUntil: 'networkidle' });
-  await page.waitForSelector('svg', { timeout: 20000 });
+  await page.goto('/?score=/test_scores/single_note_c4.musicxml', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('svg .Note', { timeout: 20000 });
 
   // 2. Switch to the Assistant tab and Agent mode
-  const assistantTab = page.getByTestId('tab-assistant');
+  const openSidebar = page.getByRole('button', { name: 'Open MusicXML sidebar' });
+  if (await openSidebar.isVisible()) {
+    await openSidebar.click();
+  }
+  const assistantTab = page.getByTestId('tab-ai');
   await expect(assistantTab).toBeVisible();
   await assistantTab.click();
 
@@ -50,7 +54,7 @@ test('Music Agent: can attach files and send multimodal prompt', async ({ page }
   });
 
   // 6. Verify file appears in the list
-  const fileListItem = page.getByText('dummy.pdf');
+  const fileListItem = page.getByText('dummy.pdf', { exact: true });
   await expect(fileListItem).toBeVisible();
 
   // 7. Enter prompt and send

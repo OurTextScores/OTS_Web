@@ -79,6 +79,10 @@ import {
     findMmaGrooveOption,
     MMA_GROOVE_OPTION_GROUPS,
 } from '../lib/music-mma-grooves';
+import {
+    computeClientScoreHash,
+    verifyAiProposalCurrentContent,
+} from '../lib/ai-edit-proposal-client';
 
 type SelectionBox = {
     index: number | null;
@@ -103,6 +107,19 @@ type CompareViewState = {
     checkpointXml: string;
     currentLabel?: string;
     checkpointLabel?: string;
+};
+
+type AiEditProposal = {
+    sourceTool: string;
+    baseXml: string;
+    proposedXml: string;
+    baseScoreSessionId: string | null;
+    baseRevision: number | null;
+    baseContentHash: string;
+    expectedCurrentContentHash: string;
+    verification: {
+        level: 'patch_apply' | 'tool_execution';
+    };
 };
 
 type CompareBlockComment = {
@@ -337,6 +354,41 @@ type SynthBatchIterator = (cancel?: boolean) => Promise<SynthBatchChunk[]>;
 const asRecord = (value: unknown): Record<string, any> | null => (
     value && typeof value === 'object' ? value as Record<string, any> : null
 );
+
+const findAiEditProposal = (value: unknown): AiEditProposal | null => {
+    const visited = new Set<unknown>();
+    const visit = (candidate: unknown, depth: number): AiEditProposal | null => {
+        if (depth > 5 || visited.has(candidate)) {
+            return null;
+        }
+        visited.add(candidate);
+        const record = asRecord(candidate);
+        if (!record) {
+            return null;
+        }
+        const proposal = asRecord(record.proposal);
+        const verification = asRecord(proposal?.verification);
+        if (
+            proposal
+            && typeof proposal.sourceTool === 'string'
+            && typeof proposal.baseXml === 'string'
+            && typeof proposal.proposedXml === 'string'
+            && typeof proposal.baseContentHash === 'string'
+            && typeof proposal.expectedCurrentContentHash === 'string'
+            && (verification?.level === 'patch_apply' || verification?.level === 'tool_execution')
+        ) {
+            return proposal as AiEditProposal;
+        }
+        for (const key of ['body', 'execution', 'result']) {
+            const found = visit(record[key], depth + 1);
+            if (found) {
+                return found;
+            }
+        }
+        return null;
+    };
+    return visit(value, 0);
+};
 
 const fetchJsonOrThrow = async <T,>(url: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(url, {
@@ -1089,6 +1141,10 @@ export default function ScoreEditor() {
     const [checkpointError, setCheckpointError] = useState<string | null>(null);
     const [compareView, setCompareView] = useState<CompareViewState | null>(null);
     const [compareSwapped, setCompareSwapped] = useState(false);
+    const aiProposalExpectedCurrentHashRef = useRef<string | null>(null);
+    const aiProposalBaseXmlRef = useRef('');
+    const aiProposalApplyErrorRef = useRef<string | null>(null);
+    const [aiProposalApplyError, setAiProposalApplyError] = useState<string | null>(null);
     const [compareLeftCheckpointLabel, setCompareLeftCheckpointLabel] = useState('');
     const [compareRightCheckpointLabel, setCompareRightCheckpointLabel] = useState('');
     const [compareRightScore, setCompareRightScore] = useState<Score | null>(null);
@@ -1267,7 +1323,6 @@ export default function ScoreEditor() {
     const [musicAgentResult, setMusicAgentResult] = useState<Record<string, unknown> | null>(null);
     const [musicAgentPatch, setMusicAgentPatch] = useState<MusicXmlPatch | null>(null);
     const [musicAgentPatchError, setMusicAgentPatchError] = useState<string | null>(null);
-    const [musicAgentPatchedXml, setMusicAgentPatchedXml] = useState('');
     const [musicAgentThread, setMusicAgentThread] = useState<AiChatMessage[]>([]);
     const musicAgentThreadRef = useRef<HTMLDivElement | null>(null);
     const [aiMode, setAiMode] = useState<'patch' | 'chat' | 'agent'>('patch');
@@ -4181,18 +4236,18 @@ ${partsBodyXml}
             inputFormat?: string;
             enforceJazzHarmonyStyle?: boolean;
         },
-    ) => {
+    ): Promise<boolean> => {
         if (!score) {
             alert('Load a score before applying XML edits.');
-            return;
+            return false;
         }
         if (!sourceXml.trim()) {
             alert('XML content is empty.');
-            return;
+            return false;
         }
         const checkpointState = await ensureCheckpointBeforeApply();
         if (!checkpointState.ok) {
-            return;
+            return false;
         }
         const willChange = checkpointState.currentXml.trim() !== sourceXml.trim();
         const encoder = new TextEncoder();
@@ -4228,6 +4283,7 @@ ${partsBodyXml}
                 duration_ms: Math.max(0, Date.now() - applyStartedAt),
             });
         }
+        return applied;
     };
 
 
@@ -6061,9 +6117,46 @@ ${partsBodyXml}
         }
 
         setCompareSwapBusy(true);
+        let committedXml: string | null = null;
         try {
+            const isAiProposalCommit = compareView?.title === 'Assistant Proposal' && targetScore === score;
+            let verifiedTargetXml: string | null = null;
+            if (isAiProposalCommit) {
+                const liveXml = await getScoreMusicXmlText(scoreRef.current ?? targetScore, null);
+                if (!liveXml) {
+                    const message = 'Unable to verify the current score before applying this proposal.';
+                    aiProposalApplyErrorRef.current = message;
+                    setAiProposalApplyError(message);
+                    setAiError(message);
+                    return false;
+                }
+                verifiedTargetXml = liveXml;
+                try {
+                    const hashCheck = await verifyAiProposalCurrentContent({
+                        expectedCurrentContentHash: aiProposalExpectedCurrentHashRef.current,
+                        baseXml: aiProposalBaseXmlRef.current || compareView.currentXml,
+                        currentXml: liveXml,
+                    });
+                    aiProposalExpectedCurrentHashRef.current = hashCheck.expectedCurrentContentHash;
+                    if (!hashCheck.ok) {
+                        const message = 'The score changed after this proposal was generated. Regenerate or rebase the proposal before applying it.';
+                        aiProposalApplyErrorRef.current = message;
+                        setAiProposalApplyError(message);
+                        setAiError(message);
+                        return false;
+                    }
+                } catch (hashError) {
+                    const message = errorMessage(hashError) || 'Unable to verify the proposal against the current score.';
+                    aiProposalApplyErrorRef.current = message;
+                    setAiProposalApplyError(message);
+                    setAiError(message);
+                    return false;
+                }
+            }
+
             const fallbackSourceXml = sourceScore === score ? compareView?.currentXml ?? null : compareView?.checkpointXml ?? null;
-            const fallbackTargetXml = targetScore === score ? compareView?.currentXml ?? null : compareView?.checkpointXml ?? null;
+            const fallbackTargetXml = verifiedTargetXml
+                ?? (targetScore === score ? compareView?.currentXml ?? null : compareView?.checkpointXml ?? null);
             const sourceXml = fallbackSourceXml ?? await getScoreMusicXmlText(sourceScore, null);
             const targetXml = fallbackTargetXml ?? await getScoreMusicXmlText(targetScore, null);
             if (!sourceXml || !targetXml) {
@@ -6083,8 +6176,26 @@ ${partsBodyXml}
             }
 
             if (targetScore === score) {
-                await applyXmlToScore(patched.xml, { telemetrySource: 'compare_overwrite' });
-                setCompareView((prev) => (prev ? { ...prev, currentXml: patched.xml } : prev));
+                const applied = await applyXmlToScore(patched.xml, { telemetrySource: 'compare_overwrite' });
+                if (!applied) {
+                    return false;
+                }
+                const appliedXml = await getScoreMusicXmlText(scoreRef.current ?? targetScore, patched.xml) || patched.xml;
+                if (isAiProposalCommit) {
+                    try {
+                        aiProposalExpectedCurrentHashRef.current = await computeClientScoreHash(appliedXml);
+                        aiProposalApplyErrorRef.current = null;
+                        setAiProposalApplyError(null);
+                        setAiError(null);
+                    } catch (hashError) {
+                        const message = errorMessage(hashError) || 'The change was applied, but the next proposal block cannot be verified.';
+                        aiProposalExpectedCurrentHashRef.current = null;
+                        aiProposalApplyErrorRef.current = message;
+                        setAiProposalApplyError(message);
+                        setAiError(message);
+                    }
+                }
+                setCompareView((prev) => (prev ? { ...prev, currentXml: appliedXml } : prev));
             } else {
                 setCompareView((prev) => (prev ? { ...prev, checkpointXml: patched.xml } : prev));
             }
@@ -6127,37 +6238,73 @@ ${partsBodyXml}
         if (!compareView || compareView.title !== 'Assistant Proposal') {
             return;
         }
-        const rightScore = compareRightScoreRef.current;
-        if (!score || !rightScore) {
+        if (!score) {
             return;
         }
         if (compareSwapBusy) {
             return;
         }
-        for (const alignment of compareAlignments) {
-            const blocks = buildMismatchBlocks(alignment.rows);
-            for (const block of blocks) {
-                const pairs = alignment.rows
-                    .slice(block.start, block.end + 1)
-                    .map((row) => (
-                        row.leftIndex !== null && row.rightIndex !== null
-                            ? { leftIndex: row.rightIndex, rightIndex: row.leftIndex }
-                            : null
-                    ))
-                    .filter((pair): pair is { leftIndex: number; rightIndex: number } => Boolean(pair));
-                if (pairs.length === 0) {
-                    continue;
-                }
-                await handleCompareOverwriteBlock(rightScore, score, alignment.partIndex, pairs);
+
+        setCompareSwapBusy(true);
+        try {
+            const liveXml = await getScoreMusicXmlText(scoreRef.current ?? score, null);
+            if (!liveXml) {
+                const message = 'Unable to verify the current score before applying this proposal.';
+                aiProposalApplyErrorRef.current = message;
+                setAiProposalApplyError(message);
+                setAiError(message);
+                return;
             }
+            const hashCheck = await verifyAiProposalCurrentContent({
+                expectedCurrentContentHash: aiProposalExpectedCurrentHashRef.current,
+                baseXml: aiProposalBaseXmlRef.current || compareView.currentXml,
+                currentXml: liveXml,
+            });
+            aiProposalExpectedCurrentHashRef.current = hashCheck.expectedCurrentContentHash;
+            if (!hashCheck.ok) {
+                const message = 'The score changed after this proposal was generated. Regenerate or rebase the proposal before applying it.';
+                aiProposalApplyErrorRef.current = message;
+                setAiProposalApplyError(message);
+                setAiError(message);
+                return;
+            }
+
+            const applied = await applyXmlToScore(compareView.checkpointXml, { telemetrySource: 'compare_apply_all' });
+            if (!applied) {
+                return;
+            }
+            const appliedXml = await getScoreMusicXmlText(
+                scoreRef.current ?? score,
+                compareView.checkpointXml,
+            ) || compareView.checkpointXml;
+            committedXml = appliedXml;
+            aiProposalExpectedCurrentHashRef.current = await computeClientScoreHash(appliedXml);
+            aiProposalApplyErrorRef.current = null;
+            setAiProposalApplyError(null);
+            setAiError(null);
+            setCompareView((prev) => (prev ? { ...prev, currentXml: appliedXml } : prev));
+            setCompareAlignmentRevision((value) => value + 1);
+        } catch (applyError) {
+            const message = committedXml
+                ? 'The proposal was applied, but its new content hash could not be recorded.'
+                : (errorMessage(applyError) || 'Unable to apply the complete proposal.');
+            if (committedXml) {
+                aiProposalExpectedCurrentHashRef.current = null;
+                setCompareView((prev) => (prev ? { ...prev, currentXml: committedXml! } : prev));
+                setCompareAlignmentRevision((value) => value + 1);
+            }
+            aiProposalApplyErrorRef.current = message;
+            setAiProposalApplyError(message);
+            setAiError(message);
+        } finally {
+            setCompareSwapBusy(false);
         }
     }, [
         compareView,
         compareSwapBusy,
         score,
-        compareAlignments,
-        buildMismatchBlocks,
-        handleCompareOverwriteBlock,
+        getScoreMusicXmlText,
+        applyXmlToScore,
     ]);
 
     const setAiDiffBlockStatus = useCallback((block: AiDiffBlockRef, status: BlockReviewStatus) => {
@@ -6339,7 +6486,7 @@ ${partsBodyXml}
             setAiDiffBlockStatus(block, 'pending');
             setAiDiffBlockErrors((prev) => ({
                 ...prev,
-                [block.blockKey]: 'Could not apply this block. Please retry.',
+                [block.blockKey]: aiProposalApplyErrorRef.current || 'Could not apply this block. Please retry.',
             }));
             return;
         }
@@ -6577,6 +6724,10 @@ ${partsBodyXml}
             // Keep the standard orientation (Current left/red, Proposal right/green) so Apply
             // writes the proposal into the document. See openAiProposalCompare.
             setCompareSwapped(true);
+            aiProposalExpectedCurrentHashRef.current = null;
+            aiProposalBaseXmlRef.current = currentXml;
+            aiProposalApplyErrorRef.current = null;
+            setAiProposalApplyError(null);
             setCompareView({
                 title: 'Assistant Proposal',
                 currentXml,
@@ -6614,6 +6765,10 @@ ${partsBodyXml}
                 currentLabel: 'Current',
                 checkpointLabel: 'Assistant Proposal',
             });
+            aiProposalExpectedCurrentHashRef.current = null;
+            aiProposalBaseXmlRef.current = currentXml;
+            aiProposalApplyErrorRef.current = null;
+            setAiProposalApplyError(null);
         } finally {
             setAiDiffFeedbackBusy(false);
             setCompareRightLoading(false);
@@ -8338,10 +8493,12 @@ ${partsBodyXml}
         return { text, sourceRag: null };
     };
 
-    const openAiProposalCompare = useCallback((baseXml: string, proposedXml: string) => {
-        const trimmedBase = baseXml.trim();
-        const trimmedProposed = proposedXml.trim();
-        if (!trimmedBase || !trimmedProposed) {
+    const openAiProposalCompare = useCallback((
+        baseXml: string,
+        proposedXml: string,
+        proposal?: Pick<AiEditProposal, 'expectedCurrentContentHash'>,
+    ) => {
+        if (!baseXml.trim() || !proposedXml.trim()) {
             return false;
         }
         // Standard diff orientation: Current on the LEFT (red/removed), Assistant Proposal on
@@ -8358,10 +8515,14 @@ ${partsBodyXml}
         setAiDiffFeedbackError(null);
         setAiDiffBlockErrors({});
         setAiDiffGutterWidth(AI_DIFF_GUTTER_DEFAULT_WIDTH);
+        aiProposalExpectedCurrentHashRef.current = proposal?.expectedCurrentContentHash || null;
+        aiProposalBaseXmlRef.current = baseXml;
+        aiProposalApplyErrorRef.current = null;
+        setAiProposalApplyError(null);
         setCompareView({
             title: 'Assistant Proposal',
-            currentXml: trimmedBase,
-            checkpointXml: trimmedProposed,
+            currentXml: baseXml,
+            checkpointXml: proposedXml,
             currentLabel: 'Current',
             checkpointLabel: 'Assistant Proposal',
         });
@@ -8780,7 +8941,6 @@ ${partsBodyXml}
         setMusicAgentResult(null);
         setMusicAgentPatch(null);
         setMusicAgentPatchError(null);
-        setMusicAgentPatchedXml('');
         const requestStartedAt = Date.now();
         let requestIssued = false;
         let outcome: 'success' | 'failure' = 'failure';
@@ -8804,6 +8964,8 @@ ${partsBodyXml}
                 };
                 toolInput.context = { ...sessionDefaults, includeAbc: true };
                 toolInput.convert = { ...sessionDefaults, inputFormat: 'musicxml', outputFormat: 'abc', includeContent: true };
+                toolInput.harmony_analyze = { ...sessionDefaults };
+                toolInput.functional_harmony_analyze = { ...sessionDefaults };
                 toolInput.patch = { ...sessionDefaults, prompt, model: aiModel.trim() || undefined, apiKey: aiApiKey.trim() || undefined };
                 toolInput.scoreops = { ...sessionDefaults, prompt, options: { includeXml: true, includeMeasureDiff: true } };
                 toolInput.render = { ...sessionDefaults };
@@ -8818,6 +8980,8 @@ ${partsBodyXml}
                     content: xmlContext,
                     includeContent: true,
                 };
+                toolInput.harmony_analyze = { content: xmlContext };
+                toolInput.functional_harmony_analyze = { content: xmlContext };
                 toolInput.patch = {
                     content: xmlContext,
                     prompt,
@@ -8931,33 +9095,37 @@ ${partsBodyXml}
                 setScoreRevision(resBody.revision);
             }
 
+            const resultPayload = asRecord(parsedResult);
+            const resultBody = asRecord(resultPayload?.body) || resultPayload;
+            const editProposal = findAiEditProposal(parsedResult);
+            const openAgentEditProposal = (proposal: AiEditProposal) => {
+                setAiBaseXml(proposal.baseXml);
+                if (!openAiProposalCompare(proposal.baseXml, proposal.proposedXml, proposal)) {
+                    setMusicAgentPatchError('The Agent returned an invalid edit proposal.');
+                    return false;
+                }
+                setXmlSidebarTab('assistant');
+                setXmlSidebarMode((prev) => (prev === 'closed' ? 'open' : prev));
+                return true;
+            };
+
             if (selectedTool === 'music.patch') {
-                const resultPayload = asRecord(parsedResult);
-                const maybePatch = asRecord(resultPayload?.patch);
+                const maybePatch = asRecord(resultBody?.patch);
                 if (maybePatch) {
                     const parsedPatch = parseMusicXmlPatch(JSON.stringify(maybePatch));
                     if (parsedPatch.patch) {
                         setMusicAgentPatch(parsedPatch.patch);
-                        const baseXml = xmlContext.trim() ? xmlContext : await resolveXmlContext();
-                        if (!baseXml.trim()) {
-                            setMusicAgentPatchError('Unable to load MusicXML for patch preview.');
-                        } else {
-                            const applied = applyMusicXmlPatch(baseXml, parsedPatch.patch);
-                            if (applied.error) {
-                                setMusicAgentPatchError(applied.error);
-                            } else {
-                                setMusicAgentPatchedXml(applied.xml);
-                            }
-                        }
                     } else {
                         setMusicAgentPatchError(parsedPatch.error || 'Agent returned an invalid patch payload.');
                     }
-                } else if (resultPayload && typeof resultPayload.error === 'string') {
-                    setMusicAgentPatchError(resultPayload.error);
+                }
+                if (editProposal) {
+                    openAgentEditProposal(editProposal);
+                } else if (response.ok && !resultBody?.error) {
+                    setMusicAgentPatchError('The Agent did not return a verified edit proposal.');
                 }
             } else if (selectedTool === 'music.diff_feedback') {
-                const resultPayload = asRecord(parsedResult);
-                const bodyPayload = asRecord(resultPayload?.body);
+                const bodyPayload = resultBody;
                 const patchPayload = asRecord(bodyPayload?.patch);
                 const proposedXml = typeof bodyPayload?.proposedXml === 'string' ? bodyPayload.proposedXml : '';
                 if (patchPayload) {
@@ -8970,7 +9138,6 @@ ${partsBodyXml}
                 }
                 if (proposedXml.trim()) {
                     const baseXml = await resolveXmlContext();
-                    setMusicAgentPatchedXml(proposedXml);
                     void openAiProposalCompare(baseXml, proposedXml);
                     // Surface the agent's diff-feedback annotations as measure-thread notes.
                     mergeAiAnnotations(extractPatchAnnotations({ annotations: bodyPayload?.annotations }));
@@ -8981,72 +9148,30 @@ ${partsBodyXml}
                     setMusicAgentPatchError(bodyPayload.error.trim());
                 }
             } else if (selectedTool === 'music.scoreops') {
-                const resultPayload = asRecord(parsedResult);
-                // Handle both direct service response (body.output.content) and nested execution format
-                const bodyPayload = asRecord(resultPayload?.body);
-                const outputPayload = asRecord(bodyPayload?.output);
-                const executionPayload = asRecord(resultPayload?.execution);
-                const executionOutput = asRecord(executionPayload?.output);
-                const nextXml = typeof outputPayload?.content === 'string'
-                    ? outputPayload.content
-                    : (typeof executionOutput?.content === 'string'
-                        ? executionOutput.content
-                        : '');
-                if (nextXml.trim()) {
-                    try {
-                        await applyXmlToScore(nextXml, { telemetrySource: 'music_agent_scoreops' });
-                        setXmlSidebarTab('xml');
-                    } catch (applyErr) {
-                        console.error('Failed to apply Music Agent scoreops output', applyErr);
-                        setMusicAgentPatchError('ScoreOps output was generated but could not be applied to the score.');
-                    }
-                } else if (typeof asRecord(bodyPayload?.error)?.message === 'string') {
-                    setMusicAgentPatchError(String(asRecord(bodyPayload?.error)?.message));
-                } else if (typeof asRecord(resultPayload?.error)?.message === 'string') {
-                    setMusicAgentPatchError(String(asRecord(resultPayload?.error)?.message));
+                if (editProposal) {
+                    openAgentEditProposal(editProposal);
+                } else if (response.ok && !resultBody?.error) {
+                    setMusicAgentPatchError('ScoreOps did not return a verified edit proposal.');
                 }
             } else if (selectedTool === 'music.harmony_analyze') {
-                const resultPayload = asRecord(parsedResult);
-                const bodyPayload = asRecord(resultPayload?.body);
-                const contentPayload = asRecord(bodyPayload?.content);
-                const nextXml = typeof contentPayload?.musicxml === 'string' ? contentPayload.musicxml : '';
-                if (shouldApplyAnalysisResult && nextXml.trim()) {
-                    try {
-                        await applyXmlToScore(nextXml, {
-                            telemetrySource: 'music_agent_harmony_analyze',
-                            inputFormat: 'musicxml',
-                            enforceJazzHarmonyStyle: true,
-                        });
-                        setXmlSidebarTab('xml');
-                    } catch (applyErr) {
-                        console.error('Failed to apply Music Agent harmony analysis output', applyErr);
-                        setMusicAgentPatchError('Harmony analysis output was generated but could not be applied to the score.');
-                    }
-                } else if (typeof asRecord(bodyPayload?.error)?.message === 'string') {
-                    setMusicAgentPatchError(String(asRecord(bodyPayload?.error)?.message));
-                } else if (typeof asRecord(resultPayload?.error)?.message === 'string') {
-                    setMusicAgentPatchError(String(asRecord(resultPayload?.error)?.message));
+                if (shouldApplyAnalysisResult && editProposal) {
+                    openAgentEditProposal(editProposal);
+                } else if (shouldApplyAnalysisResult && response.ok && !resultBody?.error) {
+                    setMusicAgentPatchError('Harmony analysis did not return a verified edit proposal.');
                 }
             } else if (selectedTool === 'music.functional_harmony_analyze') {
-                const resultPayload = asRecord(parsedResult);
-                const bodyPayload = asRecord(resultPayload?.body);
-                const nextXml = typeof bodyPayload?.annotatedXml === 'string' ? bodyPayload.annotatedXml : '';
-                if (shouldApplyAnalysisResult && nextXml.trim()) {
-                    try {
-                        await applyXmlToScore(nextXml, {
-                            telemetrySource: 'music_agent_functional_harmony_analyze',
-                            inputFormat: 'musicxml',
-                        });
-                        setXmlSidebarTab('xml');
-                    } catch (applyErr) {
-                        console.error('Failed to apply Music Agent functional harmony output', applyErr);
-                        setMusicAgentPatchError('Harmony analysis output was generated but Roman numeral annotations could not be applied to the score.');
-                    }
-                } else if (typeof asRecord(bodyPayload?.error)?.message === 'string') {
-                    setMusicAgentPatchError(String(asRecord(bodyPayload?.error)?.message));
-                } else if (typeof asRecord(resultPayload?.error)?.message === 'string') {
-                    setMusicAgentPatchError(String(asRecord(resultPayload?.error)?.message));
+                if (shouldApplyAnalysisResult && editProposal) {
+                    openAgentEditProposal(editProposal);
+                } else if (shouldApplyAnalysisResult && response.ok && !resultBody?.error) {
+                    setMusicAgentPatchError('Functional harmony analysis did not return a verified edit proposal.');
                 }
+            }
+
+            const resultBodyError = asRecord(resultBody?.error);
+            if (typeof resultBodyError?.message === 'string' && resultBodyError.message.trim()) {
+                setMusicAgentPatchError(resultBodyError.message.trim());
+            } else if (typeof resultBody?.error === 'string' && resultBody.error.trim()) {
+                setMusicAgentPatchError(resultBody.error.trim());
             }
 
             if (!response.ok) {
@@ -9107,24 +9232,6 @@ ${partsBodyXml}
                     error: outcome === 'failure' ? failureReason || undefined : undefined,
                 });
             }
-        }
-    };
-
-    const handleApplyMusicAgentPatch = async () => {
-        if (!musicAgentPatchedXml.trim()) {
-            alert(musicAgentPatchError || 'No agent-generated patch output is available yet.');
-            return;
-        }
-        setXmlLoading(true);
-        setXmlError(null);
-        try {
-            await applyXmlToScore(musicAgentPatchedXml, { telemetrySource: 'music_agent_patch' });
-            setXmlSidebarTab('xml');
-        } catch (err) {
-            console.error('Failed to apply Music Agent patch output', err);
-            alert('Failed to apply Music Agent output. See console for details.');
-        } finally {
-            setXmlLoading(false);
         }
     };
 
@@ -14689,7 +14796,6 @@ ${partsBodyXml}
                                                             setMusicAgentResult(null);
                                                             setMusicAgentPatch(null);
                                                             setMusicAgentPatchError(null);
-                                                            setMusicAgentPatchedXml('');
                                                         }}
                                                         disabled={musicAgentBusy || (!musicAgentThread.length && !musicAgentResult && !musicAgentPatch)}
                                                         className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -14750,17 +14856,7 @@ ${partsBodyXml}
                                             )}
                                             {musicAgentPatch && (
                                                 <div className="space-y-2">
-                                                    <div className="flex items-center justify-between text-xs text-gray-500">
-                                                        <span>Generated Patch</span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={handleApplyMusicAgentPatch}
-                                                            disabled={musicAgentBusy || !musicAgentPatchedXml.trim()}
-                                                            className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                        >
-                                                            Apply Patch
-                                                        </button>
-                                                    </div>
+                                                    <div className="text-xs text-gray-500">Generated Patch</div>
                                                     <CodeMirrorEditor
                                                         value={JSON.stringify(musicAgentPatch, null, 2)}
                                                         onChange={() => {}}
@@ -16279,6 +16375,14 @@ ${partsBodyXml}
                         </div>
                         )}
                         <div className={isEmbedMode ? "flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4" : "flex min-h-0 flex-1 flex-col gap-4 overflow-auto"}>
+                            {isAiCompareMode && aiProposalApplyError && (
+                                <div
+                                    role="alert"
+                                    className="rounded border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+                                >
+                                    {aiProposalApplyError}
+                                </div>
+                            )}
                             {!isEmbedMode && isAiCompareMode && (
                                 <div className="rounded border border-gray-300 bg-gray-100 p-3">
                                     <div className="text-xs font-semibold uppercase tracking-wide text-gray-900">

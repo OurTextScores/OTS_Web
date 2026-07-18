@@ -20,6 +20,7 @@ import {
 import { sanitizeEditorLaunchContext } from '../editor-launch-context';
 import {
   clearScoreOpsSessions,
+  computeScoreHash,
   createScoreOpsSession,
   getScoreOpsSession,
   updateScoreOpsSession,
@@ -403,6 +404,7 @@ const INSPECT_REQUEST_SCHEMA = z.object({
 
 const APPLY_REQUEST_SCHEMA = z.object({
   action: z.literal('apply'),
+  mutationMode: z.enum(['commit', 'proposal']).optional(),
   scoreSessionId: z.string().trim().min(1).optional(),
   baseRevision: z.number().int().min(0).optional(),
   inputArtifactId: z.string().trim().min(1).optional(),
@@ -2542,11 +2544,31 @@ async function ensureSessionForApplyOrSync(payload: {
 }
 
 async function applyOps(payload: z.infer<typeof APPLY_REQUEST_SCHEMA>): Promise<ScoreOpsServiceResult> {
-  const sessionResolution = await ensureSessionForApplyOrSync(payload);
-  if (sessionResolution.error) {
-    return sessionResolution.error;
+  const mutationMode = payload.mutationMode ?? 'commit';
+  let session: ScoreOpsSessionState | null = null;
+  if (mutationMode === 'proposal') {
+    const resolved = await resolveSourceMusicXml(payload);
+    if (resolved.error) {
+      return resolved.error;
+    }
+    const now = new Date().toISOString();
+    session = resolved.session ?? {
+      scoreSessionId: '',
+      revision: 0,
+      artifactId: resolved.artifact?.id ?? null,
+      contentHash: computeScoreHash(resolved.xml),
+      content: resolved.xml,
+      metadata: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+  } else {
+    const sessionResolution = await ensureSessionForApplyOrSync(payload);
+    if (sessionResolution.error) {
+      return sessionResolution.error;
+    }
+    session = sessionResolution.session;
   }
-  const session = sessionResolution.session;
   if (!session) {
     return errorResult(500, 'execution_failure', 'Failed to resolve ScoreOps session.');
   }
@@ -2739,6 +2761,68 @@ async function applyOps(payload: z.infer<typeof APPLY_REQUEST_SCHEMA>): Promise<
     });
   }
 
+  if (mutationMode === 'proposal') {
+    const responseBody: Record<string, unknown> = {
+      ok: true,
+      mutationMode,
+      scoreSessionId: session.scoreSessionId || null,
+      baseRevision: session.revision,
+      state: {
+        artifactId: session.artifactId,
+        contentHash: session.contentHash,
+      },
+      applied,
+      changes: {
+        summary: summaries.join(' '),
+        count: applied.filter((entry) => entry.ok).length,
+        ...(includeMeasureDiff ? {
+          measurePreview: collectMeasurePreview(workingXml, undefined, DEFAULT_INSPECT_MEASURE_LIMIT),
+        } : {}),
+      },
+      executor: {
+        preferred: preferredExecutor,
+        selected: selectedExecutor,
+        usedFallback: selectedExecutor === 'xml' && Boolean(fallbackReason),
+        ...(fallbackReason ? { fallbackReason } : {}),
+      },
+      proposal: {
+        sourceTool: 'music.scoreops',
+        baseXml: beforeXml,
+        proposedXml: workingXml,
+        baseScoreSessionId: session.scoreSessionId || null,
+        baseRevision: session.scoreSessionId ? session.revision : null,
+        baseContentHash: session.contentHash,
+        expectedCurrentContentHash: session.contentHash,
+        verification: {
+          level: 'tool_execution',
+        },
+      },
+    };
+
+    if (includeXml) {
+      responseBody.output = {
+        format: 'musicxml',
+        content: workingXml,
+      };
+    }
+    if (includePatch) {
+      const patchBundle = buildScoreOpsPatch(payload.ops, beforeXml, workingXml);
+      responseBody.patch = patchBundle.patch;
+      responseBody.patchMode = patchBundle.mode;
+      if (patchBundle.note) {
+        responseBody.patchNote = patchBundle.note;
+      }
+    }
+    if (pendingExports && Object.keys(pendingExports).length > 0) {
+      responseBody.exports = pendingExports;
+    }
+
+    return {
+      status: 200,
+      body: responseBody,
+    };
+  }
+
   const artifact = await createScoreArtifact({
     format: 'musicxml',
     content: workingXml,
@@ -2918,6 +3002,23 @@ export async function runMusicScoreOpsService(
     }
     throw error;
   }
+}
+
+export async function runMusicScoreOpsPreviewService(body: unknown): Promise<ScoreOpsServiceResult> {
+  const data = (body && typeof body === 'object') ? body as Record<string, unknown> : {};
+  const options = (data.options && typeof data.options === 'object')
+    ? data.options as Record<string, unknown>
+    : {};
+  return runMusicScoreOpsService({
+    ...data,
+    action: 'apply',
+    mutationMode: 'proposal',
+    options: {
+      ...options,
+      includeXml: true,
+      includeMeasureDiff: true,
+    },
+  }, 'apply');
 }
 
 const MAJOR_KEY_TO_FIFTHS: Record<string, number> = {
@@ -3620,6 +3721,7 @@ export async function runMusicScoreOpsPromptService(body: unknown): Promise<Scor
 
   const applyBody: Record<string, unknown> = {
     action: 'apply',
+    mutationMode: data.mutationMode === 'proposal' ? 'proposal' : 'commit',
     scoreSessionId: typeof data.scoreSessionId === 'string' ? data.scoreSessionId : undefined,
     baseRevision: typeof data.baseRevision === 'number' ? data.baseRevision : undefined,
     inputArtifactId: typeof data.inputArtifactId === 'string' ? data.inputArtifactId : (typeof data.input_artifact_id === 'string' ? data.input_artifact_id : undefined),

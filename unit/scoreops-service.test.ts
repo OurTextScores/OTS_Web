@@ -155,7 +155,13 @@ vi.mock('../lib/webmscore-loader', () => ({
   loadWebMscoreInProcess: mocked.loadWebMscoreInProcess,
 }));
 
-import { runMusicScoreOpsPromptService, runMusicScoreOpsService, __scoreOpsTestOnly } from '../lib/music-services/scoreops-service';
+import {
+  runMusicScoreOpsPreviewService,
+  runMusicScoreOpsPromptService,
+  runMusicScoreOpsService,
+  __scoreOpsTestOnly,
+} from '../lib/music-services/scoreops-service';
+import { getScoreOpsSession } from '../lib/music-services/scoreops-session-store';
 
 const SAMPLE_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <score-partwise version="4.0">
@@ -262,6 +268,57 @@ describe('runMusicScoreOpsService', () => {
     expect(Array.isArray(patch.ops)).toBe(true);
     expect(patch.ops?.some((op) => op.path.includes('/attributes/key/fifths') && op.value === '1')).toBe(true);
     expect(patch.ops?.some((op) => op.path.includes('/attributes/time/beats') && op.value === '3')).toBe(true);
+  });
+
+  it('previews operations without mutating the source session or creating an artifact', async () => {
+    const open = await runMusicScoreOpsService({ action: 'open', content: SAMPLE_XML }, 'open');
+    const scoreSessionId = String(open.body.scoreSessionId);
+    const before = structuredClone(getScoreOpsSession(scoreSessionId));
+    const artifactCount = mocked.createScoreArtifact.mock.calls.length;
+
+    const preview = await runMusicScoreOpsPreviewService({
+      scoreSessionId,
+      baseRevision: 0,
+      ops: [{ op: 'set_key_signature', fifths: 1 }],
+    });
+
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({
+      ok: true,
+      mutationMode: 'proposal',
+      scoreSessionId,
+      baseRevision: 0,
+      proposal: {
+        sourceTool: 'music.scoreops',
+        baseXml: SAMPLE_XML,
+        proposedXml: expect.stringContaining('<fifths>1</fifths>'),
+        baseScoreSessionId: scoreSessionId,
+        baseRevision: 0,
+        baseContentHash: before?.contentHash,
+        expectedCurrentContentHash: before?.contentHash,
+        verification: { level: 'tool_execution' },
+      },
+    });
+    expect(getScoreOpsSession(scoreSessionId)).toEqual(before);
+    expect(mocked.createScoreArtifact).toHaveBeenCalledTimes(artifactCount);
+  });
+
+  it('previews direct MusicXML without creating a session artifact', async () => {
+    const preview = await runMusicScoreOpsPreviewService({
+      content: SAMPLE_XML,
+      ops: [{ op: 'set_metadata_text', field: 'title', value: 'Proposed Title' }],
+    });
+
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({
+      scoreSessionId: null,
+      proposal: {
+        baseScoreSessionId: null,
+        baseRevision: null,
+        proposedXml: expect.stringContaining('<movement-title>Proposed Title</movement-title>'),
+      },
+    });
+    expect(mocked.createScoreArtifact).not.toHaveBeenCalled();
   });
 
   it('persists launch context metadata on open and sync', async () => {

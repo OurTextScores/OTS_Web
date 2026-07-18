@@ -4,10 +4,15 @@ test.describe('Music Agent: Score Sessions & Persistence', () => {
   test('Agent perceives score changes across multiple turns via the same scoreSessionId', async ({ page }) => {
     const sessionId = 'persistent-session-id';
     let serverXml = '<score-partwise><work><work-title>Original Title</work-title></work></score-partwise>';
+    let markSessionOpened!: () => void;
+    const sessionOpened = new Promise<void>((resolve) => {
+      markSessionOpened = resolve;
+    });
 
     // 1. Mock Session Open/Sync
     await page.route('**/api/music/scoreops/session/open', async (route) => {
       await route.fulfill({ status: 200, body: JSON.stringify({ scoreSessionId: sessionId, revision: 0 }) });
+      markSessionOpened();
     });
 
     await page.route('**/api/music/scoreops/sync', async (route) => {
@@ -45,12 +50,18 @@ test.describe('Music Agent: Score Sessions & Persistence', () => {
 
     // EXECUTION
     // 3. Initial load
-    await page.goto('/?score=/test_scores/single_note_c4.musicxml', { waitUntil: 'networkidle' });
+    await page.goto('/?score=/test_scores/single_note_c4.musicxml', { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('svg');
+    await sessionOpened;
+    await page.waitForTimeout(100);
 
     // 4. Turn 1: Ask about current title
     // 3. Switch to Assistant tab -> Agent mode
-    await page.getByTestId('tab-assistant').click();
+    const openSidebar = page.getByRole('button', { name: 'Open MusicXML sidebar' });
+    if (await openSidebar.isVisible()) {
+      await openSidebar.click();
+    }
+    await page.getByTestId('tab-ai').click();
     await page.getByRole('button', { name: 'Agent' }).click();
 
     await page.getByPlaceholder('Describe what you want the agent to do.').fill('What is the title?');

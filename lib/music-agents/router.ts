@@ -5,6 +5,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { OpenAI } from 'openai';
 import { z } from 'zod';
 import { allowServerCredentialFallback } from '../api-access-control';
+import { buildAiEditProposal } from '../music-services/ai-edit-proposal';
 import { runMusicContextService } from '../music-services/context-service';
 import { runMusicConvertService } from '../music-services/convert-service';
 import { runDiffFeedbackService } from '../music-services/diff-feedback-service';
@@ -13,7 +14,10 @@ import { runMusicGenerateService } from '../music-services/generate-service';
 import { runHarmonyAnalyzeService } from '../music-services/harmony-service';
 import { runMusicPatchService } from '../music-services/patch-service';
 import { runMusicRenderService } from '../music-services/render-service';
-import { runMusicScoreOpsPromptService, runMusicScoreOpsService } from '../music-services/scoreops-service';
+import {
+  runMusicScoreOpsPreviewService,
+  runMusicScoreOpsPromptService,
+} from '../music-services/scoreops-service';
 import { type TraceContext } from '../trace-http';
 import {
   MUSIC_CONTEXT_TOOL_CONTRACT,
@@ -378,6 +382,21 @@ function extractPlannerDetails(scoreOpsBody: Record<string, unknown> | null) {
   };
 }
 
+async function attachAiEditProposal(
+  body: Record<string, unknown>,
+  sourceTool: string,
+  source: unknown,
+  proposedXml: string,
+) {
+  const proposal = await buildAiEditProposal({
+    sourceTool,
+    source,
+    proposedXml,
+    verification: body.verification,
+  });
+  return proposal ? { ...body, proposal } : body;
+}
+
 async function runPatchFallback(
   prompt: string | AgentInputItem[],
   patchDefaults: Record<string, unknown>,
@@ -398,6 +417,10 @@ async function runPatchFallback(
   const patchResult = trace?.traceContext
     ? await runMusicPatchService(patchPayload, { traceContext: trace.traceContext })
     : await runMusicPatchService(patchPayload);
+  const proposedXml = typeof patchResult.body.proposedXml === 'string' ? patchResult.body.proposedXml : '';
+  const resultBody = patchResult.status < 400 && proposedXml
+    ? await attachAiEditProposal(patchResult.body, 'music.patch', patchPayload, proposedXml)
+    : patchResult.body;
   return {
     status: patchResult.status,
     body: {
@@ -408,7 +431,7 @@ async function runPatchFallback(
       response: patchResult.status < 400
         ? 'Generated patch fallback after ScoreOps routing decision.'
         : 'ScoreOps routing and patch fallback both failed.',
-      result: patchResult.body,
+      result: resultBody,
       scoreOpsAttempt,
       scoreOpsRouting: {
         reason,
@@ -479,9 +502,18 @@ async function runFallbackRouter(
     if (!harmonyDefaults.content && typeof contextDefaults?.content === 'string') {
       harmonyDefaults.content = contextDefaults.content;
     }
+    if (!harmonyDefaults.scoreSessionId && typeof contextDefaults?.scoreSessionId === 'string') {
+      harmonyDefaults.scoreSessionId = contextDefaults.scoreSessionId;
+      harmonyDefaults.baseRevision = contextDefaults.baseRevision;
+    }
     const result = trace?.traceContext
       ? await runHarmonyAnalyzeService(harmonyDefaults, { traceContext: trace.traceContext })
       : await runHarmonyAnalyzeService(harmonyDefaults);
+    const harmonyContent = asRecord(result.body.content);
+    const proposedXml = typeof harmonyContent?.musicxml === 'string' ? harmonyContent.musicxml : '';
+    const resultBody = applyToScore && result.status < 400 && proposedXml
+      ? await attachAiEditProposal(result.body, selectedTool, harmonyDefaults, proposedXml)
+      : result.body;
     return {
       status: result.status,
       body: {
@@ -493,7 +525,7 @@ async function runFallbackRouter(
           ? 'Chord-symbol analysis completed via fallback router.'
           : 'Chord-symbol analysis failed in fallback router.',
         applyToScore,
-        result: result.body,
+        result: resultBody,
       },
     };
   }
@@ -505,9 +537,17 @@ async function runFallbackRouter(
     if (!functionalDefaults.content && typeof contextDefaults?.content === 'string') {
       functionalDefaults.content = contextDefaults.content;
     }
+    if (!functionalDefaults.scoreSessionId && typeof contextDefaults?.scoreSessionId === 'string') {
+      functionalDefaults.scoreSessionId = contextDefaults.scoreSessionId;
+      functionalDefaults.baseRevision = contextDefaults.baseRevision;
+    }
     const result = trace?.traceContext
       ? await runFunctionalHarmonyAnalyzeService(functionalDefaults, { traceContext: trace.traceContext })
       : await runFunctionalHarmonyAnalyzeService(functionalDefaults);
+    const proposedXml = typeof result.body.annotatedXml === 'string' ? result.body.annotatedXml : '';
+    const resultBody = applyToScore && result.status < 400 && proposedXml
+      ? await attachAiEditProposal(result.body, selectedTool, functionalDefaults, proposedXml)
+      : result.body;
     return {
       status: result.status,
       body: {
@@ -519,7 +559,7 @@ async function runFallbackRouter(
           ? 'Functional harmony analysis completed via fallback router.'
           : 'Functional harmony analysis failed in fallback router.',
         applyToScore,
-        result: result.body,
+        result: resultBody,
       },
     };
   }
@@ -540,6 +580,10 @@ async function runFallbackRouter(
     const result = trace?.traceContext
       ? await runMusicPatchService(patchPayload, { traceContext: trace.traceContext })
       : await runMusicPatchService(patchPayload);
+    const proposedXml = typeof result.body.proposedXml === 'string' ? result.body.proposedXml : '';
+    const resultBody = result.status < 400 && proposedXml
+      ? await attachAiEditProposal(result.body, selectedTool, patchPayload, proposedXml)
+      : result.body;
     return {
       status: result.status,
       body: {
@@ -550,7 +594,7 @@ async function runFallbackRouter(
         response: result.status < 400
           ? 'Patch generated via fallback router.'
           : 'Patch generation failed in fallback router.',
-        result: result.body,
+        result: resultBody,
       },
     };
   }
@@ -565,7 +609,7 @@ async function runFallbackRouter(
 
     // If ops array is provided (e.g., from a future UI), execute directly
     if (Array.isArray(scoreOpsDefaults.ops) && scoreOpsDefaults.ops.length > 0) {
-      const directResult = await runMusicScoreOpsService({
+      const directResult = await runMusicScoreOpsPreviewService({
         action: 'apply',
         scoreSessionId: scoreOpsDefaults.scoreSessionId,
         baseRevision: scoreOpsDefaults.baseRevision,
@@ -578,7 +622,7 @@ async function runFallbackRouter(
           includeMeasureDiff: true,
           ...(scoreOpsDefaults.options || {}),
         },
-      }, 'apply');
+      });
       return {
         status: directResult.status,
         body: {
@@ -587,7 +631,7 @@ async function runFallbackRouter(
           toolStatus: directResult.status,
           toolOk: directResult.status < 400,
           response: directResult.status < 400
-            ? 'Score operations applied via direct ops execution.'
+            ? 'Score operations prepared as a verified proposal.'
             : 'Direct ops execution failed.',
           result: directResult.body,
         },
@@ -596,6 +640,7 @@ async function runFallbackRouter(
 
     const scoreOpsPayload = {
       ...scoreOpsDefaults,
+      mutationMode: 'proposal',
       prompt: typeof scoreOpsDefaults.prompt === 'string' && scoreOpsDefaults.prompt.trim()
         ? scoreOpsDefaults.prompt
         : promptText,
@@ -624,8 +669,8 @@ async function runFallbackRouter(
           toolStatus: scoreOpsResult.status,
           toolOk: true,
           response: unsupportedSteps.length
-            ? 'Applied supported ScoreOps steps; some requested steps are not yet supported.'
-            : 'Score operations applied via fallback router.',
+            ? 'Prepared supported ScoreOps steps as a proposal; some requested steps are not yet supported.'
+            : 'Score operations prepared as a verified proposal.',
           result: scoreOpsResult.body,
           scoreOpsRouting: {
             reason: unsupportedSteps.length ? 'partially_mappable' : 'fully_mappable',
@@ -653,7 +698,7 @@ async function runFallbackRouter(
       traceLog(trace, 'music_agent.scoreops.retry_xml.start', {
         parsedOpsCount: parsedOps.length,
       });
-      const retryResult = await runMusicScoreOpsService({
+      const retryResult = await runMusicScoreOpsPreviewService({
         action: 'apply',
         scoreSessionId: scoreOpsPayload.scoreSessionId,
         baseRevision: scoreOpsPayload.baseRevision,
@@ -669,7 +714,7 @@ async function runFallbackRouter(
           includeMeasureDiff: true,
           preferredExecutor: 'xml',
         },
-      }, 'apply');
+      });
       traceLog(trace, 'music_agent.scoreops.retry_xml.result', {
         status: retryResult.status,
       });
@@ -682,7 +727,7 @@ async function runFallbackRouter(
             selectedTool: 'music.scoreops',
             toolStatus: retryResult.status,
             toolOk: true,
-            response: 'Recovered ScoreOps execution via xml executor retry.',
+            response: 'Prepared a verified ScoreOps proposal via XML executor retry.',
             result: {
               ok: true,
               mode: 'scoreops-retry',
@@ -875,11 +920,16 @@ function createMusicRouterAgent() {
         ? await runHarmonyAnalyzeService(payload, { traceContext: toolTrace.traceContext })
         : await runHarmonyAnalyzeService(payload);
       console.info(`[music-agent] Tool music.harmony_analyze completed: status=${result.status}`);
+      const harmonyContent = asRecord(result.body.content);
+      const proposedXml = typeof harmonyContent?.musicxml === 'string' ? harmonyContent.musicxml : '';
+      const resultBody = payload.applyToScore === true && result.status < 400 && proposedXml
+        ? await attachAiEditProposal(result.body, 'music.harmony_analyze', payload, proposedXml)
+        : result.body;
       const fullResult = {
         tool: 'music.harmony_analyze',
         status: result.status,
         ok: result.status < 400,
-        body: result.body,
+        body: resultBody,
         scoreSessionId: (result.body as any).scoreSessionId,
         revision: (result.body as any).revision,
       };
@@ -910,11 +960,15 @@ function createMusicRouterAgent() {
         ? await runFunctionalHarmonyAnalyzeService(payload, { traceContext: toolTrace.traceContext })
         : await runFunctionalHarmonyAnalyzeService(payload);
       console.info(`[music-agent] Tool music.functional_harmony_analyze completed: status=${result.status}`);
+      const proposedXml = typeof result.body.annotatedXml === 'string' ? result.body.annotatedXml : '';
+      const resultBody = payload.applyToScore === true && result.status < 400 && proposedXml
+        ? await attachAiEditProposal(result.body, 'music.functional_harmony_analyze', payload, proposedXml)
+        : result.body;
       const fullResult = {
         tool: 'music.functional_harmony_analyze',
         status: result.status,
         ok: result.status < 400,
-        body: result.body,
+        body: resultBody,
         scoreSessionId: (result.body as any).scoreSessionId,
         revision: (result.body as any).revision,
       };
@@ -941,11 +995,15 @@ function createMusicRouterAgent() {
         ? await runMusicPatchService(payload, { traceContext: toolTrace.traceContext })
         : await runMusicPatchService(payload);
       console.info(`[music-agent] Tool music.patch completed: status=${result.status}`);
+      const proposedXml = typeof result.body.proposedXml === 'string' ? result.body.proposedXml : '';
+      const resultBody = result.status < 400 && proposedXml
+        ? await attachAiEditProposal(result.body, 'music.patch', payload, proposedXml)
+        : result.body;
       const fullResult = {
         tool: 'music.patch',
         status: result.status,
         ok: result.status < 400,
-        body: result.body,
+        body: resultBody,
         scoreSessionId: (result.body as any).scoreSessionId,
         revision: (result.body as any).revision,
       };
@@ -982,7 +1040,7 @@ function createMusicRouterAgent() {
             hasSession: Boolean(payload.scoreSessionId),
           });
         }
-        const result = await runMusicScoreOpsService({
+        const result = await runMusicScoreOpsPreviewService({
           action: 'apply',
           scoreSessionId: payload.scoreSessionId,
           baseRevision: payload.baseRevision,
@@ -995,7 +1053,7 @@ function createMusicRouterAgent() {
             includeXml: true,
             includeMeasureDiff: true,
           },
-        }, 'apply');
+        });
         if (toolTrace) {
           traceLog(toolTrace, 'music_agent.scoreops.direct_ops.result', {
             status: result.status,
@@ -1016,7 +1074,10 @@ function createMusicRouterAgent() {
       }
 
       // Fallback to prompt-based parsing
-      const result = await runMusicScoreOpsPromptService(payload);
+      const result = await runMusicScoreOpsPromptService({
+        ...payload,
+        mutationMode: 'proposal',
+      });
       console.info(`[music-agent] Tool music.scoreops (prompt) completed: status=${result.status}`);
       const fullResult = { 
         tool: 'music.scoreops', 
@@ -1089,6 +1150,8 @@ function createMusicRouterAgent() {
       'Use music_harmony_analyze for chord-symbol / harmony-tag tasks. Use music_functional_harmony_analyze for Roman numerals, cadences, modulations, and local-key analysis.',
       'When using music_harmony_analyze or music_functional_harmony_analyze, set `applyToScore: true` only if the user actually wants the score annotated and the tool result contains applyable MusicXML.',
       'If the user wants analysis only, leave `applyToScore` false or omit it.',
+      'XML-producing edit tools return verified proposals for the compare view. They do not mutate the live score.',
+      'Do not claim that an edit was applied. The user commits proposals only with Apply or Apply All in the editor.',
       'If you need to see the score visual layout or particulars, call music_render.',
       'NEVER ask the user to provide the MusicXML, PDF, or image of the current score unless you have first tried the tools and they failed.',
       'If a tool returns "session_not_found", it means the server-side cache was cleared; in this case, and ONLY in this case, should you ask the user to "Refresh the score session".',
