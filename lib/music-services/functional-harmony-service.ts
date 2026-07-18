@@ -4,7 +4,7 @@ import { constants as fsConstants } from 'node:fs';
 import { join } from 'node:path';
 import { createScoreArtifact, summarizeScoreArtifact } from '../score-artifacts';
 import type { TraceContext } from '../trace-http';
-import { asRecord, errorResult, looksLikeMusicXml, readBoolean, resolveScoreContent, type ServiceResult } from './common';
+import { asRecord, errorResult, looksLikeMusicXml, readBoolean, resolvedScoreSnapshot, resolveScoreContent, type ServiceResult } from './common';
 
 type FunctionalHarmonyServiceOptions = {
   traceContext?: TraceContext;
@@ -407,6 +407,7 @@ export async function runFunctionalHarmonyAnalyzeService(
       scoreSessionId: resolution.session?.scoreSessionId ?? null,
       revision: resolution.session?.revision ?? null,
       sourceArtifactId: resolution.artifact?.id ?? null,
+      resolvedBase: resolvedScoreSnapshot(resolution),
     },
   };
 }

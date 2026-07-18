@@ -10,7 +10,7 @@ import { allowServerCredentialFallback } from '../api-access-control';
 import { extractPatchAnnotations, PATCH_ANNOTATIONS_INSTRUCTION } from '../patch-annotations';
 import { summarizeScoreArtifact } from '../score-artifacts';
 import { type TraceContext } from '../trace-http';
-import { asRecord, looksLikeMusicXml, resolveScoreContent } from './common';
+import { asRecord, looksLikeMusicXml, resolvedScoreSnapshot, resolveScoreContent } from './common';
 
 type PatchServiceResult = {
   status: number;
@@ -943,6 +943,7 @@ export async function runMusicPatchService(
         patch: generated.patch,
         annotations: generated.annotations,
         proposedXml: generated.proposedXml,
+        resolvedBase: resolvedScoreSnapshot(resolution),
         verification: generated.verification,
       },
     };

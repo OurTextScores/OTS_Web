@@ -228,6 +228,12 @@ describe('runMusicPatchService', () => {
         ],
       },
       proposedXml: expect.stringContaining('<duration>2</duration>'),
+      resolvedBase: {
+        xml: BASE_XML,
+        scoreSessionId: null,
+        revision: null,
+        contentHash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      },
       verification: {
         level: 'patch_apply',
         attempts: 1,

@@ -164,11 +164,18 @@ describe('runMusicAgentRouter', () => {
 
   it('marks fallback functional harmony requests as applyable when prompt explicitly asks to add Roman numerals to the score', async () => {
     delete process.env.OPENAI_API_KEY;
+    const resolvedXml = '<score-partwise version="3.1"><work><work-title>Resolved base</work-title></work></score-partwise>';
     mocked.runFunctionalHarmonyAnalyzeService.mockResolvedValue({
       status: 200,
       body: {
         ok: true,
         annotatedXml: '<score-partwise version="3.1"><direction/></score-partwise>',
+        resolvedBase: {
+          xml: resolvedXml,
+          scoreSessionId: 'captured-session',
+          revision: 7,
+          contentHash: 'sha256:captured',
+        },
       },
     });
 
@@ -190,8 +197,11 @@ describe('runMusicAgentRouter', () => {
       result: {
         proposal: {
           sourceTool: 'music.functional_harmony_analyze',
-          baseXml: '<score-partwise version="3.1"></score-partwise>',
+          baseXml: resolvedXml,
           proposedXml: '<score-partwise version="3.1"><direction/></score-partwise>',
+          baseScoreSessionId: 'captured-session',
+          baseRevision: 7,
+          baseContentHash: 'sha256:captured',
           verification: { level: 'tool_execution' },
         },
       },
@@ -290,6 +300,12 @@ describe('runMusicAgentRouter', () => {
           ops: [],
         },
         proposedXml: '<score-partwise version="3.1"><credit/></score-partwise>',
+        resolvedBase: {
+          xml: '<score-partwise version="3.1"></score-partwise>',
+          scoreSessionId: null,
+          revision: null,
+          contentHash: 'sha256:patch-base',
+        },
       },
     });
 

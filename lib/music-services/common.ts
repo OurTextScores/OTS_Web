@@ -1,5 +1,5 @@
 import { getScoreArtifact, type ScoreArtifact } from '../score-artifacts';
-import { getScoreOpsSession, type ScoreOpsSessionState } from './scoreops-session-store';
+import { computeScoreHash, getScoreOpsSession, type ScoreOpsSessionState } from './scoreops-session-store';
 
 export type ServiceResult = {
   status: number;
@@ -12,6 +12,22 @@ export type ScoreContentResolution = {
   session: ScoreOpsSessionState | null;
   error?: ServiceResult;
 };
+
+export type ResolvedScoreSnapshot = {
+  xml: string;
+  scoreSessionId: string | null;
+  revision: number | null;
+  contentHash: string;
+};
+
+export function resolvedScoreSnapshot(resolution: ScoreContentResolution): ResolvedScoreSnapshot {
+  return {
+    xml: resolution.xml,
+    scoreSessionId: resolution.session?.scoreSessionId ?? null,
+    revision: resolution.session?.revision ?? null,
+    contentHash: resolution.session?.contentHash ?? computeScoreHash(resolution.xml),
+  };
+}
 
 export const asRecord = (value: unknown): Record<string, unknown> | null => (
   value && typeof value === 'object' ? value as Record<string, unknown> : null

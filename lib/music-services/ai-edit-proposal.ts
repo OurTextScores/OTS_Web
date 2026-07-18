@@ -1,5 +1,4 @@
-import { computeScoreHash } from './scoreops-session-store';
-import { resolveScoreContent } from './common';
+import type { ResolvedScoreSnapshot } from './common';
 
 export type AiEditProposal = {
   sourceTool: string;
@@ -18,7 +17,7 @@ export type AiEditProposal = {
 
 type BuildAiEditProposalArgs = {
   sourceTool: string;
-  source: unknown;
+  base: ResolvedScoreSnapshot;
   proposedXml: string;
   verification?: unknown;
 };
@@ -27,14 +26,10 @@ const asRecord = (value: unknown): Record<string, unknown> | null => (
   value && typeof value === 'object' ? value as Record<string, unknown> : null
 );
 
-export async function buildAiEditProposal(
+export function buildAiEditProposal(
   args: BuildAiEditProposalArgs,
-): Promise<AiEditProposal | null> {
-  if (!args.proposedXml.trim()) {
-    return null;
-  }
-  const resolution = await resolveScoreContent(args.source);
-  if (resolution.error || !resolution.xml.trim()) {
+): AiEditProposal | null {
+  if (!args.proposedXml.trim() || !args.base.xml.trim() || !args.base.contentHash.trim()) {
     return null;
   }
 
@@ -42,16 +37,15 @@ export async function buildAiEditProposal(
   const verificationLevel = verificationInput?.level === 'patch_apply'
     ? 'patch_apply'
     : 'tool_execution';
-  const baseContentHash = resolution.session?.contentHash ?? computeScoreHash(resolution.xml);
 
   return {
     sourceTool: args.sourceTool,
-    baseXml: resolution.xml,
+    baseXml: args.base.xml,
     proposedXml: args.proposedXml,
-    baseScoreSessionId: resolution.session?.scoreSessionId ?? null,
-    baseRevision: resolution.session?.revision ?? null,
-    baseContentHash,
-    expectedCurrentContentHash: baseContentHash,
+    baseScoreSessionId: args.base.scoreSessionId,
+    baseRevision: args.base.revision,
+    baseContentHash: args.base.contentHash,
+    expectedCurrentContentHash: args.base.contentHash,
     verification: {
       level: verificationLevel,
       ...(typeof verificationInput?.attempts === 'number' ? { attempts: verificationInput.attempts } : {}),
