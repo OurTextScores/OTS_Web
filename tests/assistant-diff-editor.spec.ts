@@ -1,10 +1,14 @@
+import { createHash } from 'node:crypto';
+
 import { expect, test } from '@playwright/test';
+import { computeMusicXmlIdentityHashServer } from '../lib/musicxml-identity-server';
 
 const OPENAI_MODELS_RESPONSE = {
   models: ['gpt-test-model'],
 };
 
 const SCORE_SESSION_ID = 'sess_assistant_diff_test';
+const scoreHash = (xml: string) => `sha256:${createHash('sha256').update(xml, 'utf8').digest('hex')}`;
 
 const PATCH_RESPONSE = {
   patch: {
@@ -158,11 +162,29 @@ test.describe('Assistant diff editor flow', () => {
     await page.route('**/api/music/patch', async (route) => {
       patchRequest = route.request().postDataJSON();
       const baseXml = String(patchRequest?.content || '');
-      const proposedXml = baseXml.replace(/<step>\s*C\s*<\/step>/, '<step>G</step>');
-      expect(proposedXml).not.toBe(baseXml);
+      const proposalBaseXml = baseXml.replace('<score-partwise', '<!-- server serialization -->\n<score-partwise');
+      const proposedXml = proposalBaseXml.replace(/<step>\s*C\s*<\/step>/, '<step>G</step>');
+      const baseContentHash = scoreHash(proposalBaseXml);
+      const baseIdentityHash = computeMusicXmlIdentityHashServer(proposalBaseXml);
+      expect(proposedXml).not.toBe(proposalBaseXml);
       await route.fulfill({
         status: 200,
-        body: JSON.stringify({ ...PATCH_RESPONSE, proposedXml }),
+        body: JSON.stringify({
+          ...PATCH_RESPONSE,
+          proposedXml,
+          proposal: {
+            sourceTool: 'music.patch',
+            baseXml: proposalBaseXml,
+            proposedXml,
+            baseScoreSessionId: null,
+            baseRevision: null,
+            baseContentHash,
+            expectedCurrentContentHash: baseContentHash,
+            baseIdentityHash,
+            expectedCurrentIdentityHash: baseIdentityHash,
+            verification: PATCH_RESPONSE.verification,
+          },
+        }),
       });
     });
 

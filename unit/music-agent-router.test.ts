@@ -202,6 +202,8 @@ describe('runMusicAgentRouter', () => {
           baseScoreSessionId: 'captured-session',
           baseRevision: 7,
           baseContentHash: 'sha256:captured',
+          baseIdentityHash: expect.stringMatching(/^xmlid-v1:[a-f0-9]{64}$/),
+          expectedCurrentIdentityHash: expect.stringMatching(/^xmlid-v1:[a-f0-9]{64}$/),
           verification: { level: 'tool_execution' },
         },
       },

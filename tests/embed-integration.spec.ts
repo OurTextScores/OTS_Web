@@ -10,6 +10,18 @@ import { test, expect } from '@playwright/test';
 
 const BASE = 'http://localhost:8080';
 
+test('static editor bundle loads the score without runtime errors', async ({ page }) => {
+  const pageErrors: Error[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error));
+
+  await page.goto(`${BASE}/score-editor/index.html?score=/score-editor/test_scores/three_notes_cde.musicxml`, {
+    waitUntil: 'domcontentloaded',
+  });
+  await page.waitForSelector('svg .Note', { timeout: 60_000 });
+
+  expect(pageErrors).toEqual([]);
+});
+
 test.describe('Analytics Stub', () => {
   test.beforeEach(async ({ request }) => {
     // Clear captured events before each test

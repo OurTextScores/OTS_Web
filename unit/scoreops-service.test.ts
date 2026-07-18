@@ -296,6 +296,8 @@ describe('runMusicScoreOpsService', () => {
         baseRevision: 0,
         baseContentHash: before?.contentHash,
         expectedCurrentContentHash: before?.contentHash,
+        baseIdentityHash: expect.stringMatching(/^xmlid-v1:[a-f0-9]{64}$/),
+        expectedCurrentIdentityHash: expect.stringMatching(/^xmlid-v1:[a-f0-9]{64}$/),
         verification: { level: 'tool_execution' },
       },
     });

@@ -1,14 +1,19 @@
 import { createHash } from 'node:crypto';
 
 import { expect, test } from '@playwright/test';
+import { computeMusicXmlIdentityHashServer } from '../lib/musicxml-identity-server';
 
 const scoreHash = (xml: string) => `sha256:${createHash('sha256').update(xml, 'utf8').digest('hex')}`;
 
 async function openScoreOpsProposal(
   page: import('@playwright/test').Page,
-  options: { stale?: boolean } = {},
+  options: { stale?: boolean; serializationDrift?: boolean } = {},
 ) {
-  const sessionId = options.stale ? 'proposal-stale-session' : 'proposal-apply-session';
+  const sessionId = options.stale
+    ? 'proposal-stale-session'
+    : options.serializationDrift
+      ? 'proposal-serialization-session'
+      : 'proposal-apply-session';
   let baseXml = '';
   let syncCount = 0;
   let lastSyncedXml = '';
@@ -34,16 +39,23 @@ async function openScoreOpsProposal(
   });
   await page.route('**/api/music/agent', async (route) => {
     const request = route.request().postDataJSON();
-    const proposalBaseXml = typeof request.toolInput.scoreops.content === 'string'
+    const requestBaseXml = typeof request.toolInput.scoreops.content === 'string'
       ? request.toolInput.scoreops.content
       : baseXml;
+    const proposalBaseXml = options.serializationDrift
+      ? requestBaseXml.replace('<score-partwise', '<!-- serialization drift -->\n<score-partwise')
+      : requestBaseXml;
     expect(proposalBaseXml).toContain('<score-partwise');
+    if (options.serializationDrift) {
+      expect(proposalBaseXml).not.toBe(requestBaseXml);
+    }
     const proposedXml = proposalBaseXml.replace(
       /<fifths>\s*0\s*<\/fifths>/,
       '<fifths>1</fifths>',
     );
     expect(proposedXml).not.toBe(proposalBaseXml);
     const baseContentHash = scoreHash(proposalBaseXml);
+    const baseIdentityHash = computeMusicXmlIdentityHashServer(proposalBaseXml);
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -65,6 +77,10 @@ async function openScoreOpsProposal(
               expectedCurrentContentHash: options.stale
                 ? `sha256:${'0'.repeat(64)}`
                 : baseContentHash,
+              baseIdentityHash,
+              expectedCurrentIdentityHash: options.stale
+                ? `xmlid-v1:${'0'.repeat(64)}`
+                : baseIdentityHash,
               verification: { level: 'tool_execution' },
             },
           },
@@ -100,6 +116,15 @@ async function openScoreOpsProposal(
 test('Music Agent proposal does not mutate until Apply All', async ({ page }) => {
   const state = await openScoreOpsProposal(page);
   expect(state.getSyncCount()).toBe(state.syncCountBeforeAgent);
+
+  await page.getByRole('button', { name: 'Apply All AI Changes' }).click();
+
+  await expect.poll(state.getSyncCount, { timeout: 30_000 }).toBeGreaterThan(state.syncCountBeforeAgent);
+  expect(state.getLastSyncedXml()).toContain('<fifths>1</fifths>');
+});
+
+test('Music Agent proposal survives identity-equivalent serialization drift', async ({ page }) => {
+  const state = await openScoreOpsProposal(page, { serializationDrift: true });
 
   await page.getByRole('button', { name: 'Apply All AI Changes' }).click();
 

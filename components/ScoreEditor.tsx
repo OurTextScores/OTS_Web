@@ -80,7 +80,7 @@ import {
     MMA_GROOVE_OPTION_GROUPS,
 } from '../lib/music-mma-grooves';
 import {
-    computeClientScoreHash,
+    computeClientProposalHashes,
     verifyAiProposalCurrentContent,
 } from '../lib/ai-edit-proposal-client';
 
@@ -117,6 +117,8 @@ type AiEditProposal = {
     baseRevision: number | null;
     baseContentHash: string;
     expectedCurrentContentHash: string;
+    baseIdentityHash?: string;
+    expectedCurrentIdentityHash?: string;
     verification: {
         level: 'patch_apply' | 'tool_execution';
     };
@@ -375,6 +377,8 @@ const findAiEditProposal = (value: unknown): AiEditProposal | null => {
             && typeof proposal.proposedXml === 'string'
             && typeof proposal.baseContentHash === 'string'
             && typeof proposal.expectedCurrentContentHash === 'string'
+            && (proposal.baseIdentityHash == null || typeof proposal.baseIdentityHash === 'string')
+            && (proposal.expectedCurrentIdentityHash == null || typeof proposal.expectedCurrentIdentityHash === 'string')
             && (verification?.level === 'patch_apply' || verification?.level === 'tool_execution')
         ) {
             return proposal as AiEditProposal;
@@ -1142,6 +1146,7 @@ export default function ScoreEditor() {
     const [compareView, setCompareView] = useState<CompareViewState | null>(null);
     const [compareSwapped, setCompareSwapped] = useState(false);
     const aiProposalExpectedCurrentHashRef = useRef<string | null>(null);
+    const aiProposalExpectedCurrentIdentityHashRef = useRef<string | null>(null);
     const aiProposalBaseXmlRef = useRef('');
     const aiProposalApplyErrorRef = useRef<string | null>(null);
     const [aiProposalApplyError, setAiProposalApplyError] = useState<string | null>(null);
@@ -6133,10 +6138,12 @@ ${partsBodyXml}
                 try {
                     const hashCheck = await verifyAiProposalCurrentContent({
                         expectedCurrentContentHash: aiProposalExpectedCurrentHashRef.current,
+                        expectedCurrentIdentityHash: aiProposalExpectedCurrentIdentityHashRef.current,
                         baseXml: aiProposalBaseXmlRef.current || compareView.currentXml,
                         currentXml: liveXml,
                     });
                     aiProposalExpectedCurrentHashRef.current = hashCheck.expectedCurrentContentHash;
+                    aiProposalExpectedCurrentIdentityHashRef.current = hashCheck.expectedCurrentIdentityHash;
                     if (!hashCheck.ok) {
                         const message = 'The score changed after this proposal was generated. Regenerate or rebase the proposal before applying it.';
                         aiProposalApplyErrorRef.current = message;
@@ -6182,13 +6189,16 @@ ${partsBodyXml}
                 const appliedXml = await getScoreMusicXmlText(scoreRef.current ?? targetScore, patched.xml) || patched.xml;
                 if (isAiProposalCommit) {
                     try {
-                        aiProposalExpectedCurrentHashRef.current = await computeClientScoreHash(appliedXml);
+                        const hashes = await computeClientProposalHashes(appliedXml);
+                        aiProposalExpectedCurrentHashRef.current = hashes.contentHash;
+                        aiProposalExpectedCurrentIdentityHashRef.current = hashes.identityHash;
                         aiProposalApplyErrorRef.current = null;
                         setAiProposalApplyError(null);
                         setAiError(null);
                     } catch (hashError) {
                         const message = errorMessage(hashError) || 'The change was applied, but the next proposal block cannot be verified.';
                         aiProposalExpectedCurrentHashRef.current = null;
+                        aiProposalExpectedCurrentIdentityHashRef.current = null;
                         aiProposalApplyErrorRef.current = message;
                         setAiProposalApplyError(message);
                         setAiError(message);
@@ -6257,10 +6267,12 @@ ${partsBodyXml}
             }
             const hashCheck = await verifyAiProposalCurrentContent({
                 expectedCurrentContentHash: aiProposalExpectedCurrentHashRef.current,
+                expectedCurrentIdentityHash: aiProposalExpectedCurrentIdentityHashRef.current,
                 baseXml: aiProposalBaseXmlRef.current || compareView.currentXml,
                 currentXml: liveXml,
             });
             aiProposalExpectedCurrentHashRef.current = hashCheck.expectedCurrentContentHash;
+            aiProposalExpectedCurrentIdentityHashRef.current = hashCheck.expectedCurrentIdentityHash;
             if (!hashCheck.ok) {
                 const message = 'The score changed after this proposal was generated. Regenerate or rebase the proposal before applying it.';
                 aiProposalApplyErrorRef.current = message;
@@ -6278,7 +6290,9 @@ ${partsBodyXml}
                 compareView.checkpointXml,
             ) || compareView.checkpointXml;
             committedXml = appliedXml;
-            aiProposalExpectedCurrentHashRef.current = await computeClientScoreHash(appliedXml);
+            const hashes = await computeClientProposalHashes(appliedXml);
+            aiProposalExpectedCurrentHashRef.current = hashes.contentHash;
+            aiProposalExpectedCurrentIdentityHashRef.current = hashes.identityHash;
             aiProposalApplyErrorRef.current = null;
             setAiProposalApplyError(null);
             setAiError(null);
@@ -6290,6 +6304,7 @@ ${partsBodyXml}
                 : (errorMessage(applyError) || 'Unable to apply the complete proposal.');
             if (committedXml) {
                 aiProposalExpectedCurrentHashRef.current = null;
+                aiProposalExpectedCurrentIdentityHashRef.current = null;
                 setCompareView((prev) => (prev ? { ...prev, currentXml: committedXml! } : prev));
                 setCompareAlignmentRevision((value) => value + 1);
             }
@@ -6725,6 +6740,7 @@ ${partsBodyXml}
             // writes the proposal into the document. See openAiProposalCompare.
             setCompareSwapped(true);
             aiProposalExpectedCurrentHashRef.current = null;
+            aiProposalExpectedCurrentIdentityHashRef.current = null;
             aiProposalBaseXmlRef.current = currentXml;
             aiProposalApplyErrorRef.current = null;
             setAiProposalApplyError(null);
@@ -6766,6 +6782,7 @@ ${partsBodyXml}
                 checkpointLabel: 'Assistant Proposal',
             });
             aiProposalExpectedCurrentHashRef.current = null;
+            aiProposalExpectedCurrentIdentityHashRef.current = null;
             aiProposalBaseXmlRef.current = currentXml;
             aiProposalApplyErrorRef.current = null;
             setAiProposalApplyError(null);
@@ -8496,7 +8513,7 @@ ${partsBodyXml}
     const openAiProposalCompare = useCallback((
         baseXml: string,
         proposedXml: string,
-        proposal?: Pick<AiEditProposal, 'expectedCurrentContentHash'>,
+        proposal?: Pick<AiEditProposal, 'expectedCurrentContentHash' | 'expectedCurrentIdentityHash'>,
     ) => {
         if (!baseXml.trim() || !proposedXml.trim()) {
             return false;
@@ -8516,6 +8533,7 @@ ${partsBodyXml}
         setAiDiffBlockErrors({});
         setAiDiffGutterWidth(AI_DIFF_GUTTER_DEFAULT_WIDTH);
         aiProposalExpectedCurrentHashRef.current = proposal?.expectedCurrentContentHash || null;
+        aiProposalExpectedCurrentIdentityHashRef.current = proposal?.expectedCurrentIdentityHash || null;
         aiProposalBaseXmlRef.current = baseXml;
         aiProposalApplyErrorRef.current = null;
         setAiProposalApplyError(null);
@@ -8719,7 +8737,10 @@ ${partsBodyXml}
             setAiPatchError(null);
             setAiPatchedXml(proposedXml);
             setAiLastAnnotations(annotations);
-            if (!openAiProposalCompare(baseXml, proposedXml)) {
+            const serviceProposal = findAiEditProposal(result);
+            const proposalBaseXml = serviceProposal?.baseXml || baseXml;
+            const proposalXml = serviceProposal?.proposedXml || proposedXml;
+            if (!openAiProposalCompare(proposalBaseXml, proposalXml, serviceProposal || undefined)) {
                 failureReason = 'Unable to open compare view for AI proposal.';
                 setAiError(failureReason);
                 return;

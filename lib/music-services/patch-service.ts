@@ -22,6 +22,7 @@ import { extractPatchAnnotations, PATCH_ANNOTATIONS_INSTRUCTION } from '../patch
 import { summarizeScoreArtifact } from '../score-artifacts';
 import { type TraceContext } from '../trace-http';
 import { asRecord, looksLikeMusicXml, resolvedScoreSnapshot, resolveScoreContent } from './common';
+import { buildAiEditProposal } from './ai-edit-proposal';
 
 type PatchServiceResult = {
   status: number;
@@ -1103,6 +1104,14 @@ export async function runMusicPatchService(
       };
     }
 
+    const resolvedBase = resolvedScoreSnapshot(resolution);
+    const proposal = buildAiEditProposal({
+      sourceTool: 'music.patch',
+      base: resolvedBase,
+      proposedXml: generated.proposedXml,
+      verification: generated.verification,
+    });
+
     return {
       status: 200,
       body: {
@@ -1119,7 +1128,8 @@ export async function runMusicPatchService(
         patch: generated.patch,
         annotations: generated.annotations,
         proposedXml: generated.proposedXml,
-        resolvedBase: resolvedScoreSnapshot(resolution),
+        resolvedBase,
+        ...(proposal ? { proposal } : {}),
         verification: generated.verification,
       },
     };

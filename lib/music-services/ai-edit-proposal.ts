@@ -1,3 +1,4 @@
+import { computeMusicXmlIdentityHashServer } from '../musicxml-identity-server';
 import type { ResolvedScoreSnapshot } from './common';
 
 export type AiEditProposal = {
@@ -8,6 +9,8 @@ export type AiEditProposal = {
   baseRevision: number | null;
   baseContentHash: string;
   expectedCurrentContentHash: string;
+  baseIdentityHash: string;
+  expectedCurrentIdentityHash: string;
   verification: {
     level: 'patch_apply' | 'tool_execution';
     attempts?: number;
@@ -37,6 +40,7 @@ export function buildAiEditProposal(
   const verificationLevel = verificationInput?.level === 'patch_apply'
     ? 'patch_apply'
     : 'tool_execution';
+  const baseIdentityHash = computeMusicXmlIdentityHashServer(args.base.xml);
 
   return {
     sourceTool: args.sourceTool,
@@ -46,6 +50,8 @@ export function buildAiEditProposal(
     baseRevision: args.base.revision,
     baseContentHash: args.base.contentHash,
     expectedCurrentContentHash: args.base.contentHash,
+    baseIdentityHash,
+    expectedCurrentIdentityHash: baseIdentityHash,
     verification: {
       level: verificationLevel,
       ...(typeof verificationInput?.attempts === 'number' ? { attempts: verificationInput.attempts } : {}),

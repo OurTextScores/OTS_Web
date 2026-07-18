@@ -238,6 +238,13 @@ describe('runMusicPatchService', () => {
         revision: null,
         contentHash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
       },
+      proposal: {
+        sourceTool: 'music.patch',
+        baseXml: BASE_XML,
+        proposedXml: expect.stringContaining('<duration>2</duration>'),
+        baseIdentityHash: expect.stringMatching(/^xmlid-v1:[a-f0-9]{64}$/),
+        expectedCurrentIdentityHash: expect.stringMatching(/^xmlid-v1:[a-f0-9]{64}$/),
+      },
       verification: {
         level: 'patch_apply',
         attempts: 1,

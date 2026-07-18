@@ -6,6 +6,7 @@ import {
   type ScoreArtifact,
 } from '../score-artifacts';
 import { loadWebMscoreInProcess, type Score } from '../webmscore-loader';
+import { computeMusicXmlIdentityHashServer } from '../musicxml-identity-server';
 import {
   asRecord,
   errorResult,
@@ -2762,6 +2763,7 @@ async function applyOps(payload: z.infer<typeof APPLY_REQUEST_SCHEMA>): Promise<
   }
 
   if (mutationMode === 'proposal') {
+    const baseIdentityHash = computeMusicXmlIdentityHashServer(beforeXml);
     const responseBody: Record<string, unknown> = {
       ok: true,
       mutationMode,
@@ -2793,6 +2795,8 @@ async function applyOps(payload: z.infer<typeof APPLY_REQUEST_SCHEMA>): Promise<
         baseRevision: session.scoreSessionId ? session.revision : null,
         baseContentHash: session.contentHash,
         expectedCurrentContentHash: session.contentHash,
+        baseIdentityHash,
+        expectedCurrentIdentityHash: baseIdentityHash,
         verification: {
           level: 'tool_execution',
         },
