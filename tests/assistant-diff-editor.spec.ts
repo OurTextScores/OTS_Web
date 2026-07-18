@@ -120,11 +120,8 @@ const fulfillPatchFromRequestBase = async (route: Route) => {
   });
 };
 
-const buildDiffFeedbackResponse = (step: string, iteration: number) => ({
-  scoreSessionId: SCORE_SESSION_ID,
-  baseRevision: iteration,
-  iteration,
-  patch: {
+const buildDiffFeedbackResponse = (step: string, iteration: number, baseXml: string) => {
+  const patch: MusicXmlPatch = {
     format: 'musicxml-patch@1',
     ops: [
       {
@@ -133,16 +130,38 @@ const buildDiffFeedbackResponse = (step: string, iteration: number) => ({
         value: step,
       },
     ],
-  },
-  proposedXml: buildThreeNotesXml(step),
-  verification: {
+  };
+  const proposedXml = baseXml.replace(/<step>\s*C\s*<\/step>/, `<step>${step}</step>`);
+  const baseContentHash = scoreHash(baseXml);
+  const baseIdentityHash = computeMusicXmlIdentityHashServer(baseXml);
+  const verification = {
     level: 'patch_apply',
     attempts: 1,
     llmCalls: 1,
     elapsedMs: 5,
-  },
-  feedbackPrompt: `PATCH REVISION FEEDBACK (iteration ${Math.max(0, iteration - 1)})`,
-});
+  } as const;
+  return {
+    scoreSessionId: SCORE_SESSION_ID,
+    baseRevision: iteration,
+    iteration,
+    patch,
+    proposedXml,
+    proposal: {
+      sourceTool: 'music.patch',
+      baseXml,
+      proposedXml,
+      baseScoreSessionId: null,
+      baseRevision: null,
+      baseContentHash,
+      expectedCurrentContentHash: baseContentHash,
+      baseIdentityHash,
+      expectedCurrentIdentityHash: baseIdentityHash,
+      verification,
+    },
+    verification,
+    feedbackPrompt: `PATCH REVISION FEEDBACK (iteration ${Math.max(0, iteration - 1)})`,
+  };
+};
 
 const countHighlights = async (page: Parameters<typeof test>[0]['page']) => (
   await page.getByTestId('compare-left-highlight').count()
@@ -360,7 +379,7 @@ test.describe('Assistant diff editor flow', () => {
       await feedbackPaused;
       await route.fulfill({
         status: 200,
-        body: JSON.stringify(buildDiffFeedbackResponse('A', 1)),
+        body: JSON.stringify(buildDiffFeedbackResponse('A', 1, String(lastFeedbackPayload?.content || ''))),
       });
     });
 
@@ -380,6 +399,8 @@ test.describe('Assistant diff editor flow', () => {
     await expect(page.getByTestId('ai-diff-feedback-working')).toHaveCount(0);
     await expect(page.getByText('Iteration 2 review')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByPlaceholder('Describe the revision needed...')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Apply All AI Changes' }).click();
+    await expect.poll(() => countHighlights(page), { timeout: 20_000 }).toBe(0);
   });
 
   test('global comment is sent in diff feedback request', async ({ page }) => {
@@ -391,7 +412,7 @@ test.describe('Assistant diff editor flow', () => {
       capturedGlobalComment = String(payload.globalComment || '');
       await route.fulfill({
         status: 200,
-        body: JSON.stringify(buildDiffFeedbackResponse('B', 1)),
+        body: JSON.stringify(buildDiffFeedbackResponse('B', 1, String(payload.content || ''))),
       });
     });
 
@@ -412,11 +433,12 @@ test.describe('Assistant diff editor flow', () => {
     await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
     await page.route('**/api/music/diff/feedback', async (route) => {
       callCount += 1;
-      requests.push(route.request().postDataJSON());
+      const payload = route.request().postDataJSON();
+      requests.push(payload);
       const step = callCount === 1 ? 'A' : 'B';
       await route.fulfill({
         status: 200,
-        body: JSON.stringify(buildDiffFeedbackResponse(step, callCount)),
+        body: JSON.stringify(buildDiffFeedbackResponse(step, callCount, String(payload.content || ''))),
       });
     });
 

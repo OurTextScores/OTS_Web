@@ -6726,27 +6726,30 @@ ${partsBodyXml}
             if (parsedPatch.error || !parsedPatch.patch) {
                 throw new Error(parsedPatch.error || 'Service returned an invalid patch payload.');
             }
-            const proposedXml = typeof result.proposedXml === 'string' ? result.proposedXml.trim() : '';
+            const editProposal = findAiEditProposal(result);
+            const proposedXml = editProposal?.proposedXml
+                || (typeof result.proposedXml === 'string' ? result.proposedXml.trim() : '');
             if (!proposedXml) {
                 throw new Error('Service returned empty proposed MusicXML.');
             }
+            const proposalBaseXml = editProposal?.baseXml || currentXml;
 
             setAiOutput(JSON.stringify(parsedPatch.patch, null, 2));
             setAiPatch(parsedPatch.patch);
             setAiPatchError(null);
             setAiPatchedXml(proposedXml);
-            setAiBaseXml(currentXml);
+            setAiBaseXml(proposalBaseXml);
             // Keep the standard orientation (Current left/red, Proposal right/green) so Apply
             // writes the proposal into the document. See openAiProposalCompare.
             setCompareSwapped(true);
-            aiProposalExpectedCurrentHashRef.current = null;
-            aiProposalExpectedCurrentIdentityHashRef.current = null;
-            aiProposalBaseXmlRef.current = currentXml;
+            aiProposalExpectedCurrentHashRef.current = editProposal?.expectedCurrentContentHash || null;
+            aiProposalExpectedCurrentIdentityHashRef.current = editProposal?.expectedCurrentIdentityHash || null;
+            aiProposalBaseXmlRef.current = proposalBaseXml;
             aiProposalApplyErrorRef.current = null;
             setAiProposalApplyError(null);
             setCompareView({
                 title: 'Assistant Proposal',
-                currentXml,
+                currentXml: proposalBaseXml,
                 checkpointXml: proposedXml,
                 currentLabel: 'Current',
                 checkpointLabel: 'Assistant Proposal',

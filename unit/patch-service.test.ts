@@ -232,12 +232,6 @@ describe('runMusicPatchService', () => {
         ],
       },
       proposedXml: expect.stringContaining('<duration>2</duration>'),
-      resolvedBase: {
-        xml: BASE_XML,
-        scoreSessionId: null,
-        revision: null,
-        contentHash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-      },
       proposal: {
         sourceTool: 'music.patch',
         baseXml: BASE_XML,
@@ -251,6 +245,7 @@ describe('runMusicPatchService', () => {
         llmCalls: 1,
       },
     });
+    expect(result.body.resolvedBase).toBeUndefined();
   });
 
   it('refreshes provider metadata before authorizing options for an otherwise unknown model', async () => {
@@ -298,6 +293,59 @@ describe('runMusicPatchService', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
+  it('re-looks up each model after piggybacking on a shared metadata refresh', async () => {
+    const models = ['gemini-concurrent-model-a', 'gemini-concurrent-model-b'];
+    let releaseModelList: (() => void) | undefined;
+    let markModelListStarted: (() => void) | undefined;
+    const modelListStarted = new Promise<void>((resolve) => {
+      markModelListStarted = resolve;
+    });
+    const modelListPaused = new Promise<void>((resolve) => {
+      releaseModelList = resolve;
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/v1beta/models')) {
+        markModelListStarted?.();
+        await modelListPaused;
+        return new Response(JSON.stringify({
+          models: models.map((model, index) => ({
+            name: `models/${model}`,
+            baseModelId: model,
+            inputTokenLimit: 32_768,
+            outputTokenLimit: 4_096 * (index + 1),
+            supportedGenerationMethods: ['generateContent'],
+          })),
+        }), { status: 200 });
+      }
+      expect(models.some((model) => url.includes(`models/${model}:generateContent`))).toBe(true);
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: validPatchText() }] } }],
+      }), { status: 200 });
+    });
+    const request = (model: string) => runMusicPatchService({
+      prompt: 'Fix the duration.',
+      content: BASE_XML,
+      provider: 'gemini',
+      apiKey: 'gemini-shared-concurrent-key',
+      model,
+      maxTokens: 2_048,
+    });
+
+    const first = request(models[0]);
+    await modelListStarted;
+    const second = request(models[1]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseModelList?.();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(firstResult.status).toBe(200);
+    expect(secondResult.status).toBe(200);
+    expect(firstResult.body.modelDescriptor).toMatchObject({ id: models[0] });
+    expect(secondResult.body.modelDescriptor).toMatchObject({ id: models[1] });
+    expect(fetchSpy.mock.calls.filter(([input]) => String(input).endsWith('/v1beta/models'))).toHaveLength(1);
+  });
+
   it('fails closed with zero LLM calls when metadata refresh fails and ignores a client descriptor hint', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('unavailable', { status: 503 }));
@@ -330,8 +378,9 @@ describe('runMusicPatchService', () => {
     expect(result.body).toMatchObject({
       error: `Custom max output is not confirmed for model ${model}. Use Auto.`,
       modelDescriptor: { id: model, source: 'unknown' },
-      verification: { attempts: 0, llmCalls: 0 },
     });
+    expect(result.body.verification).toBeUndefined();
+    expect(repeatedResult.body.verification).toBeUndefined();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(
       '[patch-service] Model metadata refresh failed.',

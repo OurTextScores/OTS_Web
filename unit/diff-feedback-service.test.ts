@@ -64,6 +64,15 @@ describe('diff-feedback-service', () => {
         },
         model: 'gpt-5.5',
         proposedXml: '<score-partwise version="4.0"><part-list/></score-partwise>',
+        proposal: {
+          sourceTool: 'music.patch',
+          baseXml: '<score-partwise version="4.0"></score-partwise>',
+          proposedXml: '<score-partwise version="4.0"><part-list/></score-partwise>',
+          baseContentHash: 'sha256:base',
+          expectedCurrentContentHash: 'sha256:base',
+          baseIdentityHash: 'xmlid-v1:base',
+          expectedCurrentIdentityHash: 'xmlid-v1:base',
+        },
         verification: {
           level: 'patch_apply',
           attempts: 1,
@@ -101,6 +110,11 @@ describe('diff-feedback-service', () => {
         format: 'musicxml-patch@1',
       },
       proposedXml: '<score-partwise version="4.0"><part-list/></score-partwise>',
+      proposal: {
+        sourceTool: 'music.patch',
+        baseXml: '<score-partwise version="4.0"></score-partwise>',
+        expectedCurrentIdentityHash: 'xmlid-v1:base',
+      },
       model: 'gpt-5.5',
       verification: {
         level: 'patch_apply',

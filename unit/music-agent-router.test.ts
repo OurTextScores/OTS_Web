@@ -138,6 +138,12 @@ describe('runMusicAgentRouter', () => {
         content: {
           musicxml: '<score-partwise version="3.1"><credit/></score-partwise>',
         },
+        resolvedBase: {
+          xml: '<score-partwise version="3.1"></score-partwise>',
+          scoreSessionId: null,
+          revision: null,
+          contentHash: 'sha256:analysis-only',
+        },
       },
     });
 
@@ -160,6 +166,7 @@ describe('runMusicAgentRouter', () => {
       content: '<score-partwise version="3.1"></score-partwise>',
     });
     expect((result.body.result as Record<string, unknown>)?.proposal).toBeUndefined();
+    expect((result.body.result as Record<string, unknown>)?.resolvedBase).toBeUndefined();
   });
 
   it('marks fallback functional harmony requests as applyable when prompt explicitly asks to add Roman numerals to the score', async () => {
@@ -170,12 +177,12 @@ describe('runMusicAgentRouter', () => {
       body: {
         ok: true,
         annotatedXml: '<score-partwise version="3.1"><direction/></score-partwise>',
-        resolvedBase: {
-          xml: resolvedXml,
-          scoreSessionId: 'captured-session',
-          revision: 7,
-          contentHash: 'sha256:captured',
-        },
+      },
+      resolvedBase: {
+        xml: resolvedXml,
+        scoreSessionId: 'captured-session',
+        revision: 7,
+        contentHash: 'sha256:captured',
       },
     });
 
@@ -208,6 +215,7 @@ describe('runMusicAgentRouter', () => {
         },
       },
     });
+    expect((result.body.result as Record<string, unknown>)?.resolvedBase).toBeUndefined();
   });
 
   it('uses fallback router and generate service for composition prompts', async () => {

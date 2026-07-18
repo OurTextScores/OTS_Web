@@ -607,7 +607,8 @@ const refreshModelDescriptor = async (
   const key = descriptorRefreshKey(provider, apiKey);
   const existing = descriptorRefreshState.entries.get(key);
   if (existing?.inFlight) {
-    return existing.inFlight;
+    await existing.inFlight;
+    return getDiscoveredAiModelDescriptor(provider, model);
   }
   if (existing && existing.nextAllowedAt > now) {
     return getDiscoveredAiModelDescriptor(provider, model);
@@ -887,7 +888,6 @@ export async function runMusicPatchService(
   body: unknown,
   options?: { traceContext?: TraceContext; signal?: AbortSignal },
 ): Promise<PatchServiceResult> {
-  const serviceStartedAt = Date.now();
   const data = asRecord(body);
   const prompt = typeof data?.prompt === 'string' ? data.prompt.trim() : '';
   const promptText = typeof data?.promptText === 'string' ? data.promptText.trim() : '';
@@ -1058,7 +1058,11 @@ export async function runMusicPatchService(
     && capabilityNeedsDiscovery(serverDescriptor, requestCapabilities)
   ) {
     const refreshedDescriptor = await refreshModelDescriptor(provider, apiKey, model);
-    if (refreshedDescriptor) {
+    const normalizedRequestedModel = model.trim().replace(/^models\//, '');
+    const refreshedModelMatches = refreshedDescriptor
+      && refreshedDescriptor.provider === provider
+      && refreshedDescriptor.id.trim().replace(/^models\//, '') === normalizedRequestedModel;
+    if (refreshedDescriptor && refreshedModelMatches) {
       serverDescriptor = refreshedDescriptor;
       capabilityValidation = validateAiModelRequest(
         provider,
@@ -1074,7 +1078,6 @@ export async function runMusicPatchService(
       body: {
         error: capabilityValidation.error || `Request options are not confirmed for model ${model}.`,
         modelDescriptor: serverDescriptor,
-        verification: verificationFor(serviceStartedAt, 0, 0),
       },
     };
   }
@@ -1128,7 +1131,6 @@ export async function runMusicPatchService(
         patch: generated.patch,
         annotations: generated.annotations,
         proposedXml: generated.proposedXml,
-        resolvedBase,
         ...(proposal ? { proposal } : {}),
         verification: generated.verification,
       },

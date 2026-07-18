@@ -86,12 +86,13 @@ describe('harmony service', () => {
       content: {
         musicxml: expect.stringContaining('<harmony'),
       },
-      resolvedBase: {
-        xml: SAMPLE_XML,
-        scoreSessionId: null,
-        revision: null,
-        contentHash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-      },
+    });
+    expect(result.body.resolvedBase).toBeUndefined();
+    expect(result.resolvedBase).toMatchObject({
+      xml: SAMPLE_XML,
+      scoreSessionId: null,
+      revision: null,
+      contentHash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
     });
     expect(mocked.createScoreArtifact).not.toHaveBeenCalled();
   });

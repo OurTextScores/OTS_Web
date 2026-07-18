@@ -248,6 +248,7 @@ export async function runDiffFeedbackService(
       patch: patchPayload,
       annotations: Array.isArray(patchResult.body.annotations) ? patchResult.body.annotations : [],
       proposedXml,
+      ...(asRecord(patchResult.body.proposal) ? { proposal: patchResult.body.proposal } : {}),
       verification: patchResult.body.verification,
       feedbackPrompt,
       provider,

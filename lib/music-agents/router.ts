@@ -30,7 +30,7 @@ import {
   MUSIC_SCOREOPS_TOOL_CONTRACT,
   MUSIC_RENDER_TOOL_CONTRACT,
 } from '../music-services/contracts';
-import { normalizeScoreSessionId } from '../music-services/common';
+import { normalizeScoreSessionId, type ResolvedScoreSnapshot } from '../music-services/common';
 
 type MusicAgentToolName =
   | 'music.context'
@@ -386,8 +386,14 @@ function attachAiEditProposal(
   body: Record<string, unknown>,
   sourceTool: string,
   proposedXml: string,
+  baseSnapshot?: ResolvedScoreSnapshot | null,
 ) {
-  const resolvedBase = asRecord(body.resolvedBase);
+  const publicBody = { ...body };
+  delete publicBody.resolvedBase;
+  if (asRecord(publicBody.proposal)) {
+    return publicBody;
+  }
+  const resolvedBase = asRecord(baseSnapshot ?? body.resolvedBase);
   const xml = typeof resolvedBase?.xml === 'string' ? resolvedBase.xml : '';
   const contentHash = typeof resolvedBase?.contentHash === 'string' ? resolvedBase.contentHash : '';
   const proposal = buildAiEditProposal({
@@ -401,7 +407,13 @@ function attachAiEditProposal(
     proposedXml,
     verification: body.verification,
   });
-  return proposal ? { ...body, proposal } : body;
+  return proposal ? { ...publicBody, proposal } : publicBody;
+}
+
+function stripResolvedBase(body: Record<string, unknown>) {
+  const publicBody = { ...body };
+  delete publicBody.resolvedBase;
+  return publicBody;
 }
 
 async function runPatchFallback(
@@ -427,7 +439,7 @@ async function runPatchFallback(
   const proposedXml = typeof patchResult.body.proposedXml === 'string' ? patchResult.body.proposedXml : '';
   const resultBody = patchResult.status < 400 && proposedXml
     ? attachAiEditProposal(patchResult.body, 'music.patch', proposedXml)
-    : patchResult.body;
+    : stripResolvedBase(patchResult.body);
   return {
     status: patchResult.status,
     body: {
@@ -519,8 +531,8 @@ async function runFallbackRouter(
     const harmonyContent = asRecord(result.body.content);
     const proposedXml = typeof harmonyContent?.musicxml === 'string' ? harmonyContent.musicxml : '';
     const resultBody = applyToScore && result.status < 400 && proposedXml
-      ? attachAiEditProposal(result.body, selectedTool, proposedXml)
-      : result.body;
+      ? attachAiEditProposal(result.body, selectedTool, proposedXml, result.resolvedBase)
+      : stripResolvedBase(result.body);
     return {
       status: result.status,
       body: {
@@ -553,8 +565,8 @@ async function runFallbackRouter(
       : await runFunctionalHarmonyAnalyzeService(functionalDefaults);
     const proposedXml = typeof result.body.annotatedXml === 'string' ? result.body.annotatedXml : '';
     const resultBody = applyToScore && result.status < 400 && proposedXml
-      ? attachAiEditProposal(result.body, selectedTool, proposedXml)
-      : result.body;
+      ? attachAiEditProposal(result.body, selectedTool, proposedXml, result.resolvedBase)
+      : stripResolvedBase(result.body);
     return {
       status: result.status,
       body: {
@@ -590,7 +602,7 @@ async function runFallbackRouter(
     const proposedXml = typeof result.body.proposedXml === 'string' ? result.body.proposedXml : '';
     const resultBody = result.status < 400 && proposedXml
       ? attachAiEditProposal(result.body, selectedTool, proposedXml)
-      : result.body;
+      : stripResolvedBase(result.body);
     return {
       status: result.status,
       body: {
@@ -930,8 +942,8 @@ function createMusicRouterAgent() {
       const harmonyContent = asRecord(result.body.content);
       const proposedXml = typeof harmonyContent?.musicxml === 'string' ? harmonyContent.musicxml : '';
       const resultBody = payload.applyToScore === true && result.status < 400 && proposedXml
-        ? attachAiEditProposal(result.body, 'music.harmony_analyze', proposedXml)
-        : result.body;
+        ? attachAiEditProposal(result.body, 'music.harmony_analyze', proposedXml, result.resolvedBase)
+        : stripResolvedBase(result.body);
       const fullResult = {
         tool: 'music.harmony_analyze',
         status: result.status,
@@ -969,8 +981,8 @@ function createMusicRouterAgent() {
       console.info(`[music-agent] Tool music.functional_harmony_analyze completed: status=${result.status}`);
       const proposedXml = typeof result.body.annotatedXml === 'string' ? result.body.annotatedXml : '';
       const resultBody = payload.applyToScore === true && result.status < 400 && proposedXml
-        ? attachAiEditProposal(result.body, 'music.functional_harmony_analyze', proposedXml)
-        : result.body;
+        ? attachAiEditProposal(result.body, 'music.functional_harmony_analyze', proposedXml, result.resolvedBase)
+        : stripResolvedBase(result.body);
       const fullResult = {
         tool: 'music.functional_harmony_analyze',
         status: result.status,
@@ -1005,7 +1017,7 @@ function createMusicRouterAgent() {
       const proposedXml = typeof result.body.proposedXml === 'string' ? result.body.proposedXml : '';
       const resultBody = result.status < 400 && proposedXml
         ? attachAiEditProposal(result.body, 'music.patch', proposedXml)
-        : result.body;
+        : stripResolvedBase(result.body);
       const fullResult = {
         tool: 'music.patch',
         status: result.status,

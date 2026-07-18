@@ -86,12 +86,13 @@ describe('functional harmony service', () => {
       exports: {
         rntxt: expect.stringContaining('m1 I'),
       },
-      resolvedBase: {
-        xml: SAMPLE_XML,
-        scoreSessionId: null,
-        revision: null,
-        contentHash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-      },
+    });
+    expect(result.body.resolvedBase).toBeUndefined();
+    expect(result.resolvedBase).toMatchObject({
+      xml: SAMPLE_XML,
+      scoreSessionId: null,
+      revision: null,
+      contentHash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
     });
     expect(result.body).toMatchObject({
       segments: expect.arrayContaining([
