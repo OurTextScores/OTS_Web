@@ -203,7 +203,35 @@ export type RequestAiTextDirectArgs = {
 export type LoadAiModelsDirectArgs = {
     provider: AiProvider;
     apiKey: string;
+    signal?: AbortSignal;
 };
+
+export class AiProviderRequestError extends Error {
+    readonly requestStarted: boolean;
+    readonly retryable: boolean;
+    readonly status: number | null;
+
+    constructor(
+        message: string,
+        options: { requestStarted: boolean; retryable: boolean; status?: number | null; cause?: unknown },
+    ) {
+        super(message, options.cause === undefined ? undefined : { cause: options.cause });
+        this.name = 'AiProviderRequestError';
+        this.requestStarted = options.requestStarted;
+        this.retryable = options.retryable;
+        this.status = options.status ?? null;
+    }
+}
+
+const isRetryableProviderStatus = (status: number) => (
+    status === 408 || status === 409 || status === 425 || status === 429 || status >= 500
+);
+
+const responseRequestError = (response: Response, message: string) => new AiProviderRequestError(message, {
+    requestStarted: true,
+    retryable: isRetryableProviderStatus(response.status),
+    status: response.status,
+});
 
 const asRecord = (value: unknown): Record<string, unknown> | null => (
     value && typeof value === 'object' ? value as Record<string, unknown> : null
@@ -286,7 +314,7 @@ const normalizeGeminiModel = (model: string) => {
     return `models/${trimmed}`;
 };
 
-export async function loadAiModelDescriptorsDirect({ provider, apiKey }: LoadAiModelsDirectArgs): Promise<AiModelDescriptor[]> {
+export async function loadAiModelDescriptorsDirect({ provider, apiKey, signal }: LoadAiModelsDirectArgs): Promise<AiModelDescriptor[]> {
     if (!apiKey.trim()) {
         return [];
     }
@@ -297,6 +325,7 @@ export async function loadAiModelDescriptorsDirect({ provider, apiKey }: LoadAiM
                 Authorization: `Bearer ${apiKey}`,
                 'Content-Type': 'application/json',
             },
+            signal,
         });
         let response = provider === 'grok'
             ? await fetchModels('/language-models')
@@ -320,6 +349,7 @@ export async function loadAiModelDescriptorsDirect({ provider, apiKey }: LoadAiM
                 'anthropic-version': ANTHROPIC_VERSION,
                 'Content-Type': 'application/json',
             },
+            signal,
         });
         if (!response.ok) {
             const errorText = await response.text();
@@ -337,6 +367,7 @@ export async function loadAiModelDescriptorsDirect({ provider, apiKey }: LoadAiM
             'Content-Type': 'application/json',
             'x-goog-api-key': apiKey,
         },
+        signal,
     });
     if (!response.ok) {
         const errorText = await response.text();
@@ -378,16 +409,28 @@ export async function requestAiTextDirect({
         hasPdf,
     }, modelDescriptor);
     if (!capabilityValidation.ok) {
-        throw new Error(capabilityValidation.error || `Unsupported request options for ${model}.`);
+        throw new AiProviderRequestError(
+            capabilityValidation.error || `Unsupported request options for ${model}.`,
+            { requestStarted: false, retryable: false },
+        );
     }
     const imageDataUrl = hasImage ? `data:${image!.mediaType};base64,${image!.base64}` : '';
     const pdfDataUrl = hasPdf ? `data:${pdf!.mediaType};base64,${pdf!.base64}` : '';
+    let requestStarted = false;
+    const startRequest = () => {
+        onRequest?.();
+        requestStarted = true;
+    };
 
-    if (isOpenAiCompatibleProvider(provider)) {
+    try {
+      if (isOpenAiCompatibleProvider(provider)) {
         const providerLabel = AI_PROVIDER_LABELS[provider];
         const providerBaseUrl = OPENAI_COMPATIBLE_PROVIDER_BASE_URL[provider];
         if (hasPdf && !OPENAI_COMPATIBLE_PROVIDER_SUPPORTS_PDF[provider]) {
-            throw new Error(`${providerLabel} does not support PDF attachments in this integration yet. Disable PDF context or use OpenAI/Claude/Gemini.`);
+            throw new AiProviderRequestError(
+                `${providerLabel} does not support PDF attachments in this integration yet. Disable PDF context or use OpenAI/Claude/Gemini.`,
+                { requestStarted: false, retryable: false },
+            );
         }
 
         if (OPENAI_COMPATIBLE_PROVIDER_SUPPORTS_RESPONSES_API[provider]) {
@@ -416,7 +459,7 @@ export async function requestAiTextDirect({
             if (maxTokens) {
                 responsePayload.max_output_tokens = maxTokens;
             }
-            onRequest?.();
+            startRequest();
             const response = await fetch(`${providerBaseUrl}/responses`, {
                 method: 'POST',
                 headers: {
@@ -432,7 +475,7 @@ export async function requestAiTextDirect({
             }
             const errorText = await response.text();
             if (hasPdf) {
-                throw new Error(errorText || `${providerLabel} request failed.`);
+                throw responseRequestError(response, errorText || `${providerLabel} request failed.`);
             }
 
             const userMessageContent: unknown = hasImage
@@ -452,7 +495,7 @@ export async function requestAiTextDirect({
             if (maxTokens) {
                 fallbackPayload.max_tokens = maxTokens;
             }
-            onRequest?.();
+            startRequest();
             const fallbackResponse = await fetch(`${providerBaseUrl}/chat/completions`, {
                 method: 'POST',
                 headers: {
@@ -464,7 +507,10 @@ export async function requestAiTextDirect({
             });
             if (!fallbackResponse.ok) {
                 const fallbackError = await fallbackResponse.text();
-                throw new Error(fallbackError || errorText || `${providerLabel} request failed.`);
+                throw responseRequestError(
+                    fallbackResponse,
+                    fallbackError || errorText || `${providerLabel} request failed.`,
+                );
             }
             const fallbackData = await fallbackResponse.json();
             return parseOpenAiChatCompletionsText(fallbackData);
@@ -487,7 +533,7 @@ export async function requestAiTextDirect({
         if (maxTokens) {
             payload[provider === 'kimi' ? 'max_completion_tokens' : 'max_tokens'] = maxTokens;
         }
-        onRequest?.();
+        startRequest();
         const response = await fetch(`${providerBaseUrl}/chat/completions`, {
             method: 'POST',
             headers: {
@@ -499,7 +545,7 @@ export async function requestAiTextDirect({
         });
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(errorText || `${providerLabel} request failed.`);
+            throw responseRequestError(response, errorText || `${providerLabel} request failed.`);
         }
         const data = await response.json();
         return parseOpenAiChatCompletionsText(data);
@@ -527,7 +573,7 @@ export async function requestAiTextDirect({
                 },
             });
         }
-        onRequest?.();
+        startRequest();
         const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
@@ -546,7 +592,7 @@ export async function requestAiTextDirect({
         });
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(errorText || 'Anthropic request failed.');
+            throw responseRequestError(response, errorText || 'Anthropic request failed.');
         }
         const data = await response.json();
         return parseAnthropicText(data);
@@ -554,7 +600,7 @@ export async function requestAiTextDirect({
 
     const normalizedModel = normalizeGeminiModel(model);
     if (!normalizedModel) {
-        throw new Error('Missing Gemini model.');
+        throw new AiProviderRequestError('Missing Gemini model.', { requestStarted: false, retryable: false });
     }
     const geminiPayload: Record<string, unknown> = {
         systemInstruction: {
@@ -587,7 +633,7 @@ export async function requestAiTextDirect({
     if (maxTokens) {
         (geminiPayload.generationConfig as Record<string, unknown>).maxOutputTokens = maxTokens;
     }
-    onRequest?.();
+    startRequest();
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${normalizedModel}:generateContent`, {
         method: 'POST',
         headers: {
@@ -599,8 +645,17 @@ export async function requestAiTextDirect({
     });
     if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(errorText || 'Gemini request failed.');
+        throw responseRequestError(response, errorText || 'Gemini request failed.');
     }
     const data = await response.json();
     return parseGeminiText(data);
+    } catch (error) {
+        if (error instanceof AiProviderRequestError) {
+            throw error;
+        }
+        throw new AiProviderRequestError(
+            error instanceof Error ? error.message : String(error || 'AI provider request failed.'),
+            { requestStarted, retryable: requestStarted, cause: error },
+        );
+    }
 }

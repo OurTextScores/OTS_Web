@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AiProviderRequestError, requestAiTextDirect } from '../lib/ai-provider-adapters';
 
 const mocked = vi.hoisted(() => ({
   getScoreArtifact: vi.fn(),
@@ -48,6 +49,9 @@ const PATCH_ENV_KEYS = [
   'MUSIC_PATCH_MAX_PDF_BYTES',
   'MUSIC_PATCH_MAX_CANDIDATE_CHARS',
   'MUSIC_PATCH_MAX_OUTPUT_BYTES',
+  'MUSIC_PATCH_MODEL_REFRESH_COOLDOWN_MS',
+  'MUSIC_PATCH_MODEL_REFRESH_TIMEOUT_MS',
+  'MUSIC_PATCH_MODEL_REFRESH_GLOBAL_LIMIT',
   'ALLOW_SERVER_LLM_KEYS',
 ];
 
@@ -241,6 +245,92 @@ describe('runMusicPatchService', () => {
       },
     });
   });
+
+  it('refreshes provider metadata before authorizing options for an otherwise unknown model', async () => {
+    const model = 'gemini-live-metadata-test';
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/v1beta/models')) {
+        return new Response(JSON.stringify({
+          models: [{
+            name: `models/${model}`,
+            baseModelId: model,
+            inputTokenLimit: 32_768,
+            outputTokenLimit: 4_096,
+            supportedGenerationMethods: ['generateContent'],
+          }],
+        }), { status: 200 });
+      }
+      expect(url).toContain(`models/${model}:generateContent`);
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        generationConfig: { maxOutputTokens: 2_048 },
+      });
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: validPatchText() }] } }],
+      }), { status: 200 });
+    });
+
+    const result = await runMusicPatchService({
+      prompt: 'Fix the duration.',
+      content: BASE_XML,
+      provider: 'gemini',
+      apiKey: 'gemini-live-metadata-key',
+      model,
+      maxTokens: 2_048,
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      modelDescriptor: {
+        id: model,
+        source: 'provider',
+        parameters: { maxOutputTokens: { support: 'supported', max: 4_096 } },
+      },
+      verification: { attempts: 1, llmCalls: 1 },
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails closed with zero LLM calls when metadata refresh fails and ignores a client descriptor hint', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('unavailable', { status: 503 }));
+    const model = 'gemini-unconfirmed-client-hint-test';
+
+    const result = await runMusicPatchService({
+      prompt: 'Fix the duration.',
+      content: BASE_XML,
+      provider: 'gemini',
+      apiKey: 'gemini-refresh-failure-key',
+      model,
+      maxTokens: 2_048,
+      modelDescriptor: {
+        id: model,
+        provider: 'gemini',
+        parameters: { maxOutputTokens: { support: 'supported' } },
+      },
+    });
+    const repeatedResult = await runMusicPatchService({
+      prompt: 'Fix the duration.',
+      content: BASE_XML,
+      provider: 'gemini',
+      apiKey: 'gemini-refresh-failure-key',
+      model,
+      maxTokens: 2_048,
+    });
+
+    expect(result.status).toBe(400);
+    expect(repeatedResult.status).toBe(400);
+    expect(result.body).toMatchObject({
+      error: `Custom max output is not confirmed for model ${model}. Use Auto.`,
+      modelDescriptor: { id: model, source: 'unknown' },
+      verification: { attempts: 0, llmCalls: 0 },
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[patch-service] Model metadata refresh failed.',
+      expect.objectContaining({ provider: 'gemini', model }),
+    );
+  });
 });
 
 describe('generateApplyVerifiedPatch', () => {
@@ -336,7 +426,11 @@ describe('generateApplyVerifiedPatch', () => {
         args.onRequest?.();
         call += 1;
         if (call === 1) {
-          throw new Error('temporary provider failure');
+          throw new AiProviderRequestError('temporary provider failure', {
+            requestStarted: true,
+            retryable: true,
+            status: 503,
+          });
         }
         return validPatchText();
       },
@@ -344,6 +438,35 @@ describe('generateApplyVerifiedPatch', () => {
 
     expect(result.ok).toBe(true);
     expect(result.verification).toMatchObject({ attempts: 1, llmCalls: 2 });
+  });
+
+  it('does not retry a typed non-retryable provider error', async () => {
+    process.env.MUSIC_PATCH_TRANSPORT_RETRIES = '3';
+    const requestText = vi.fn(async (args: Parameters<NonNullable<Parameters<typeof generateApplyVerifiedPatch>[0]['requestText']>>[0]) => {
+      args.onRequest?.();
+      throw new AiProviderRequestError('invalid credentials', {
+        requestStarted: true,
+        retryable: false,
+        status: 401,
+      });
+    });
+
+    const result = await generateApplyVerifiedPatch({
+      provider: 'openai',
+      apiKey: 'sk-test',
+      model: 'gpt-4.1',
+      baseXml: BASE_XML,
+      promptText: 'Fix the duration.',
+      maxTokens: null,
+      requestText,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 502,
+      verification: { attempts: 0, llmCalls: 1 },
+    });
+    expect(requestText).toHaveBeenCalledTimes(1);
   });
 
   it('aborts an in-flight provider request at the configured deadline', async () => {
@@ -392,6 +515,56 @@ describe('generateApplyVerifiedPatch', () => {
       pdf: { mediaType: 'application/pdf', base64: 'cGRm', filename: 'score.pdf' },
       signal: expect.any(AbortSignal),
     }));
+  });
+});
+
+describe('requestAiTextDirect error metadata', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('marks capability failures as not started and non-retryable', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    let caught: unknown;
+    try {
+      await requestAiTextDirect({
+        provider: 'openai',
+        apiKey: 'sk-test',
+        model: 'unknown-model',
+        promptText: 'test',
+        systemPrompt: 'test',
+        maxTokens: 1_000,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(AiProviderRequestError);
+    expect(caught).toMatchObject({ requestStarted: false, retryable: false, status: null });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('marks retryable provider responses after a request starts', async () => {
+    const onRequest = vi.fn();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('busy', { status: 503 }));
+    let caught: unknown;
+    try {
+      await requestAiTextDirect({
+        provider: 'openai',
+        apiKey: 'sk-test',
+        model: 'gpt-4.1',
+        promptText: 'test',
+        systemPrompt: 'test',
+        maxTokens: null,
+        onRequest,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(AiProviderRequestError);
+    expect(caught).toMatchObject({ requestStarted: true, retryable: true, status: 503 });
+    expect(onRequest).toHaveBeenCalledTimes(2);
   });
 });
 

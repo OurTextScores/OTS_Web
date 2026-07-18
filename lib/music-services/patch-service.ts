@@ -1,11 +1,22 @@
+import { createHash } from 'node:crypto';
 import {
+  AiProviderRequestError,
   DEFAULT_MODEL_BY_PROVIDER,
+  loadAiModelDescriptorsDirect,
   type AiProvider,
   type RequestAiTextDirectArgs,
   type TextImageAttachment,
   type TextPdfAttachment,
   requestAiTextDirect,
 } from '../ai-provider-adapters';
+import {
+  getDiscoveredAiModelDescriptor,
+  rememberDiscoveredAiModelDescriptors,
+  resolveAiModelDescriptor,
+  validateAiModelRequest,
+  type AiModelDescriptor,
+  type AiModelRequestCapabilities,
+} from '../ai-model-capabilities';
 import { allowServerCredentialFallback } from '../api-access-control';
 import { extractPatchAnnotations, PATCH_ANNOTATIONS_INSTRUCTION } from '../patch-annotations';
 import { summarizeScoreArtifact } from '../score-artifacts';
@@ -45,6 +56,11 @@ const DEFAULT_PATCH_MAX_OUTPUT_BYTES = 15 * 1024 * 1024;
 const MAX_PATCH_ATTEMPTS = 8;
 const MAX_PATCH_TRANSPORT_RETRIES = 3;
 const MAX_PATCH_BUDGET_MS = 10 * 60_000;
+const DEFAULT_MODEL_REFRESH_COOLDOWN_MS = 60_000;
+const DEFAULT_MODEL_REFRESH_TIMEOUT_MS = 10_000;
+const DEFAULT_MODEL_REFRESH_GLOBAL_LIMIT = 30;
+const MODEL_REFRESH_WINDOW_MS = 60_000;
+const MAX_MODEL_REFRESH_KEYS = 256;
 
 type XmlDomBindings = {
   DOMParser: new () => DOMParser;
@@ -54,6 +70,7 @@ type XmlDomBindings = {
 };
 
 const OPENAI_COMPATIBLE_PROVIDER_SET = new Set<AiProvider>(['openai', 'grok', 'deepseek', 'kimi']);
+const PROVIDER_CAPABILITY_DISCOVERY_SET = new Set<AiProvider>(['anthropic', 'gemini', 'grok', 'kimi']);
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -500,6 +517,7 @@ export type GenerateApplyVerifiedPatchArgs = {
   promptText: string;
   maxTokens: number | null;
   temperature?: number | null;
+  modelDescriptor?: AiModelDescriptor | null;
   image?: TextImageAttachment | null;
   pdf?: TextPdfAttachment | null;
   signal?: AbortSignal;
@@ -526,6 +544,122 @@ const readClampedEnvInteger = (name: string, fallback: number, minimum: number, 
     return fallback;
   }
   return Math.min(maximum, Math.max(minimum, Math.floor(value)));
+};
+
+type ModelDescriptorRefreshEntry = {
+  nextAllowedAt: number;
+  inFlight: Promise<AiModelDescriptor | null> | null;
+};
+
+type ModelDescriptorRefreshState = {
+  entries: Map<string, ModelDescriptorRefreshEntry>;
+  recentStarts: number[];
+};
+
+const descriptorRefreshGlobal = globalThis as typeof globalThis & {
+  __otsPatchModelDescriptorRefresh?: ModelDescriptorRefreshState;
+};
+const descriptorRefreshState = descriptorRefreshGlobal.__otsPatchModelDescriptorRefresh ?? {
+  entries: new Map<string, ModelDescriptorRefreshEntry>(),
+  recentStarts: [],
+};
+descriptorRefreshGlobal.__otsPatchModelDescriptorRefresh = descriptorRefreshState;
+
+const capabilityNeedsDiscovery = (
+  descriptor: AiModelDescriptor,
+  request: AiModelRequestCapabilities,
+) => (
+  (request.maxTokens != null && descriptor.parameters.maxOutputTokens.support === 'unknown')
+  || (request.temperature != null && descriptor.parameters.temperature.support === 'unknown')
+  || (request.hasImage === true && descriptor.inputs.image === 'unknown')
+  || (request.hasPdf === true && descriptor.inputs.pdf === 'unknown')
+);
+
+const descriptorRefreshKey = (provider: AiProvider, apiKey: string) => (
+  `${provider}:${createHash('sha256').update(apiKey, 'utf8').digest('hex').slice(0, 24)}`
+);
+
+const pruneDescriptorRefreshState = (now: number) => {
+  descriptorRefreshState.recentStarts = descriptorRefreshState.recentStarts
+    .filter((startedAt) => now - startedAt < MODEL_REFRESH_WINDOW_MS);
+  for (const [key, entry] of descriptorRefreshState.entries) {
+    if (!entry.inFlight && entry.nextAllowedAt <= now) {
+      descriptorRefreshState.entries.delete(key);
+    }
+  }
+  while (descriptorRefreshState.entries.size > MAX_MODEL_REFRESH_KEYS) {
+    const oldestKey = descriptorRefreshState.entries.keys().next().value as string | undefined;
+    if (!oldestKey) {
+      break;
+    }
+    descriptorRefreshState.entries.delete(oldestKey);
+  }
+};
+
+const refreshModelDescriptor = async (
+  provider: AiProvider,
+  apiKey: string,
+  model: string,
+): Promise<AiModelDescriptor | null> => {
+  const now = Date.now();
+  pruneDescriptorRefreshState(now);
+  const key = descriptorRefreshKey(provider, apiKey);
+  const existing = descriptorRefreshState.entries.get(key);
+  if (existing?.inFlight) {
+    return existing.inFlight;
+  }
+  if (existing && existing.nextAllowedAt > now) {
+    return getDiscoveredAiModelDescriptor(provider, model);
+  }
+  const globalLimit = readClampedEnvInteger(
+    'MUSIC_PATCH_MODEL_REFRESH_GLOBAL_LIMIT',
+    DEFAULT_MODEL_REFRESH_GLOBAL_LIMIT,
+    1,
+    1_000,
+  );
+  if (descriptorRefreshState.recentStarts.length >= globalLimit) {
+    return null;
+  }
+
+  const cooldownMs = readClampedEnvInteger(
+    'MUSIC_PATCH_MODEL_REFRESH_COOLDOWN_MS',
+    DEFAULT_MODEL_REFRESH_COOLDOWN_MS,
+    1_000,
+    60 * 60_000,
+  );
+  const timeoutMs = readClampedEnvInteger(
+    'MUSIC_PATCH_MODEL_REFRESH_TIMEOUT_MS',
+    DEFAULT_MODEL_REFRESH_TIMEOUT_MS,
+    500,
+    60_000,
+  );
+  const entry: ModelDescriptorRefreshEntry = {
+    nextAllowedAt: now + cooldownMs,
+    inFlight: null,
+  };
+  descriptorRefreshState.entries.set(key, entry);
+  descriptorRefreshState.recentStarts.push(now);
+  const refresh = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new Error('Model metadata refresh timed out.')), timeoutMs);
+    try {
+      const descriptors = await loadAiModelDescriptorsDirect({ provider, apiKey, signal: controller.signal });
+      rememberDiscoveredAiModelDescriptors(descriptors);
+      return getDiscoveredAiModelDescriptor(provider, model);
+    } catch (error) {
+      console.warn('[patch-service] Model metadata refresh failed.', {
+        provider,
+        model,
+        error: error instanceof Error ? error.name : 'unknown_error',
+      });
+      return null;
+    } finally {
+      clearTimeout(timeout);
+      entry.inFlight = null;
+    }
+  })();
+  entry.inFlight = refresh;
+  return refresh;
 };
 
 const byteLength = (value: string) => new TextEncoder().encode(value).byteLength;
@@ -560,6 +694,9 @@ const buildRepairContext = (candidate: string, failure: string, maximumCandidate
 ].join('\n');
 
 const isRetryableTransportError = (error: unknown) => {
+  if (error instanceof AiProviderRequestError) {
+    return error.requestStarted && error.retryable;
+  }
   const message = errorMessage(error).toLowerCase();
   return !(
     message.includes('missing api')
@@ -641,7 +778,6 @@ export async function generateApplyVerifiedPatch(
         timedOut = true;
         controller.abort(new Error('AI provider request timed out.'));
       }, Math.min(remainingMs, requestTimeoutMs));
-      let observedProviderCalls = 0;
       try {
         const text = await requestText({
           provider: args.provider,
@@ -651,22 +787,16 @@ export async function generateApplyVerifiedPatch(
           systemPrompt: AI_PATCH_SYSTEM_PROMPT,
           maxTokens: args.maxTokens,
           temperature: args.temperature,
+          modelDescriptor: args.modelDescriptor,
           image: args.image,
           pdf: args.pdf,
           signal: controller.signal,
           onRequest: () => {
-            observedProviderCalls += 1;
             llmCalls += 1;
           },
         });
-        if (observedProviderCalls === 0) {
-          llmCalls += 1;
-        }
         return { text, error: '', status: 200 as const };
       } catch (error) {
-        if (observedProviderCalls === 0) {
-          llmCalls += 1;
-        }
         lastError = error;
         const deadlineExpired = Date.now() >= deadlineAt || args.signal?.aborted;
         if (deadlineExpired) {
@@ -756,6 +886,7 @@ export async function runMusicPatchService(
   body: unknown,
   options?: { traceContext?: TraceContext; signal?: AbortSignal },
 ): Promise<PatchServiceResult> {
+  const serviceStartedAt = Date.now();
   const data = asRecord(body);
   const prompt = typeof data?.prompt === 'string' ? data.prompt.trim() : '';
   const promptText = typeof data?.promptText === 'string' ? data.promptText.trim() : '';
@@ -897,14 +1028,57 @@ export async function runMusicPatchService(
     };
   }
 
-  try {
-    const builtPromptText = promptText || buildAiPatchPrompt(prompt, xml);
-    if (builtPromptText.length > maximumPromptChars) {
-      return {
-        status: 413,
-        body: { error: `Patch prompt exceeds the ${maximumPromptChars} character limit.` },
-      };
+  const builtPromptText = promptText || buildAiPatchPrompt(prompt, xml);
+  if (builtPromptText.length > maximumPromptChars) {
+    return {
+      status: 413,
+      body: { error: `Patch prompt exceeds the ${maximumPromptChars} character limit.` },
+    };
+  }
+
+  const requestCapabilities: AiModelRequestCapabilities = {
+    maxTokens,
+    temperature,
+    hasImage: Boolean(parsedImage.attachment),
+    hasPdf: Boolean(parsedPdf.attachment),
+  };
+  const cachedDescriptor = getDiscoveredAiModelDescriptor(provider, model);
+  let serverDescriptor = cachedDescriptor ?? resolveAiModelDescriptor(provider, model);
+  let capabilityValidation = validateAiModelRequest(
+    provider,
+    model,
+    requestCapabilities,
+    serverDescriptor,
+  );
+  if (
+    !capabilityValidation.ok
+    && !cachedDescriptor
+    && PROVIDER_CAPABILITY_DISCOVERY_SET.has(provider)
+    && capabilityNeedsDiscovery(serverDescriptor, requestCapabilities)
+  ) {
+    const refreshedDescriptor = await refreshModelDescriptor(provider, apiKey, model);
+    if (refreshedDescriptor) {
+      serverDescriptor = refreshedDescriptor;
+      capabilityValidation = validateAiModelRequest(
+        provider,
+        model,
+        requestCapabilities,
+        serverDescriptor,
+      );
     }
+  }
+  if (!capabilityValidation.ok) {
+    return {
+      status: 400,
+      body: {
+        error: capabilityValidation.error || `Request options are not confirmed for model ${model}.`,
+        modelDescriptor: serverDescriptor,
+        verification: verificationFor(serviceStartedAt, 0, 0),
+      },
+    };
+  }
+
+  try {
     const generated = await generateApplyVerifiedPatch({
       provider,
       apiKey,
@@ -913,6 +1087,7 @@ export async function runMusicPatchService(
       promptText: builtPromptText,
       maxTokens,
       temperature,
+      modelDescriptor: serverDescriptor,
       image: parsedImage.attachment,
       pdf: parsedPdf.attachment,
       signal: options?.signal,
@@ -936,6 +1111,7 @@ export async function runMusicPatchService(
           : `${provider}-direct`,
         provider,
         model,
+        modelDescriptor: serverDescriptor,
         scoreSessionId: session?.scoreSessionId ?? null,
         revision: session?.revision ?? null,
         inputArtifactId: resolutionArtifact?.id || null,

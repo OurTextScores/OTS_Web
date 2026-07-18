@@ -37,9 +37,16 @@ export async function POST(request: Request) {
       return response;
     }
     const data = asRecord(body);
+    const clientModelDescriptor = asRecord(data?.modelDescriptor);
     summaryExtra = {
       provider: typeof data?.provider === 'string' ? data.provider.slice(0, 32) : null,
       model: typeof data?.model === 'string' ? data.model.slice(0, 128) : null,
+      clientModelDescriptorId: typeof clientModelDescriptor?.id === 'string'
+        ? clientModelDescriptor.id.slice(0, 128)
+        : null,
+      clientModelDescriptorSource: typeof clientModelDescriptor?.source === 'string'
+        ? clientModelDescriptor.source.slice(0, 32)
+        : null,
     };
     if (typeof data?.content !== 'string' || !data.content.trim()) {
       status = 400;
@@ -54,6 +61,7 @@ export async function POST(request: Request) {
     });
     status = result.status;
     const verification = asRecord(result.body.verification);
+    const authorizedModelDescriptor = asRecord(result.body.modelDescriptor);
     const failures = Array.isArray(result.body.failures) ? result.body.failures : [];
     const lastFailure = asRecord(failures.at(-1));
     summaryExtra = {
@@ -62,6 +70,9 @@ export async function POST(request: Request) {
       attempts: typeof verification?.attempts === 'number' ? verification.attempts : null,
       llmCalls: typeof verification?.llmCalls === 'number' ? verification.llmCalls : null,
       verificationElapsedMs: typeof verification?.elapsedMs === 'number' ? verification.elapsedMs : null,
+      serverModelDescriptorSource: typeof authorizedModelDescriptor?.source === 'string'
+        ? authorizedModelDescriptor.source
+        : null,
       errorCategory: typeof lastFailure?.category === 'string'
         ? lastFailure.category
         : status === 200 ? null

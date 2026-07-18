@@ -185,7 +185,13 @@ export const validateAiModelRequest = (
     if (temperature != null) {
         const capability = descriptor.parameters.temperature;
         if (capability.support !== 'supported') {
-            return { ok: false, descriptor, error: `Temperature is not supported for model ${descriptor.id}.` };
+            return {
+                ok: false,
+                descriptor,
+                error: capability.support === 'unknown'
+                    ? `Temperature is not confirmed for model ${descriptor.id}. Use Auto.`
+                    : `Temperature is not supported for model ${descriptor.id}.`,
+            };
         }
         if (!Number.isFinite(temperature)) {
             return { ok: false, descriptor, error: 'Temperature must be a finite number.' };
@@ -202,10 +208,18 @@ export const validateAiModelRequest = (
     }
 
     if (request.hasImage && descriptor.inputs.image !== 'supported') {
-        return { ok: false, descriptor, error: `Image input is not confirmed for model ${descriptor.id}.` };
+        return {
+            ok: false,
+            descriptor,
+            error: `Image input is not confirmed for model ${descriptor.id}. Disable image context or choose a confirmed model.`,
+        };
     }
     if (request.hasPdf && descriptor.inputs.pdf !== 'supported') {
-        return { ok: false, descriptor, error: `PDF input is not confirmed for model ${descriptor.id}.` };
+        return {
+            ok: false,
+            descriptor,
+            error: `PDF input is not confirmed for model ${descriptor.id}. Disable PDF context or choose a confirmed model.`,
+        };
     }
 
     return { ok: true, descriptor };
