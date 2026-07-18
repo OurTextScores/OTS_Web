@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   AiProviderRequestError,
   DEFAULT_MODEL_BY_PROVIDER,
@@ -530,6 +530,7 @@ export type GenerateApplyVerifiedPatchResult = {
   patch: MusicXmlPatch;
   annotations: ReturnType<typeof extractPatchAnnotations>;
   proposedXml: string;
+  failures: PatchAttemptFailure[];
   verification: PatchApplyVerification;
 } | {
   ok: false;
@@ -713,6 +714,10 @@ const isRetryableTransportError = (error: unknown) => {
   );
 };
 
+const MAX_FAILURE_MESSAGE_CHARS = 2_000;
+
+const boundFailureMessage = (message: string) => message.slice(0, MAX_FAILURE_MESSAGE_CHARS);
+
 const verificationFor = (startedAt: number, attempts: number, llmCalls: number): PatchApplyVerification => ({
   level: 'patch_apply',
   attempts,
@@ -848,7 +853,7 @@ export async function generateApplyVerifiedPatch(
     if (parsed.error || !parsed.patch) {
       previousCandidate = rawText;
       previousError = parsed.error || 'Model response is not a musicxml-patch@1 payload.';
-      failures.push({ attempt: attempts, category: 'parse', error: previousError });
+      failures.push({ attempt: attempts, category: 'parse', error: boundFailureMessage(previousError) });
       continue;
     }
 
@@ -856,13 +861,13 @@ export async function generateApplyVerifiedPatch(
     if (applied.error || !applied.xml.trim()) {
       previousCandidate = extracted;
       previousError = applied.error || 'Patch application returned empty MusicXML.';
-      failures.push({ attempt: attempts, category: 'apply', error: previousError });
+      failures.push({ attempt: attempts, category: 'apply', error: boundFailureMessage(previousError) });
       continue;
     }
     if (byteLength(applied.xml) > maximumOutputBytes) {
       previousCandidate = extracted;
       previousError = `Applied MusicXML exceeds the ${maximumOutputBytes} byte output limit.`;
-      failures.push({ attempt: attempts, category: 'output_size', error: previousError });
+      failures.push({ attempt: attempts, category: 'output_size', error: boundFailureMessage(previousError) });
       continue;
     }
 
@@ -871,6 +876,7 @@ export async function generateApplyVerifiedPatch(
       patch: parsed.patch,
       annotations: parsed.annotations ?? [],
       proposedXml: applied.xml,
+      failures,
       verification: verificationFor(startedAt, attempts, llmCalls),
     };
   }
@@ -1132,6 +1138,9 @@ export async function runMusicPatchService(
         annotations: generated.annotations,
         proposedXml: generated.proposedXml,
         ...(proposal ? { proposal } : {}),
+        proposalSessionId: randomUUID(),
+        cycle: 1,
+        failures: generated.failures,
         verification: generated.verification,
       },
     };

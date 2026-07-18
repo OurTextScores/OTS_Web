@@ -41,6 +41,7 @@ export async function POST(request: Request) {
   const startedAt = Date.now();
   const trace = resolveTraceContext(request);
   let status = 500;
+  let summaryExtra: Record<string, unknown> = {};
   try {
     const body = await request.json();
     if (routeWouldUseServerAiKey(body)) {
@@ -56,6 +57,23 @@ export async function POST(request: Request) {
     }
     const result = await runDiffFeedbackService(body, { traceContext: trace, signal: request.signal });
     status = result.status;
+    const audit = asRecord(result.body.audit);
+    const feedbackCounts = asRecord(audit?.feedbackCounts);
+    const contextFlags = asRecord(audit?.proposalContext);
+    const verification = asRecord(result.body.verification);
+    summaryExtra = {
+      proposalSessionId: typeof result.body.proposalSessionId === 'string' ? result.body.proposalSessionId : null,
+      cycle: typeof audit?.cycle === 'number' ? audit.cycle : null,
+      feedbackCounts: feedbackCounts ?? null,
+      contextProvided: contextFlags?.provided === true,
+      contextLineage: typeof contextFlags?.lineage === 'string' ? contextFlags.lineage : null,
+      previousCycleDropped: contextFlags?.previousCycleDropped === true,
+      contextTruncated: Array.isArray(contextFlags?.truncated) ? contextFlags.truncated.length : 0,
+      verificationLevel: typeof verification?.level === 'string' ? verification.level : null,
+      attempts: typeof verification?.attempts === 'number' ? verification.attempts : null,
+      llmCalls: typeof verification?.llmCalls === 'number' ? verification.llmCalls : null,
+      errorCategory: status < 400 ? null : status === 400 ? 'request' : status === 422 ? 'verification' : status === 504 ? 'timeout' : 'provider',
+    };
     const response = NextResponse.json(result.body, { status: result.status });
     applyTraceHeaders(response.headers, trace);
     return response;
@@ -67,6 +85,7 @@ export async function POST(request: Request) {
       status,
       startedAt,
       trace,
+      extra: summaryExtra,
     });
   }
 }

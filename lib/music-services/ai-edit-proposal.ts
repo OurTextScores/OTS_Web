@@ -1,4 +1,5 @@
 import { computeMusicXmlIdentityHashServer } from '../musicxml-identity-server';
+import { computeScoreHash } from './scoreops-session-store';
 import type { ResolvedScoreSnapshot } from './common';
 
 export type AiEditProposal = {
@@ -11,6 +12,8 @@ export type AiEditProposal = {
   expectedCurrentContentHash: string;
   baseIdentityHash: string;
   expectedCurrentIdentityHash: string;
+  proposedContentHash: string;
+  proposedIdentityHash: string;
   verification: {
     level: 'patch_apply' | 'tool_execution';
     attempts?: number;
@@ -52,6 +55,8 @@ export function buildAiEditProposal(
     expectedCurrentContentHash: args.base.contentHash,
     baseIdentityHash,
     expectedCurrentIdentityHash: baseIdentityHash,
+    proposedContentHash: computeScoreHash(args.proposedXml),
+    proposedIdentityHash: computeMusicXmlIdentityHashServer(args.proposedXml),
     verification: {
       level: verificationLevel,
       ...(typeof verificationInput?.attempts === 'number' ? { attempts: verificationInput.attempts } : {}),

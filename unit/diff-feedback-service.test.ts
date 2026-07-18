@@ -21,6 +21,49 @@ vi.mock('../lib/music-services/patch-service', () => ({
 }));
 
 import { buildFeedbackPrompt, runDiffFeedbackService } from '../lib/music-services/diff-feedback-service';
+import { computeScoreHash } from '../lib/music-services/scoreops-session-store';
+import { computeMusicXmlIdentityHashServer } from '../lib/musicxml-identity-server';
+
+const SESSION_BASE_XML = '<score-partwise version="4.0"><part-list/><part id="P1"><measure number="1"/></part></score-partwise>';
+const SESSION_PROPOSED_XML = '<score-partwise version="4.0"><part-list/><part id="P1"><measure number="1"><note/></measure></part></score-partwise>';
+
+const proposalSessionInput = (currentXml: string, overrides: Record<string, unknown> = {}) => ({
+  id: 'sess-continuity-1',
+  cycle: 1,
+  originalInstruction: 'Add a G major arpeggio in measure 1.',
+  previousCycle: {
+    cycle: 1,
+    baseContentHash: computeScoreHash(SESSION_BASE_XML),
+    baseIdentityHash: computeMusicXmlIdentityHashServer(SESSION_BASE_XML),
+    proposedContentHash: computeScoreHash(SESSION_PROPOSED_XML),
+    proposedIdentityHash: computeMusicXmlIdentityHashServer(SESSION_PROPOSED_XML),
+    expectedCurrentContentHash: computeScoreHash(currentXml),
+    expectedCurrentIdentityHash: computeMusicXmlIdentityHashServer(currentXml),
+    patch: {
+      format: 'musicxml-patch@1',
+      ops: [{ op: 'setText', path: '/score-partwise/part/measure/note/duration', value: '4' }],
+    },
+    annotations: [{ part: 1, measure: 1, comment: 'Added the arpeggio as eighth notes.' }],
+  },
+  constraints: [
+    { cycle: 1, kind: 'rejected', partIndex: 0, measureRange: '2-2', text: '' },
+    { cycle: 1, kind: 'note', partIndex: null, measureRange: null, text: 'No slurs anywhere.' },
+  ],
+  ...overrides,
+});
+
+const successPatchBody = () => ({
+  status: 200,
+  body: {
+    patch: {
+      format: 'musicxml-patch@1',
+      ops: [{ op: 'setText', path: '/score-partwise/part/measure/note/duration', value: '2' }],
+    },
+    model: 'gpt-5.5',
+    proposedXml: SESSION_PROPOSED_XML,
+    verification: { level: 'patch_apply', attempts: 1, llmCalls: 1, elapsedMs: 10 },
+  },
+});
 
 describe('diff-feedback-service', () => {
   beforeEach(() => {
@@ -121,6 +164,130 @@ describe('diff-feedback-service', () => {
       },
     });
     expect(mocked.applyMusicXmlPatch).not.toHaveBeenCalled();
+  });
+
+  it('feeds original instruction, previous patch, labeled annotations, and constraints into the next cycle', async () => {
+    mocked.runMusicPatchService.mockResolvedValue(successPatchBody());
+
+    const result = await runDiffFeedbackService({
+      content: SESSION_BASE_XML,
+      iteration: 0,
+      provider: 'openai',
+      model: 'gpt-5.5',
+      apiKey: 'sk-test',
+      blocks: [{ partIndex: 0, measureRange: '1-1', status: 'comment', comment: 'Use quarter notes.' }],
+      proposalSession: proposalSessionInput(SESSION_BASE_XML),
+    });
+
+    expect(result.status).toBe(200);
+    const prompt = String(mocked.runMusicPatchService.mock.calls[0][0].prompt);
+    expect(prompt).toContain('ORIGINAL EDIT REQUEST');
+    expect(prompt).toContain('Add a G major arpeggio in measure 1.');
+    expect(prompt).toContain('PREVIOUS PROPOSAL PATCH (cycle 1');
+    expect(prompt).toContain('"format":"musicxml-patch@1"');
+    expect(prompt).toContain('NOT user instructions');
+    expect(prompt).toContain('Added the arpeggio as eighth notes.');
+    expect(prompt).toContain('STANDING CONSTRAINTS FROM EARLIER CYCLES');
+    expect(prompt).toContain('(cycle 1) Rejected — Part 1, measures 2-2');
+    expect(prompt).toContain('"No slurs anywhere."');
+    expect(result.body).toMatchObject({
+      proposalSessionId: 'sess-continuity-1',
+      cycle: 2,
+      iteration: 1,
+      audit: {
+        proposalSessionId: 'sess-continuity-1',
+        cycle: 2,
+        feedbackCounts: { accepted: 0, rejected: 0, revise: 1, pending: 0 },
+        proposalContext: {
+          provided: true,
+          lineage: 'verified',
+          previousCycleDropped: false,
+          truncated: [],
+        },
+      },
+    });
+  });
+
+  it('accepts a partial-apply current state via the expected-current hash', async () => {
+    mocked.runMusicPatchService.mockResolvedValue(successPatchBody());
+    const partialXml = '<score-partwise version="4.0"><part-list/><part id="P1"><measure number="1"><note/><note/></measure></part></score-partwise>';
+
+    const result = await runDiffFeedbackService({
+      content: partialXml,
+      iteration: 0,
+      provider: 'openai',
+      model: 'gpt-5.5',
+      apiKey: 'sk-test',
+      blocks: [{ partIndex: 0, measureRange: '1-1', status: 'pending' }],
+      proposalSession: proposalSessionInput(partialXml),
+    });
+
+    expect(result.status).toBe(200);
+    const audit = result.body.audit as Record<string, any>;
+    expect(audit.proposalContext.lineage).toBe('verified');
+    expect(audit.proposalContext.previousCycleDropped).toBe(false);
+  });
+
+  it('drops the previous cycle but keeps instruction and constraints on a lineage mismatch', async () => {
+    mocked.runMusicPatchService.mockResolvedValue(successPatchBody());
+    const unrelatedXml = '<score-partwise version="4.0"><part-list/><part id="P1"><measure number="9"/></part></score-partwise>';
+    const context = proposalSessionInput(SESSION_BASE_XML);
+    (context.previousCycle as Record<string, unknown>).expectedCurrentContentHash = computeScoreHash(SESSION_BASE_XML);
+    (context.previousCycle as Record<string, unknown>).expectedCurrentIdentityHash = computeMusicXmlIdentityHashServer(SESSION_BASE_XML);
+
+    const result = await runDiffFeedbackService({
+      content: unrelatedXml,
+      iteration: 0,
+      provider: 'openai',
+      model: 'gpt-5.5',
+      apiKey: 'sk-test',
+      blocks: [{ partIndex: 0, measureRange: '1-1', status: 'pending' }],
+      proposalSession: context,
+    });
+
+    expect(result.status).toBe(200);
+    const prompt = String(mocked.runMusicPatchService.mock.calls[0][0].prompt);
+    expect(prompt).toContain('ORIGINAL EDIT REQUEST');
+    expect(prompt).toContain('STANDING CONSTRAINTS FROM EARLIER CYCLES');
+    expect(prompt).not.toContain('PREVIOUS PROPOSAL PATCH');
+    expect(prompt).not.toContain('Added the arpeggio as eighth notes.');
+    const audit = result.body.audit as Record<string, any>;
+    expect(audit.proposalContext.lineage).toBe('mismatch');
+    expect(audit.proposalContext.previousCycleDropped).toBe(true);
+  });
+
+  it('returns 400 for structural proposal-session violations without calling the model', async () => {
+    const result = await runDiffFeedbackService({
+      content: SESSION_BASE_XML,
+      iteration: 0,
+      provider: 'openai',
+      model: 'gpt-5.5',
+      apiKey: 'sk-test',
+      blocks: [{ partIndex: 0, measureRange: '1-1', status: 'pending' }],
+      proposalSession: proposalSessionInput(SESSION_BASE_XML, { cycle: 5 }),
+    });
+
+    expect(result.status).toBe(400);
+    expect(String(result.body.error)).toContain('cycle');
+    expect(mocked.runMusicPatchService).not.toHaveBeenCalled();
+  });
+
+  it('mints a proposal session id when the client sends no context', async () => {
+    mocked.runMusicPatchService.mockResolvedValue(successPatchBody());
+
+    const result = await runDiffFeedbackService({
+      content: SESSION_BASE_XML,
+      iteration: 0,
+      provider: 'openai',
+      model: 'gpt-5.5',
+      apiKey: 'sk-test',
+      blocks: [{ partIndex: 0, measureRange: '1-1', status: 'pending' }],
+    });
+
+    expect(result.status).toBe(200);
+    expect(String(result.body.proposalSessionId)).toMatch(/^[0-9a-f-]{36}$/);
+    const audit = result.body.audit as Record<string, any>;
+    expect(audit.proposalContext).toMatchObject({ provided: false, lineage: 'none' });
   });
 
   it('returns 400 for malformed block payloads', async () => {

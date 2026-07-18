@@ -2797,6 +2797,8 @@ async function applyOps(payload: z.infer<typeof APPLY_REQUEST_SCHEMA>): Promise<
         expectedCurrentContentHash: session.contentHash,
         baseIdentityHash,
         expectedCurrentIdentityHash: baseIdentityHash,
+        proposedContentHash: computeScoreHash(workingXml),
+        proposedIdentityHash: computeMusicXmlIdentityHashServer(workingXml),
         verification: {
           level: 'tool_execution',
         },

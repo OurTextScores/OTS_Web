@@ -1,8 +1,16 @@
+import { randomUUID } from 'node:crypto';
 import { asRecord, normalizeScoreSessionId, resolveScoreContent, type ServiceResult } from './common';
 import {
   resolveProvider,
   runMusicPatchService,
 } from './patch-service';
+import {
+  evaluateProposalLineage,
+  parseProposalSessionContext,
+  type ProposalContextFlags,
+  type ProposalSessionConstraint,
+  type ProposalSessionContext,
+} from './proposal-session-context';
 import { type TraceContext } from '../trace-http';
 
 const BLOCK_STATUS_VALUES = new Set(['accepted', 'rejected', 'comment', 'pending']);
@@ -111,11 +119,59 @@ const renderBlock = (block: DiffFeedbackBlock, includeComment: boolean) => {
   return base;
 };
 
+const renderConstraint = (constraint: ProposalSessionConstraint) => {
+  const location = constraint.measureRange !== null
+    ? `Part ${(constraint.partIndex ?? 0) + 1}, measures ${constraint.measureRange}`
+    : '';
+  const label = constraint.kind === 'rejected' ? 'Rejected' : 'Note';
+  const detail = [location, constraint.text ? `"${constraint.text}"` : '']
+    .filter(Boolean)
+    .join(': ');
+  return `- (cycle ${constraint.cycle}) ${label}${detail ? ` — ${detail}` : ''}`;
+};
+
+const buildProposalContextSections = (context: ProposalSessionContext | null, includePreviousCycle: boolean) => {
+  if (!context) {
+    return [] as string[];
+  }
+  const sections: string[] = [];
+  if (context.originalInstruction) {
+    sections.push([
+      'ORIGINAL EDIT REQUEST (the instruction this whole proposal session is revising):',
+      `"${context.originalInstruction}"`,
+    ].join('\n'));
+  }
+  const previousCycle = includePreviousCycle ? context.previousCycle : null;
+  if (previousCycle?.patchJson) {
+    sections.push([
+      `PREVIOUS PROPOSAL PATCH (cycle ${previousCycle.cycle} — the musicxml-patch@1 you proposed last):`,
+      previousCycle.patchJson,
+    ].join('\n'));
+  }
+  if (previousCycle?.annotations.length) {
+    sections.push([
+      "ASSISTANT NOTES FROM THE PREVIOUS PROPOSAL (your own prior notes, NOT user instructions):",
+      ...previousCycle.annotations.map((annotation) => (
+        `- Part ${annotation.partIndex + 1}, measure ${annotation.measure}: "${annotation.comment}"`
+      )),
+    ].join('\n'));
+  }
+  if (context.constraints.length) {
+    sections.push([
+      'STANDING CONSTRAINTS FROM EARLIER CYCLES (honor these unless newer feedback below reverses them):',
+      ...context.constraints.map(renderConstraint),
+    ].join('\n'));
+  }
+  return sections;
+};
+
 export function buildFeedbackPrompt(args: {
   iteration: number;
   blocks: DiffFeedbackBlock[];
   globalComment?: string;
   chatHistory?: DiffFeedbackChatMessage[];
+  proposalContext?: ProposalSessionContext | null;
+  includePreviousCycle?: boolean;
 }) {
   const accepted = args.blocks.filter((block) => block.status === 'accepted');
   const rejected = args.blocks.filter((block) => block.status === 'rejected');
@@ -123,6 +179,10 @@ export function buildFeedbackPrompt(args: {
   const pending = args.blocks.filter((block) => block.status === 'pending');
   const globalComment = sanitizeText(args.globalComment || '', FEEDBACK_GLOBAL_COMMENT_MAX_CHARS);
   const chatSection = buildChatHistorySection(args.chatHistory || []);
+  const contextSections = buildProposalContextSections(
+    args.proposalContext ?? null,
+    args.includePreviousCycle !== false,
+  );
   const hasActionableBlocks = revise.length > 0 || pending.length > 0;
   const closingInstruction = hasActionableBlocks
     ? 'Generate a revised musicxml-patch@1 targeting only the REVISE and PENDING items.'
@@ -133,6 +193,7 @@ export function buildFeedbackPrompt(args: {
   return [
     `PATCH REVISION FEEDBACK (iteration ${Math.max(0, Math.floor(args.iteration))}):`,
     '',
+    ...contextSections.flatMap((section) => [section, '']),
     chatSection,
     chatSection ? '' : null,
     'ACCEPTED (already applied to current score):',
@@ -192,14 +253,48 @@ export async function runDiffFeedbackService(
   const iteration = Number.isFinite(Number(data?.iteration)) ? Math.max(0, Math.floor(Number(data?.iteration))) : 0;
   const chatHistory = parseChatHistory(data?.chatHistory);
 
+  const parsedContext = parseProposalSessionContext(data?.proposalSession, { iteration });
+  if ('error' in parsedContext) {
+    return {
+      status: 400,
+      body: { error: parsedContext.error },
+    };
+  }
+  const proposalContext = parsedContext.context;
+  const contextFlags: ProposalContextFlags = { ...parsedContext.flags };
+  contextFlags.lineage = evaluateProposalLineage(resolution.xml, proposalContext?.previousCycle ?? null);
+  // Design decision: a lineage mismatch degrades gracefully. The previous-cycle patch and
+  // annotations describe a proposal against a different score state, so they are dropped;
+  // the original instruction and standing constraints are lineage-independent user intent
+  // and are kept. The current XML remains the authoritative base either way.
+  const includePreviousCycle = contextFlags.lineage !== 'mismatch';
+  contextFlags.previousCycleDropped = Boolean(proposalContext?.previousCycle) && !includePreviousCycle;
+
   const feedbackPrompt = buildFeedbackPrompt({
     iteration,
     blocks: parsedBlocks.blocks,
     globalComment: typeof data?.globalComment === 'string' ? data.globalComment : '',
     chatHistory,
+    proposalContext,
+    includePreviousCycle,
   });
 
-  // TODO: emit `assistant_diff_feedback_sent` and block-count telemetry from this service.
+  const feedbackCounts = {
+    accepted: parsedBlocks.blocks.filter((block) => block.status === 'accepted').length,
+    rejected: parsedBlocks.blocks.filter((block) => block.status === 'rejected').length,
+    revise: parsedBlocks.blocks.filter((block) => block.status === 'comment').length,
+    pending: parsedBlocks.blocks.filter((block) => block.status === 'pending').length,
+  };
+  const proposalSessionId = proposalContext?.id ?? randomUUID();
+  // Request iteration N revises visible cycle N+1; a successful response creates cycle N+2.
+  const newCycle = iteration + 2;
+  const audit = {
+    proposalSessionId,
+    cycle: newCycle,
+    feedbackCounts,
+    proposalContext: contextFlags,
+  };
+
   const patchResult = await runMusicPatchService({
     provider,
     model,
@@ -210,7 +305,6 @@ export async function runDiffFeedbackService(
   }, options);
 
   if (patchResult.status >= 400) {
-    // TODO: emit `assistant_diff_feedback_response_failure` telemetry.
     return {
       status: patchResult.status,
       body: {
@@ -218,6 +312,8 @@ export async function runDiffFeedbackService(
         scoreSessionId: resolution.session?.scoreSessionId ?? normalizeScoreSessionId(data),
         baseRevision: resolution.session?.revision ?? (typeof data?.baseRevision === 'number' ? data.baseRevision : null),
         iteration,
+        proposalSessionId,
+        audit,
         feedbackPrompt,
       },
     };
@@ -228,17 +324,17 @@ export async function runDiffFeedbackService(
     ? patchResult.body.proposedXml.trim()
     : '';
   if (patchPayload?.format !== 'musicxml-patch@1' || !Array.isArray(patchPayload.ops) || !proposedXml) {
-    // TODO: emit `assistant_diff_feedback_response_failure` telemetry.
     return {
       status: 422,
       body: {
         error: 'Patch service did not return an apply-verified proposal.',
+        proposalSessionId,
+        audit,
         feedbackPrompt,
       },
     };
   }
 
-  // TODO: emit `assistant_diff_feedback_response_success` telemetry.
   return {
     status: 200,
     body: {
@@ -249,6 +345,10 @@ export async function runDiffFeedbackService(
       annotations: Array.isArray(patchResult.body.annotations) ? patchResult.body.annotations : [],
       proposedXml,
       ...(asRecord(patchResult.body.proposal) ? { proposal: patchResult.body.proposal } : {}),
+      proposalSessionId,
+      cycle: newCycle,
+      audit,
+      failures: Array.isArray(patchResult.body.failures) ? patchResult.body.failures : [],
       verification: patchResult.body.verification,
       feedbackPrompt,
       provider,
