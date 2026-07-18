@@ -13912,8 +13912,8 @@ ${partsBodyXml}
                                 </span>
                                 {xmlLoading && <span>Loading...</span>}
                             </div>
-                            <div className="mt-3 flex items-center justify-between text-xs font-medium text-gray-600">
-                                <div className="flex gap-2">
+                            <div className="mt-3 flex flex-wrap items-center justify-between gap-y-2 text-xs font-medium text-gray-600">
+                                <div className="flex flex-wrap gap-2">
                                     <button
                                         type="button"
                                         data-testid="tab-xml"
