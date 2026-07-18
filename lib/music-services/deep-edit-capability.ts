@@ -225,7 +225,16 @@ export class DeepEditCapability {
     return true;
   }
 
-  /** Strongest verification level achieved on any candidate during this run. */
+  /**
+   * Record that a verification level was exercised in this run, whether or not it
+   * succeeded. The finalize gate holds every winner to the strongest attempted level, so
+   * a failed engine check on one candidate still raises the bar for all of them.
+   */
+  noteAttemptedLevel(level: DeepEditVerificationLevel): void {
+    this.recordAttemptedLevel(level);
+  }
+
+  /** Strongest verification level attempted on any candidate during this run. */
   strongestAttemptedLevel(): DeepEditVerificationLevel {
     return this.strongestAttempted;
   }

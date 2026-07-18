@@ -15,7 +15,7 @@ export type AiEditProposal = {
   proposedContentHash: string;
   proposedIdentityHash: string;
   verification: {
-    level: 'patch_apply' | 'tool_execution';
+    level: 'patch_apply' | 'tool_execution' | 'engine_load' | 'render';
     attempts?: number;
     llmCalls?: number;
   };
@@ -41,7 +41,9 @@ export function buildAiEditProposal(
 
   const verificationInput = asRecord(args.verification);
   const verificationLevel = verificationInput?.level === 'patch_apply'
-    ? 'patch_apply'
+    || verificationInput?.level === 'engine_load'
+    || verificationInput?.level === 'render'
+    ? verificationInput.level
     : 'tool_execution';
   const baseIdentityHash = computeMusicXmlIdentityHashServer(args.base.xml);
 

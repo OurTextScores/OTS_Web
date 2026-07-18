@@ -94,7 +94,7 @@ export const resolveProvider = (value: unknown): AiProvider => {
   return 'openai';
 };
 
-const resolveApiKeyForProvider = (provider: AiProvider, explicitApiKey: string) => {
+export const resolveApiKeyForProvider = (provider: AiProvider, explicitApiKey: string) => {
   if (explicitApiKey.trim()) {
     return explicitApiKey.trim();
   }

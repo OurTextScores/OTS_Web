@@ -1,0 +1,719 @@
+import { Agent, run, tool, type Model } from '@openai/agents';
+import { aisdk } from '@openai/agents-extensions';
+import { OpenAIResponsesModel } from '@openai/agents-openai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { OpenAI } from 'openai';
+import { z } from 'zod';
+
+import { renderMusicSnapshot } from '../music-conversion';
+import { loadWebMscoreInProcess, type Score } from '../webmscore-loader';
+import { buildAiEditProposal, type AiEditProposal } from './ai-edit-proposal';
+import { asRecord, looksLikeMusicXml, resolvedScoreSnapshot, resolveScoreContent } from './common';
+import {
+  DEEP_EDIT_BASE_ID,
+  DEEP_EDIT_LEVEL_RANK,
+  DeepEditCapability,
+  type DeepEditBudgets,
+  type DeepEditVerificationLevel,
+} from './deep-edit-capability';
+import {
+  applyMusicXmlPatch,
+  parseMusicXmlPatch,
+  resolveApiKeyForProvider,
+  resolveProvider,
+} from './patch-service';
+import { createProposalContinuityToken } from './proposal-session-context';
+import { runFunctionalHarmonyAnalyzeService } from './functional-harmony-service';
+import { runHarmonyAnalyzeService } from './harmony-service';
+import { runMusicScoreOpsPreviewService } from './scoreops-service';
+import { randomUUID } from 'node:crypto';
+import { type TraceContext } from '../trace-http';
+
+// Phase 3 deep-edit loop (design §7): a bounded agent tries alternative edits against
+// capability-owned in-memory candidates, and the server-side finalize gate decides
+// whether the finalized candidate ships as a normal AiEditProposal.
+
+export type DeepEditErrorCategory =
+  | 'no_finalize'
+  | 'gate_failed'
+  | 'budget_exhausted'
+  | 'provider'
+  | 'timeout'
+  | 'request';
+
+export type DeepEditAudit = {
+  finalizedCandidateId: string | null;
+  rationale: string;
+  candidates: ReturnType<DeepEditCapability['auditCandidates']>;
+  counters: { llmCalls: number; toolCalls: number; renders: number };
+  elapsedMs: number;
+};
+
+export type DeepEditServiceResult = {
+  status: number;
+  body: Record<string, unknown>;
+};
+
+type DeepEditToolResult = Record<string, unknown> & { ok: boolean };
+
+export type DeepEditDriver = (args: {
+  capability: DeepEditCapability;
+  executeTool: (name: string, toolArgs: Record<string, unknown>) => Promise<DeepEditToolResult>;
+  instructions: string;
+  prompt: string;
+}) => Promise<{ candidateId: string; rationale: string } | null>;
+
+const DEFAULT_MAX_LLM_CALLS = 12;
+const DEFAULT_MAX_TOOL_CALLS = 24;
+const DEFAULT_MAX_CANDIDATES = 4;
+const DEFAULT_MAX_RENDERS = 3;
+const DEFAULT_BUDGET_MS = 300_000;
+const MAX_BUDGET_MS = 600_000;
+const DEFAULT_MAX_CANDIDATE_BYTES = 15 * 1024 * 1024;
+const DEFAULT_MAX_TOTAL_BYTES = 60 * 1024 * 1024;
+const MAX_RATIONALE_CHARS = 2_000;
+const MAX_ANALYSIS_RESULT_CHARS = 4_000;
+const MAX_TOOL_ERROR_CHARS = 2_000;
+
+const readClampedEnvInteger = (name: string, fallback: number, minimum: number, maximum: number) => {
+  const value = Number(process.env[name]);
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(maximum, Math.max(minimum, Math.floor(value)));
+};
+
+export const resolveDeepEditBudgets = (): DeepEditBudgets => ({
+  maxLlmCalls: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_LLM_CALLS', DEFAULT_MAX_LLM_CALLS, 1, 32),
+  maxToolCalls: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_TOOL_CALLS', DEFAULT_MAX_TOOL_CALLS, 1, 64),
+  maxCandidates: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_CANDIDATES', DEFAULT_MAX_CANDIDATES, 1, 8),
+  maxRenders: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_RENDERS', DEFAULT_MAX_RENDERS, 0, 8),
+  budgetMs: readClampedEnvInteger('MUSIC_DEEP_EDIT_BUDGET_MS', DEFAULT_BUDGET_MS, 10_000, MAX_BUDGET_MS),
+  maxCandidateBytes: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_CANDIDATE_BYTES', DEFAULT_MAX_CANDIDATE_BYTES, 10_000, 50 * 1024 * 1024),
+  maxTotalBytes: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_TOTAL_BYTES', DEFAULT_MAX_TOTAL_BYTES, 10_000, 200 * 1024 * 1024),
+});
+
+const boundError = (message: string) => message.slice(0, MAX_TOOL_ERROR_CHARS);
+
+const budgetToolError = (reason: string): DeepEditToolResult => ({
+  ok: false,
+  error: `Budget exhausted (${reason}). Call finalize with your best verified candidate now.`,
+  budget: reason,
+});
+
+const invalidIdError = (id: unknown): DeepEditToolResult => ({
+  ok: false,
+  error: `"${String(id).slice(0, 64)}" is not a live candidate id. Valid ids are "${DEEP_EDIT_BASE_ID}" and ids returned by sandbox tools.`,
+});
+
+/** Per-part measure hash map used for compact candidate diffs. */
+const measureHashes = (xml: string): Map<string, string> => {
+  const map = new Map<string, string>();
+  const partRegex = /<part\b([^>]*)>([\s\S]*?)<\/part>/gi;
+  let partMatch: RegExpExecArray | null;
+  let partOrdinal = 0;
+  while ((partMatch = partRegex.exec(xml)) !== null) {
+    const partId = partMatch[1]?.match(/\bid="([^"]+)"/i)?.[1] || `#${partOrdinal}`;
+    partOrdinal += 1;
+    const measureRegex = /<measure\b([^>]*)>([\s\S]*?)<\/measure>/gi;
+    let measureMatch: RegExpExecArray | null;
+    while ((measureMatch = measureRegex.exec(partMatch[2] || '')) !== null) {
+      const numberText = measureMatch[1]?.match(/\bnumber="([^"]+)"/i)?.[1] || '';
+      let hash = 5381;
+      const body = measureMatch[2] || '';
+      for (let i = 0; i < body.length; i += 1) {
+        hash = ((hash << 5) + hash + body.charCodeAt(i)) | 0;
+      }
+      map.set(`${partId}:${numberText}`, `${(hash >>> 0).toString(16)}:${body.length}`);
+    }
+  }
+  return map;
+};
+
+export const summarizeMeasureDifferences = (leftXml: string, rightXml: string) => {
+  const left = measureHashes(leftXml);
+  const right = measureHashes(rightXml);
+  const changed: string[] = [];
+  const added: string[] = [];
+  const removed: string[] = [];
+  for (const [key, hash] of right) {
+    const before = left.get(key);
+    if (before === undefined) {
+      added.push(key);
+    } else if (before !== hash) {
+      changed.push(key);
+    }
+  }
+  for (const key of left.keys()) {
+    if (!right.has(key)) {
+      removed.push(key);
+    }
+  }
+  const cap = 50;
+  return {
+    changedMeasures: changed.slice(0, cap),
+    addedMeasures: added.slice(0, cap),
+    removedMeasures: removed.slice(0, cap),
+    changedCount: changed.length,
+    addedCount: added.length,
+    removedCount: removed.length,
+  };
+};
+
+const verifyCandidateEngine = async (
+  capability: DeepEditCapability,
+  candidateId: string,
+): Promise<DeepEditToolResult> => {
+  const xml = capability.resolveXml(candidateId);
+  if (xml === null || candidateId === DEEP_EDIT_BASE_ID) {
+    return invalidIdError(candidateId);
+  }
+  capability.noteAttemptedLevel('engine_load');
+  let score: Score | null = null;
+  try {
+    const webMscore = await loadWebMscoreInProcess();
+    score = await webMscore.load('musicxml', new TextEncoder().encode(xml));
+    capability.recordVerification(candidateId, 'engine_load');
+    return { ok: true, candidateId, verification: 'engine_load' };
+  } catch (error) {
+    const message = boundError(error instanceof Error ? error.message : 'Engine load failed.');
+    capability.recordVerification(candidateId, 'engine_load', message);
+    return { ok: false, candidateId, error: message };
+  } finally {
+    try {
+      score?.destroy?.();
+    } catch {
+      // destroy failures must not mask the verification result
+    }
+  }
+};
+
+const verifyCandidateRender = async (
+  capability: DeepEditCapability,
+  candidateId: string,
+): Promise<DeepEditToolResult> => {
+  const xml = capability.resolveXml(candidateId);
+  if (xml === null || candidateId === DEEP_EDIT_BASE_ID) {
+    return invalidIdError(candidateId);
+  }
+  capability.noteAttemptedLevel('render');
+  try {
+    const { buffer, mimeType } = await renderMusicSnapshot({
+      content: xml,
+      format: 'png',
+      timeoutMs: Math.min(60_000, Math.max(1_000, capability.remainingMs())),
+    });
+    capability.recordVerification(candidateId, 'render');
+    return { ok: true, candidateId, verification: 'render', mimeType, renderedBytes: buffer.byteLength };
+  } catch (error) {
+    const message = boundError(error instanceof Error ? error.message : 'Render failed.');
+    return { ok: false, candidateId, error: message };
+  }
+};
+
+/**
+ * Pure tool dispatch: every sandbox tool the agent can call, minus `finalize` (which the
+ * loop owns). Exported for direct unit testing without an LLM.
+ */
+export async function executeSandboxTool(
+  capability: DeepEditCapability,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<DeepEditToolResult> {
+  if (name === 'sandbox_render') {
+    const rendered = capability.chargeRender();
+    if (!rendered.ok) {
+      return budgetToolError(rendered.reason);
+    }
+  }
+  const charged = capability.chargeToolCall();
+  if (!charged.ok) {
+    return budgetToolError(charged.reason);
+  }
+
+  switch (name) {
+    case 'sandbox_apply_patch': {
+      const sourceId = String(args.baseCandidateId ?? DEEP_EDIT_BASE_ID);
+      if (!capability.isValidSourceId(sourceId)) {
+        return invalidIdError(sourceId);
+      }
+      const parsed = parseMusicXmlPatch(JSON.stringify(args.patch ?? null));
+      if (parsed.error || !parsed.patch) {
+        return { ok: false, error: boundError(parsed.error || 'Invalid musicxml-patch@1 payload.') };
+      }
+      const baseXml = capability.resolveXml(sourceId);
+      if (baseXml === null) {
+        return invalidIdError(sourceId);
+      }
+      const applied = await applyMusicXmlPatch(baseXml, parsed.patch);
+      if (applied.error || !applied.xml.trim()) {
+        return { ok: false, error: boundError(applied.error || 'Patch application returned empty MusicXML.') };
+      }
+      const minted = capability.mintCandidate({
+        parentId: sourceId,
+        xml: applied.xml,
+        createdByTool: 'apply_patch',
+        patch: parsed.patch,
+        verification: 'patch_apply',
+      });
+      if (!minted.ok) {
+        return budgetToolError(minted.reason);
+      }
+      return {
+        ok: true,
+        candidateId: minted.candidate.id,
+        verification: 'patch_apply',
+        diff: summarizeMeasureDifferences(baseXml, applied.xml),
+      };
+    }
+
+    case 'sandbox_scoreops': {
+      const sourceId = String(args.baseCandidateId ?? DEEP_EDIT_BASE_ID);
+      if (!capability.isValidSourceId(sourceId)) {
+        return invalidIdError(sourceId);
+      }
+      const baseXml = capability.resolveXml(sourceId);
+      if (baseXml === null) {
+        return invalidIdError(sourceId);
+      }
+      const result = await runMusicScoreOpsPreviewService({
+        content: baseXml,
+        ops: args.ops,
+      });
+      const proposal = asRecord(result.body.proposal);
+      const proposedXml = typeof proposal?.proposedXml === 'string' ? proposal.proposedXml : '';
+      if (result.status >= 400 || !proposedXml.trim()) {
+        const detail = asRecord(result.body.error);
+        const message = typeof result.body.error === 'string'
+          ? result.body.error
+          : typeof detail?.message === 'string' ? detail.message : 'ScoreOps execution failed.';
+        return { ok: false, error: boundError(message) };
+      }
+      const minted = capability.mintCandidate({
+        parentId: sourceId,
+        xml: proposedXml,
+        createdByTool: 'scoreops',
+        verification: 'tool_execution',
+      });
+      if (!minted.ok) {
+        return budgetToolError(minted.reason);
+      }
+      return {
+        ok: true,
+        candidateId: minted.candidate.id,
+        verification: 'tool_execution',
+        changes: asRecord(result.body.changes)?.summary ?? null,
+        diff: summarizeMeasureDifferences(baseXml, proposedXml),
+      };
+    }
+
+    case 'sandbox_engine_check':
+      return verifyCandidateEngine(capability, String(args.candidateId ?? ''));
+
+    case 'sandbox_render':
+      return verifyCandidateRender(capability, String(args.candidateId ?? ''));
+
+    case 'sandbox_measure_diff': {
+      const candidateId = String(args.candidateId ?? '');
+      const againstId = String(args.againstId ?? DEEP_EDIT_BASE_ID);
+      if (!capability.isValidSourceId(candidateId) || !capability.isValidSourceId(againstId)) {
+        return invalidIdError(capability.isValidSourceId(candidateId) ? againstId : candidateId);
+      }
+      const left = capability.resolveXml(againstId);
+      const right = capability.resolveXml(candidateId);
+      if (left === null || right === null) {
+        return invalidIdError(candidateId);
+      }
+      return { ok: true, candidateId, againstId, diff: summarizeMeasureDifferences(left, right) };
+    }
+
+    case 'sandbox_analyze': {
+      const candidateId = String(args.candidateId ?? '');
+      const kind = args.kind === 'functional_harmony' ? 'functional_harmony' : 'harmony';
+      const xml = capability.resolveXml(candidateId);
+      if (xml === null || !capability.isValidSourceId(candidateId)) {
+        return invalidIdError(candidateId);
+      }
+      const result = kind === 'functional_harmony'
+        ? await runFunctionalHarmonyAnalyzeService({ content: xml })
+        : await runHarmonyAnalyzeService({ content: xml });
+      if (result.status >= 400) {
+        const message = typeof result.body.error === 'string' ? result.body.error : 'Analysis failed.';
+        return { ok: false, error: boundError(message) };
+      }
+      const { content: _content, annotatedXml: _annotatedXml, ...rest } = result.body;
+      return {
+        ok: true,
+        candidateId,
+        kind,
+        analysis: JSON.stringify(rest).slice(0, MAX_ANALYSIS_RESULT_CHARS),
+      };
+    }
+
+    case 'sandbox_record_score': {
+      const candidateId = String(args.candidateId ?? '');
+      if (!capability.isValidSourceId(candidateId) || candidateId === DEEP_EDIT_BASE_ID) {
+        return invalidIdError(candidateId);
+      }
+      const kind = typeof args.kind === 'string' ? args.kind.trim() : '';
+      const value = typeof args.value === 'number' || typeof args.value === 'string' ? args.value : '';
+      if (!kind || value === '') {
+        return { ok: false, error: 'record_score requires kind and a string/number value.' };
+      }
+      const recorded = capability.recordScore(candidateId, {
+        kind,
+        value,
+        ...(typeof args.detail === 'string' ? { detail: args.detail } : {}),
+      });
+      return recorded
+        ? { ok: true, candidateId }
+        : { ok: false, error: 'Score limit reached for this candidate.' };
+    }
+
+    default:
+      return { ok: false, error: `Unknown sandbox tool "${name.slice(0, 64)}".` };
+  }
+}
+
+class DeepEditLlmBudgetError extends Error {
+  constructor(readonly reason: string) {
+    super(`Deep edit LLM budget exhausted (${reason}).`);
+    this.name = 'DeepEditLlmBudgetError';
+  }
+}
+
+const modelForRequest = (provider: 'openai' | 'anthropic', apiKey: string, modelName: string): Model => {
+  if (provider === 'anthropic') {
+    const client = createAnthropic({ apiKey });
+    return aisdk(client(modelName));
+  }
+  const client = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
+  return new OpenAIResponsesModel(client, modelName);
+};
+
+const withLlmBudget = (inner: Model, capability: DeepEditCapability): Model => new Proxy(inner, {
+  get(target, prop, receiver) {
+    if (prop === 'getResponse' || prop === 'getStreamedResponse') {
+      return (...callArgs: unknown[]) => {
+        const charge = capability.chargeLlmCall();
+        if (!charge.ok) {
+          throw new DeepEditLlmBudgetError(charge.reason);
+        }
+        return (target as unknown as Record<string, (...inner: unknown[]) => unknown>)[prop as string](...callArgs);
+      };
+    }
+    return Reflect.get(target, prop, receiver);
+  },
+});
+
+const SANDBOX_INSTRUCTIONS = [
+  'You are a MusicXML deep-edit agent working in an isolated sandbox.',
+  'The user\'s current score is candidate "base". You cannot modify base or the user\'s score; you create candidates.',
+  'Workflow: create one or more candidate edits, verify them, compare them, then call finalize with the best candidate id.',
+  '',
+  'Tools:',
+  '- sandbox_apply_patch(baseCandidateId, patch): apply a musicxml-patch@1 JSON object to a candidate. Ops: replace, setText, setAttr, insertBefore, insertAfter, delete. Each XPath must match exactly one node. On failure you get the exact apply error; fix the patch and retry.',
+  '- sandbox_scoreops(baseCandidateId, ops): structured score operations (transpose, set_key, set_time, etc.).',
+  '- sandbox_engine_check(candidateId): load the candidate in the notation engine. Do this for every candidate you might finalize.',
+  '- sandbox_render(candidateId): full render verification (strongest check; limited budget).',
+  '- sandbox_measure_diff(candidateId, againstId?): compact per-measure diff versus base or another candidate.',
+  '- sandbox_analyze(candidateId, kind): "harmony" or "functional_harmony" analysis report.',
+  '- sandbox_record_score(candidateId, kind, value, detail?): record an assessment for the audit trail.',
+  '- finalize(candidateId, rationale): REQUIRED final call. Names the candidate to propose to the user.',
+  '',
+  'Budgets are strict and request-wide. When a tool reports budget exhaustion, immediately finalize your best verified candidate.',
+  'The user commits changes with Apply in their editor; you only propose. Never claim an edit was applied.',
+].join('\n');
+
+const defaultDriver: (provider: 'openai' | 'anthropic', apiKey: string, modelName: string) => DeepEditDriver = (
+  provider,
+  apiKey,
+  modelName,
+) => async ({ capability, executeTool, instructions, prompt }) => {
+  const candidateIdSchema = z.string().min(1).max(32);
+  let finalized: { candidateId: string; rationale: string } | null = null;
+
+  const jsonTool = (
+    name: string,
+    description: string,
+    parameters: z.ZodTypeAny,
+  ) => tool({
+    name,
+    description,
+    parameters,
+    execute: async (input: unknown) => JSON.stringify(
+      await executeTool(name, asRecord(input) ?? {}),
+    ),
+  });
+
+  const agent = new Agent({
+    name: 'DeepEdit',
+    instructions,
+    model: withLlmBudget(modelForRequest(provider, apiKey, modelName), capability),
+    modelSettings: { toolChoice: 'required' },
+    tools: [
+      jsonTool('sandbox_apply_patch', 'Apply a musicxml-patch@1 to a candidate, minting a new candidate.', z.object({
+        baseCandidateId: candidateIdSchema,
+        patch: z.record(z.string(), z.unknown()),
+      })),
+      jsonTool('sandbox_scoreops', 'Run structured score operations against a candidate, minting a new candidate.', z.object({
+        baseCandidateId: candidateIdSchema,
+        ops: z.array(z.record(z.string(), z.unknown())).min(1),
+      })),
+      jsonTool('sandbox_engine_check', 'Load a candidate in the notation engine to verify it.', z.object({
+        candidateId: candidateIdSchema,
+      })),
+      jsonTool('sandbox_render', 'Render a candidate as the strongest verification level.', z.object({
+        candidateId: candidateIdSchema,
+      })),
+      jsonTool('sandbox_measure_diff', 'Summarize per-measure differences between candidates.', z.object({
+        candidateId: candidateIdSchema,
+        againstId: candidateIdSchema.nullable().optional(),
+      })),
+      jsonTool('sandbox_analyze', 'Run a harmony or functional-harmony analysis on a candidate.', z.object({
+        candidateId: candidateIdSchema,
+        kind: z.enum(['harmony', 'functional_harmony']),
+      })),
+      jsonTool('sandbox_record_score', 'Record an assessment score for a candidate.', z.object({
+        candidateId: candidateIdSchema,
+        kind: z.string().min(1).max(64),
+        value: z.union([z.string().max(200), z.number()]),
+        detail: z.string().max(500).nullable().optional(),
+      })),
+      tool({
+        name: 'finalize',
+        description: 'Finish the deep edit by naming the candidate to propose, with a short rationale.',
+        parameters: z.object({
+          candidateId: candidateIdSchema,
+          rationale: z.string().min(1).max(MAX_RATIONALE_CHARS),
+        }),
+        execute: async (input: unknown) => {
+          const record = asRecord(input) ?? {};
+          finalized = {
+            candidateId: String(record.candidateId ?? ''),
+            rationale: String(record.rationale ?? '').slice(0, MAX_RATIONALE_CHARS),
+          };
+          return JSON.stringify({ ok: true });
+        },
+      }),
+    ],
+    toolUseBehavior: { stopAtToolNames: ['finalize'] },
+  });
+
+  try {
+    await run(agent, prompt, {
+      maxTurns: capability.budgets.maxLlmCalls + 2,
+      signal: capability.signal,
+    });
+  } catch (error) {
+    if (error instanceof DeepEditLlmBudgetError || capability.signal.aborted) {
+      return finalized;
+    }
+    throw error;
+  }
+  return finalized;
+};
+
+const buildDeepEditPrompt = (instruction: string, baseXml: string) => [
+  `EDIT REQUEST:\n${instruction}`,
+  '',
+  'CURRENT MUSICXML (candidate "base"):',
+  baseXml,
+].join('\n');
+
+const errorResult = (
+  status: number,
+  category: DeepEditErrorCategory,
+  message: string,
+  audit?: DeepEditAudit,
+): DeepEditServiceResult => ({
+  status,
+  body: {
+    error: message,
+    errorCategory: category,
+    ...(audit ? { deepEdit: audit } : {}),
+  },
+});
+
+export async function runDeepEditService(
+  body: unknown,
+  options?: {
+    traceContext?: TraceContext;
+    signal?: AbortSignal;
+    driveAgent?: DeepEditDriver;
+    budgets?: DeepEditBudgets;
+  },
+): Promise<DeepEditServiceResult> {
+  const startedAt = Date.now();
+  const data = asRecord(body);
+  const prompt = typeof data?.prompt === 'string' ? data.prompt.trim() : '';
+  const promptText = typeof data?.promptText === 'string' ? data.promptText.trim() : '';
+  const provider = resolveProvider(data?.provider);
+  const requestedModel = typeof data?.model === 'string' ? data.model.trim() : '';
+
+  if (!prompt && !promptText) {
+    return errorResult(400, 'request', 'An edit instruction is required.');
+  }
+  if (data?.image != null || data?.pdf != null) {
+    return errorResult(400, 'request', 'Image and PDF context are not supported in Deep Edit yet.');
+  }
+  if (provider !== 'openai' && provider !== 'anthropic') {
+    return errorResult(400, 'request', 'Deep Edit supports OpenAI and Anthropic models.');
+  }
+  if (!requestedModel) {
+    return errorResult(400, 'request', 'Select a model for Deep Edit.');
+  }
+  const apiKeyInput = (typeof data?.apiKey === 'string' ? data.apiKey : (typeof data?.api_key === 'string' ? data.api_key : '')).trim();
+  const apiKey = resolveApiKeyForProvider(provider, apiKeyInput);
+  if (!apiKey) {
+    return errorResult(401, 'request', `Missing ${provider === 'openai' ? 'OpenAI' : 'Anthropic'} API key.`);
+  }
+
+  const resolution = await resolveScoreContent(body);
+  if (resolution.error) {
+    return { status: resolution.error.status, body: { ...resolution.error.body, errorCategory: 'request' } };
+  }
+  const baseXml = resolution.xml;
+  if (!looksLikeMusicXml(baseXml) || !/<score-(?:partwise|timewise)\b/i.test(baseXml)) {
+    return errorResult(400, 'request', 'Base content must be MusicXML.');
+  }
+
+  const budgets = options?.budgets ?? resolveDeepEditBudgets();
+  if (Buffer.byteLength(baseXml, 'utf8') > budgets.maxCandidateBytes) {
+    return errorResult(413, 'request', `Base MusicXML exceeds the ${budgets.maxCandidateBytes} byte Deep Edit limit.`);
+  }
+
+  const capability = new DeepEditCapability({
+    baseXml,
+    budgets,
+    parentSignal: options?.signal,
+  });
+  const auditFor = (finalizedCandidateId: string | null, rationale: string): DeepEditAudit => ({
+    finalizedCandidateId,
+    rationale,
+    candidates: capability.auditCandidates(),
+    counters: {
+      llmCalls: capability.counters.llmCalls,
+      toolCalls: capability.counters.toolCalls,
+      renders: capability.counters.renders,
+    },
+    elapsedMs: Math.max(0, Date.now() - startedAt),
+  });
+
+  try {
+    const driver = options?.driveAgent ?? defaultDriver(provider, apiKey, requestedModel);
+    let finalized: { candidateId: string; rationale: string } | null = null;
+    try {
+      finalized = await driver({
+        capability,
+        executeTool: (name, toolArgs) => executeSandboxTool(capability, name, toolArgs),
+        instructions: SANDBOX_INSTRUCTIONS,
+        prompt: promptText || buildDeepEditPrompt(prompt, baseXml),
+      });
+    } catch (error) {
+      const timedOut = capability.expired();
+      console.error('[deep-edit] Agent loop failed.', {
+        provider,
+        model: requestedModel,
+        error: error instanceof Error ? error.name : 'unknown_error',
+      });
+      return errorResult(
+        timedOut ? 504 : 502,
+        timedOut ? 'timeout' : 'provider',
+        timedOut ? 'Deep edit exceeded its request budget.' : 'Deep edit provider request failed.',
+        auditFor(null, ''),
+      );
+    }
+
+    if (!finalized) {
+      const exhausted = capability.expired()
+        || capability.counters.llmCalls >= budgets.maxLlmCalls
+        || capability.counters.toolCalls >= budgets.maxToolCalls;
+      return errorResult(
+        422,
+        exhausted ? 'budget_exhausted' : 'no_finalize',
+        exhausted
+          ? 'Deep edit ran out of budget before finalizing a candidate.'
+          : 'Deep edit ended without finalizing a candidate.',
+        auditFor(null, ''),
+      );
+    }
+
+    const winner = capability.getCandidate(finalized.candidateId);
+    if (!winner) {
+      return errorResult(422, 'gate_failed', `Finalized candidate "${finalized.candidateId.slice(0, 32)}" does not exist.`, auditFor(null, finalized.rationale));
+    }
+
+    // Feasibility gate: the winner must hold the strongest level attempted during the
+    // run, and ScoreOps-born candidates must pass at least engine_load. The gate runs
+    // missing checks itself, charging the same budgets.
+    const requiredLevel: DeepEditVerificationLevel = (() => {
+      const attempted = capability.strongestAttemptedLevel();
+      const floor: DeepEditVerificationLevel = winner.createdByTool === 'scoreops' ? 'engine_load' : 'patch_apply';
+      return DEEP_EDIT_LEVEL_RANK[attempted] >= DEEP_EDIT_LEVEL_RANK[floor] ? attempted : floor;
+    })();
+    while (DEEP_EDIT_LEVEL_RANK[winner.verification] < DEEP_EDIT_LEVEL_RANK[requiredLevel]) {
+      const nextCheck = DEEP_EDIT_LEVEL_RANK[winner.verification] < DEEP_EDIT_LEVEL_RANK.engine_load
+        ? 'sandbox_engine_check'
+        : 'sandbox_render';
+      const checked = await executeSandboxTool(capability, nextCheck, { candidateId: winner.id });
+      if (!checked.ok) {
+        const budgetReason = typeof checked.budget === 'string';
+        return errorResult(
+          422,
+          budgetReason ? 'budget_exhausted' : 'gate_failed',
+          budgetReason
+            ? 'Deep edit ran out of budget while gating the finalized candidate.'
+            : `Finalized candidate failed ${nextCheck === 'sandbox_engine_check' ? 'engine' : 'render'} verification: ${String(checked.error ?? 'unknown error').slice(0, 500)}`,
+          auditFor(winner.id, finalized.rationale),
+        );
+      }
+    }
+
+    const resolvedBase = resolvedScoreSnapshot(resolution);
+    const proposal: AiEditProposal | null = buildAiEditProposal({
+      sourceTool: 'music.deep_edit',
+      base: resolvedBase,
+      proposedXml: winner.xml,
+      verification: {
+        level: winner.verification,
+        llmCalls: capability.counters.llmCalls,
+      },
+    });
+    if (!proposal) {
+      return errorResult(500, 'request', 'Failed to build the deep-edit proposal.', auditFor(winner.id, finalized.rationale));
+    }
+    const proposalSessionId = randomUUID();
+    const continuityToken = createProposalContinuityToken({
+      proposalSessionId,
+      cycle: 1,
+      baseContentHash: proposal.baseContentHash,
+      proposedContentHash: proposal.proposedContentHash,
+    });
+
+    return {
+      status: 200,
+      body: {
+        provider,
+        model: requestedModel,
+        proposal,
+        ...(winner.patch ? { patch: winner.patch } : {}),
+        annotations: [],
+        proposedXml: winner.xml,
+        scoreSessionId: resolution.session?.scoreSessionId ?? null,
+        revision: resolution.session?.revision ?? null,
+        proposalSessionId,
+        cycle: 1,
+        continuityToken,
+        verification: {
+          level: winner.verification,
+          llmCalls: capability.counters.llmCalls,
+          elapsedMs: Math.max(0, Date.now() - startedAt),
+        },
+        deepEdit: auditFor(winner.id, finalized.rationale),
+      },
+    };
+  } finally {
+    capability.dispose();
+  }
+}
