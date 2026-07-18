@@ -2,10 +2,6 @@
 
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import ReactMarkdown from 'react-markdown';
-import remarkBreaks from 'remark-breaks';
-import remarkGfm from 'remark-gfm';
-import { LoaderCircle, Square } from 'lucide-react';
 import {
     loadWebMscore,
     loadWebMscoreInProcess,
@@ -89,10 +85,6 @@ import {
     MMA_GROOVE_OPTION_GROUPS,
 } from '../lib/music-mma-grooves';
 import {
-    computeClientProposalHashes,
-    verifyAiProposalCurrentContent,
-} from '../lib/ai-edit-proposal-client';
-import {
     advanceClientProposalSession,
     buildProposalSessionRequestPayload,
     createClientProposalSession,
@@ -100,13 +92,29 @@ import {
 } from '../lib/proposal-session-client';
 import {
     AI_EDIT_EFFORT_PROFILES,
-    AI_EDIT_EFFORTS,
-    DEFAULT_AI_EDIT_EFFORT,
-    formatAiEditBudgetDuration,
     type AiEditEffort,
 } from '../lib/ai-edit-effort';
 import { readAiEditServiceResponse } from '../lib/ai-edit-progress-client';
-import { type AiEditProgressUpdate } from '../lib/ai-edit-progress';
+import { useAiEditController } from './score-editor/useAiEditController';
+import { useAiProposalController } from './score-editor/useAiProposalController';
+import { AiAssistantPanel } from './score-editor/AiAssistantPanel';
+import {
+    AiCompareWorkspace,
+    AiCompareWorkspaceActions,
+} from './score-editor/AiCompareWorkspace';
+import { AiDiffBlockReview } from './score-editor/AiDiffBlockReview';
+import {
+    useAiAssistantController,
+} from './score-editor/useAiAssistantController';
+import {
+    type AiChatMessage,
+    type AiImageAttachment,
+    type AiPdfAttachment,
+    type AiSourceRagInfo,
+    type MusicXmlPatch,
+    type MusicXmlPatchOp,
+} from './score-editor/ai-assistant-types';
+import { type AiScoreBridge } from './score-editor/ai-score-bridge';
 
 type SelectionBox = {
     index: number | null;
@@ -134,14 +142,6 @@ type CompareViewState = {
     checkpointLabel?: string;
 };
 
-type AiEditWorkKind = 'patch' | 'deep' | 'feedback';
-
-type AiEditWorkState = {
-    kind: AiEditWorkKind;
-    startedAt: number;
-    message: string;
-};
-
 type AiEditProposal = {
     sourceTool: string;
     baseXml: string;
@@ -160,13 +160,6 @@ type AiEditProposal = {
 };
 
 const AI_PROPOSAL_VERIFICATION_LEVELS = new Set(['patch_apply', 'tool_execution', 'engine_load', 'render']);
-
-const AI_PROPOSAL_VERIFICATION_LABELS: Record<string, string> = {
-    patch_apply: 'apply-verified',
-    tool_execution: 'tool-executed',
-    engine_load: 'engine-verified',
-    render: 'render-verified',
-};
 
 type CompareBlockComment = {
     comment: string;
@@ -581,54 +574,9 @@ const ANTHROPIC_EMBED_PROXY_ERROR = [
 
 type HarmonyVariant = 0 | 1 | 2;
 
-type MusicXmlPatchOp = {
-    op: 'replace' | 'setText' | 'setAttr' | 'insertBefore' | 'insertAfter' | 'delete';
-    path: string;
-    value?: string;
-    name?: string;
-};
-
-type MusicXmlPatch = {
-    format: 'musicxml-patch@1';
-    ops: MusicXmlPatchOp[];
-};
-
 type AiPromptSection = {
     title: string;
     content: string;
-};
-
-type AiImageAttachment = {
-    mediaType: 'image/png';
-    base64: string;
-};
-
-type AiPdfAttachment = {
-    mediaType: 'application/pdf';
-    base64: string;
-    filename: string;
-};
-
-type AiSourceRagInfo = {
-    enabled: boolean;
-    used: boolean;
-    reason?: string;
-    sourceUrl?: string;
-    snippetCount?: number;
-    sourceCount?: number;
-    sources?: Array<{
-        id: string;
-        label: string;
-        url: string;
-        tier: string;
-        score: number;
-    }>;
-};
-
-type AiChatMessage = {
-    role: 'user' | 'assistant';
-    text: string;
-    sourceRag?: AiSourceRagInfo | null;
 };
 
 type MmaStarterPreset = 'blank' | 'lead-sheet' | 'blues';
@@ -1219,13 +1167,22 @@ export default function ScoreEditor() {
     const [checkpointError, setCheckpointError] = useState<string | null>(null);
     const [compareView, setCompareView] = useState<CompareViewState | null>(null);
     const [compareSwapped, setCompareSwapped] = useState(false);
-    const aiProposalExpectedCurrentHashRef = useRef<string | null>(null);
-    const aiProposalExpectedCurrentIdentityHashRef = useRef<string | null>(null);
-    const aiProposalBaseXmlRef = useRef('');
-    const aiProposalApplyErrorRef = useRef<string | null>(null);
-    const [aiProposalApplyError, setAiProposalApplyError] = useState<string | null>(null);
-    const aiProposalSessionRef = useRef<ClientProposalSession | null>(null);
-    const [aiProposalAudit, setAiProposalAudit] = useState<Record<string, unknown> | null>(null);
+    const aiProposalController = useAiProposalController();
+    const aiProposalApplyError = aiProposalController.applyError;
+    const aiProposalAudit = aiProposalController.audit;
+    const captureAiProposal = aiProposalController.capture;
+    const verifyAiProposalCurrent = aiProposalController.verifyCurrent;
+    const recordAiProposalAppliedXml = aiProposalController.recordAppliedXml;
+    const invalidateAiProposalExpectedCurrent = aiProposalController.invalidateExpectedCurrent;
+    const snapshotAiProposalContinuity = aiProposalController.snapshot;
+    const restoreAiProposalContinuity = aiProposalController.restore;
+    const getAiProposalExpectedHashes = aiProposalController.getExpectedHashes;
+    const getAiProposalSession = aiProposalController.getSession;
+    const setAiProposalSession = aiProposalController.setSession;
+    const setAiProposalApplyError = aiProposalController.setApplyError;
+    const getAiProposalApplyError = aiProposalController.getApplyError;
+    const setAiProposalAudit = aiProposalController.setAudit;
+    const clearAiProposal = aiProposalController.clear;
     const [compareLeftCheckpointLabel, setCompareLeftCheckpointLabel] = useState('');
     const [compareRightCheckpointLabel, setCompareRightCheckpointLabel] = useState('');
     const [compareRightScore, setCompareRightScore] = useState<Score | null>(null);
@@ -1272,7 +1229,6 @@ export default function ScoreEditor() {
     const [aiLastAnnotations, setAiLastAnnotations] = useState<PatchAnnotation[]>([]);
     const [aiDiffIteration, setAiDiffIteration] = useState(0);
     const [aiDiffGlobalComment, setAiDiffGlobalComment] = useState('');
-    const [aiDiffFeedbackBusy, setAiDiffFeedbackBusy] = useState(false);
     const [aiDiffFeedbackError, setAiDiffFeedbackError] = useState<string | null>(null);
     const [aiDiffBlockErrors, setAiDiffBlockErrors] = useState<Record<string, string>>({});
     const [aiDiffGutterWidth, setAiDiffGutterWidth] = useState(AI_DIFF_GUTTER_DEFAULT_WIDTH);
@@ -1348,9 +1304,39 @@ export default function ScoreEditor() {
     const [functionalHarmonyAnnotatedXml, setFunctionalHarmonyAnnotatedXml] = useState('');
     const [functionalHarmonyJsonExport, setFunctionalHarmonyJsonExport] = useState('');
     const [functionalHarmonyRntxtExport, setFunctionalHarmonyRntxtExport] = useState('');
-    const [aiProvider, setAiProvider] = useState<AiProvider>('openai');
-    const [aiModel, setAiModel] = useState('');
-    const [aiApiKey, setAiApiKey] = useState('');
+    const aiAssistantController = useAiAssistantController();
+    const {
+        aiProvider, setAiProvider,
+        aiModel, setAiModel,
+        aiApiKey, setAiApiKey,
+        aiMode, setAiMode,
+        aiPrompt, setAiPrompt,
+        aiIncludeXml, setAiIncludeXml,
+        aiIncludePdf, setAiIncludePdf,
+        aiIncludePage, setAiIncludePage,
+        aiIncludeSelection, setAiIncludeSelection,
+        aiIncludeChat, setAiIncludeChat,
+        aiDeepEdit, setAiDeepEdit,
+        aiEditEffort, setAiEditEffort,
+        aiIncludeRenderedImage, setAiIncludeRenderedImage,
+        aiMaxTokensMode, setAiMaxTokensMode,
+        aiMaxTokens, setAiMaxTokens,
+        aiTemperatureMode, setAiTemperatureMode,
+        aiTemperature, setAiTemperature,
+        aiChatInput, setAiChatInput,
+        aiChatMessages, setAiChatMessages,
+        aiChatSourceRagHintDismissed, setAiChatSourceRagHintDismissed,
+        aiOutput, setAiOutput,
+        aiPatch, setAiPatch,
+        aiPatchError, setAiPatchError,
+        aiPatchedXml, setAiPatchedXml,
+        aiBaseXml, setAiBaseXml,
+        aiError, setAiError,
+        aiModels, setAiModels,
+        aiModelDescriptors, setAiModelDescriptors,
+        aiModelsLoading, setAiModelsLoading,
+        aiModelsError, setAiModelsError,
+    } = aiAssistantController;
     const [musicNotaGenBackend, setMusicNotaGenBackend] = useState<'huggingface' | 'huggingface-space'>(
         MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_BACKEND,
     );
@@ -1394,37 +1380,7 @@ export default function ScoreEditor() {
         const seconds = totalSeconds % 60;
         return `${minutes}:${String(seconds).padStart(2, '0')}`;
     };
-    const [aiMode, setAiMode] = useState<'patch' | 'chat'>('patch');
-    const [aiPrompt, setAiPrompt] = useState('');
-    const [aiIncludeXml, setAiIncludeXml] = useState(true);
-    const [aiIncludePdf, setAiIncludePdf] = useState(false);
-    const [aiIncludePage, setAiIncludePage] = useState(false);
-    const [aiIncludeSelection, setAiIncludeSelection] = useState(false);
-    const [aiIncludeChat, setAiIncludeChat] = useState(false);
-    const [aiDeepEdit, setAiDeepEdit] = useState(false);
-    const [aiEditEffort, setAiEditEffort] = useState<AiEditEffort>(DEFAULT_AI_EDIT_EFFORT);
-    const [aiEditWork, setAiEditWork] = useState<AiEditWorkState | null>(null);
-    const [aiEditElapsedMs, setAiEditElapsedMs] = useState(0);
-    const aiEditAbortControllerRef = useRef<AbortController | null>(null);
-    const [aiIncludeRenderedImage, setAiIncludeRenderedImage] = useState(false);
-    const [aiMaxTokensMode, setAiMaxTokensMode] = useState<'auto' | 'custom'>('auto');
-    const [aiMaxTokens, setAiMaxTokens] = useState(4096);
-    const [aiTemperatureMode, setAiTemperatureMode] = useState<'auto' | 'custom'>('auto');
-    const [aiTemperature, setAiTemperature] = useState(1);
-    const [aiChatInput, setAiChatInput] = useState('');
-    const [aiChatMessages, setAiChatMessages] = useState<AiChatMessage[]>([]);
-    const [aiChatSourceRagHintDismissed, setAiChatSourceRagHintDismissed] = useState(false);
-    const [aiOutput, setAiOutput] = useState('');
-    const [aiPatch, setAiPatch] = useState<MusicXmlPatch | null>(null);
-    const [aiPatchError, setAiPatchError] = useState<string | null>(null);
-    const [aiPatchedXml, setAiPatchedXml] = useState('');
-    const [aiBaseXml, setAiBaseXml] = useState('');
-    const [aiBusy, setAiBusy] = useState(false);
-    const [aiError, setAiError] = useState<string | null>(null);
-    const [aiModels, setAiModels] = useState<string[]>([]);
-    const [aiModelDescriptors, setAiModelDescriptors] = useState<AiModelDescriptor[]>([]);
-    const [aiModelsLoading, setAiModelsLoading] = useState(false);
-    const [aiModelsError, setAiModelsError] = useState<string | null>(null);
+    const [aiChatBusy, setAiChatBusy] = useState(false);
     const aiUnsupportedParametersRef = useRef<Map<string, Set<OptionalAiRequestParameter>>>(new Map());
     const [currentPage, setCurrentPage] = useState(0);
     const [pageCount, setPageCount] = useState(1);
@@ -1534,38 +1490,18 @@ export default function ScoreEditor() {
         }
     }, []);
 
-    const activeAiEditBudgetMs = aiEditWork
-        ? (aiEditWork.kind === 'deep'
-            ? AI_EDIT_EFFORT_PROFILES[aiEditEffort].deep.budgetMs
-            : AI_EDIT_EFFORT_PROFILES[aiEditEffort].patch.budgetMs)
-        : 0;
-    const cancelAiEditRequest = useCallback(() => {
-        const controller = aiEditAbortControllerRef.current;
-        if (controller && !controller.signal.aborted) {
-            controller.abort(new DOMException('Request cancelled by user.', 'AbortError'));
-        }
-    }, []);
-    const updateAiEditProgress = useCallback((update: AiEditProgressUpdate) => {
-        setAiEditWork((current) => current ? { ...current, message: update.message } : current);
-    }, []);
-
-    useEffect(() => {
-        if (!aiEditWork) {
-            setAiEditElapsedMs(0);
-            return;
-        }
-        const updateElapsed = () => setAiEditElapsedMs(Math.max(0, Date.now() - aiEditWork.startedAt));
-        updateElapsed();
-        const interval = window.setInterval(updateElapsed, 500);
-        return () => window.clearInterval(interval);
-    }, [aiEditWork]);
-
-    useEffect(() => () => {
-        const controller = aiEditAbortControllerRef.current;
-        if (controller && !controller.signal.aborted) {
-            controller.abort(new DOMException('Editor closed.', 'AbortError'));
-        }
-    }, []);
+    const aiEditController = useAiEditController(aiEditEffort);
+    const beginAiEdit = aiEditController.begin;
+    const updateAiEditProgress = aiEditController.updateProgress;
+    const finishAiEdit = aiEditController.finish;
+    const aiEditWork = aiEditController.work;
+    const aiEditElapsedMs = aiEditController.elapsedMs;
+    const activeAiEditBudgetMs = aiEditController.budgetMs;
+    const cancelAiEditRequest = aiEditController.cancel;
+    const aiDiffFeedbackBusy = aiEditController.activeKind === 'feedback';
+    const aiPatchBusy = aiEditController.active
+        && (aiEditController.activeKind === 'patch' || aiEditController.activeKind === 'deep');
+    const aiBusy = aiChatBusy || aiPatchBusy;
 
     useEffect(() => {
         if (!editorSessionIdRef.current) {
@@ -5301,6 +5237,16 @@ ${partsBodyXml}
         }
     }, [score, runSerializedScoreOperation]);
 
+    const aiScoreBridge: AiScoreBridge = {
+        getLiveXml: (fallback = null) => getScoreMusicXmlText(scoreRef.current ?? score, fallback),
+        getContextXml: resolveXmlContext,
+        applyXml: (xml, telemetrySource) => applyXmlToScore(xml, { telemetrySource }),
+        getSelectionContext: resolveSelectionContext,
+        getPageSvgContext: resolveCurrentPageSvgContext,
+        getPageImage: resolveCurrentPageImageAttachment,
+        getScorePdf: resolveScorePdfAttachment,
+    };
+
     const loadScoreWithInitialLayout = async (
         WebMscore: Awaited<ReturnType<typeof loadWebMscore>>,
         format: InputFileFormat,
@@ -6233,31 +6179,21 @@ ${partsBodyXml}
                 const liveXml = await getScoreMusicXmlText(scoreRef.current ?? targetScore, null);
                 if (!liveXml) {
                     const message = 'Unable to verify the current score before applying this proposal.';
-                    aiProposalApplyErrorRef.current = message;
                     setAiProposalApplyError(message);
                     setAiError(message);
                     return false;
                 }
                 verifiedTargetXml = liveXml;
                 try {
-                    const hashCheck = await verifyAiProposalCurrentContent({
-                        expectedCurrentContentHash: aiProposalExpectedCurrentHashRef.current,
-                        expectedCurrentIdentityHash: aiProposalExpectedCurrentIdentityHashRef.current,
-                        baseXml: aiProposalBaseXmlRef.current || compareView.currentXml,
-                        currentXml: liveXml,
-                    });
-                    aiProposalExpectedCurrentHashRef.current = hashCheck.expectedCurrentContentHash;
-                    aiProposalExpectedCurrentIdentityHashRef.current = hashCheck.expectedCurrentIdentityHash;
+                    const hashCheck = await verifyAiProposalCurrent(liveXml, compareView.currentXml);
                     if (!hashCheck.ok) {
                         const message = 'The score changed after this proposal was generated. Regenerate or rebase the proposal before applying it.';
-                        aiProposalApplyErrorRef.current = message;
                         setAiProposalApplyError(message);
                         setAiError(message);
                         return false;
                     }
                 } catch (hashError) {
                     const message = errorMessage(hashError) || 'Unable to verify the proposal against the current score.';
-                    aiProposalApplyErrorRef.current = message;
                     setAiProposalApplyError(message);
                     setAiError(message);
                     return false;
@@ -6293,18 +6229,11 @@ ${partsBodyXml}
                 const appliedXml = await getScoreMusicXmlText(scoreRef.current ?? targetScore, patched.xml) || patched.xml;
                 if (isAiProposalCommit) {
                     try {
-                        const hashes = await computeClientProposalHashes(appliedXml);
-                        aiProposalExpectedCurrentHashRef.current = hashes.contentHash;
-                        aiProposalExpectedCurrentIdentityHashRef.current = hashes.identityHash;
-                        aiProposalApplyErrorRef.current = null;
-                        setAiProposalApplyError(null);
+                        await recordAiProposalAppliedXml(appliedXml);
                         setAiError(null);
                     } catch (hashError) {
                         const message = errorMessage(hashError) || 'The change was applied, but the next proposal block cannot be verified.';
-                        aiProposalExpectedCurrentHashRef.current = null;
-                        aiProposalExpectedCurrentIdentityHashRef.current = null;
-                        aiProposalApplyErrorRef.current = message;
-                        setAiProposalApplyError(message);
+                        invalidateAiProposalExpectedCurrent(message);
                         setAiError(message);
                     }
                 }
@@ -6327,6 +6256,10 @@ ${partsBodyXml}
         getScoreMusicXmlText,
         replaceMeasuresInMusicXml,
         applyXmlToScore,
+        invalidateAiProposalExpectedCurrent,
+        recordAiProposalAppliedXml,
+        setAiProposalApplyError,
+        verifyAiProposalCurrent,
     ]);
 
     const handleCompareOverwrite = useCallback(async (
@@ -6361,44 +6294,29 @@ ${partsBodyXml}
         setCompareSwapBusy(true);
         let committedXml: string | null = null;
         try {
-            const liveXml = await getScoreMusicXmlText(scoreRef.current ?? score, null);
+            const liveXml = await aiScoreBridge.getLiveXml();
             if (!liveXml) {
                 const message = 'Unable to verify the current score before applying this proposal.';
-                aiProposalApplyErrorRef.current = message;
                 setAiProposalApplyError(message);
                 setAiError(message);
                 return;
             }
-            const hashCheck = await verifyAiProposalCurrentContent({
-                expectedCurrentContentHash: aiProposalExpectedCurrentHashRef.current,
-                expectedCurrentIdentityHash: aiProposalExpectedCurrentIdentityHashRef.current,
-                baseXml: aiProposalBaseXmlRef.current || compareView.currentXml,
-                currentXml: liveXml,
-            });
-            aiProposalExpectedCurrentHashRef.current = hashCheck.expectedCurrentContentHash;
-            aiProposalExpectedCurrentIdentityHashRef.current = hashCheck.expectedCurrentIdentityHash;
+            const hashCheck = await verifyAiProposalCurrent(liveXml, compareView.currentXml);
             if (!hashCheck.ok) {
                 const message = 'The score changed after this proposal was generated. Regenerate or rebase the proposal before applying it.';
-                aiProposalApplyErrorRef.current = message;
                 setAiProposalApplyError(message);
                 setAiError(message);
                 return;
             }
 
-            const applied = await applyXmlToScore(compareView.checkpointXml, { telemetrySource: 'compare_apply_all' });
+            const applied = await aiScoreBridge.applyXml(compareView.checkpointXml, 'compare_apply_all');
             if (!applied) {
                 return;
             }
-            const appliedXml = await getScoreMusicXmlText(
-                scoreRef.current ?? score,
-                compareView.checkpointXml,
-            ) || compareView.checkpointXml;
+            const appliedXml = await aiScoreBridge.getLiveXml(compareView.checkpointXml)
+                || compareView.checkpointXml;
             committedXml = appliedXml;
-            const hashes = await computeClientProposalHashes(appliedXml);
-            aiProposalExpectedCurrentHashRef.current = hashes.contentHash;
-            aiProposalExpectedCurrentIdentityHashRef.current = hashes.identityHash;
-            aiProposalApplyErrorRef.current = null;
-            setAiProposalApplyError(null);
+            await recordAiProposalAppliedXml(appliedXml);
             setAiError(null);
             setCompareView((prev) => (prev ? { ...prev, currentXml: appliedXml } : prev));
             setCompareAlignmentRevision((value) => value + 1);
@@ -6407,12 +6325,10 @@ ${partsBodyXml}
                 ? 'The proposal was applied, but its new content hash could not be recorded.'
                 : (errorMessage(applyError) || 'Unable to apply the complete proposal.');
             if (committedXml) {
-                aiProposalExpectedCurrentHashRef.current = null;
-                aiProposalExpectedCurrentIdentityHashRef.current = null;
+                invalidateAiProposalExpectedCurrent(message);
                 setCompareView((prev) => (prev ? { ...prev, currentXml: committedXml! } : prev));
                 setCompareAlignmentRevision((value) => value + 1);
             }
-            aiProposalApplyErrorRef.current = message;
             setAiProposalApplyError(message);
             setAiError(message);
         } finally {
@@ -6424,6 +6340,10 @@ ${partsBodyXml}
         score,
         getScoreMusicXmlText,
         applyXmlToScore,
+        invalidateAiProposalExpectedCurrent,
+        recordAiProposalAppliedXml,
+        setAiProposalApplyError,
+        verifyAiProposalCurrent,
     ]);
 
     const setAiDiffBlockStatus = useCallback((block: AiDiffBlockRef, status: BlockReviewStatus) => {
@@ -6455,6 +6375,17 @@ ${partsBodyXml}
                     commentCommitted: false,
                 },
             ];
+        });
+    }, []);
+
+    const clearAiDiffBlockError = useCallback((blockKey: string) => {
+        setAiDiffBlockErrors((prev) => {
+            if (!prev[blockKey]) {
+                return prev;
+            }
+            const next = { ...prev };
+            delete next[blockKey];
+            return next;
         });
     }, []);
 
@@ -6606,7 +6537,7 @@ ${partsBodyXml}
             setAiDiffBlockStatus(block, 'pending');
             setAiDiffBlockErrors((prev) => ({
                 ...prev,
-                [block.blockKey]: aiProposalApplyErrorRef.current || 'Could not apply this block. Please retry.',
+                [block.blockKey]: getAiProposalApplyError() || 'Could not apply this block. Please retry.',
             }));
             return;
         }
@@ -6621,6 +6552,7 @@ ${partsBodyXml}
     }, [
         compareLeftScore,
         compareRightScoreDisplay,
+        getAiProposalApplyError,
         handleCompareOverwriteBlock,
         setAiDiffBlockStatus,
     ]);
@@ -6777,7 +6709,7 @@ ${partsBodyXml}
             return;
         }
 
-        const currentXml = await getScoreMusicXmlText(scoreRef.current ?? score, compareView.currentXml);
+        const currentXml = await aiScoreBridge.getLiveXml(compareView.currentXml);
         if (!currentXml?.trim()) {
             const message = 'Unable to export the current score for feedback.';
             setAiError(message);
@@ -6786,17 +6718,10 @@ ${partsBodyXml}
             return;
         }
         const previousCheckpointXml = compareView.checkpointXml;
-        const previousExpectedContentHash = aiProposalExpectedCurrentHashRef.current;
-        const previousExpectedIdentityHash = aiProposalExpectedCurrentIdentityHashRef.current;
-        const previousBaseXml = aiProposalBaseXmlRef.current;
-        const requestController = new AbortController();
-        aiEditAbortControllerRef.current = requestController;
-        setAiEditWork({
-            kind: 'feedback',
-            startedAt: Date.now(),
-            message: 'Preparing feedback context',
-        });
-        setAiDiffFeedbackBusy(true);
+        const previousContinuity = snapshotAiProposalContinuity();
+        const editRequest = beginAiEdit('feedback', 'Preparing feedback context');
+        const requestController = editRequest.controller;
+        let requestOutcome: 'success' | 'failure' | 'cancelled' = 'failure';
         setAiError(null);
         setAiPatchError(null);
         setAiDiffFeedbackError(null);
@@ -6811,7 +6736,7 @@ ${partsBodyXml}
             // cycle-consistency check holds for pre-session compare views. A cycle that no
             // longer matches the iteration counter means local state diverged, so the
             // previous-cycle claim is dropped rather than relabeled with a new cycle.
-            const existingSession = aiProposalSessionRef.current;
+            const existingSession = getAiProposalSession();
             const proposalSession: ClientProposalSession = existingSession
                 ? (existingSession.cycle === aiDiffIteration + 1
                     ? existingSession
@@ -6823,7 +6748,8 @@ ${partsBodyXml}
                     }),
                     cycle: aiDiffIteration + 1,
                 };
-            aiProposalSessionRef.current = proposalSession;
+            setAiProposalSession(proposalSession);
+            const expectedHashes = getAiProposalExpectedHashes();
             const response = await fetch(resolveScoreEditorApiPath('/api/music/diff/feedback'), {
                 method: 'POST',
                 headers: {
@@ -6844,13 +6770,16 @@ ${partsBodyXml}
                     temperature: aiTemperatureMode === 'custom' ? aiTemperature : null,
                     ...(proposalSession.includeChat ? { chatHistory: aiChatMessages } : {}),
                     proposalSession: buildProposalSessionRequestPayload(proposalSession, {
-                        contentHash: aiProposalExpectedCurrentHashRef.current,
-                        identityHash: aiProposalExpectedCurrentIdentityHashRef.current,
+                        contentHash: expectedHashes.contentHash,
+                        identityHash: expectedHashes.identityHash,
                     }),
                 }),
             });
             captureApiTraceContext(response.headers);
-            const serviceResponse = await readAiEditServiceResponse(response, updateAiEditProgress);
+            const serviceResponse = await readAiEditServiceResponse(
+                response,
+                (update) => updateAiEditProgress(editRequest, update),
+            );
             const result = asRecord(serviceResponse.body) || {};
             if (serviceResponse.status >= 400) {
                 if (result.patch && typeof result.patch === 'object') {
@@ -6883,11 +6812,7 @@ ${partsBodyXml}
             // Keep the standard orientation (Current left/red, Proposal right/green) so Apply
             // writes the proposal into the document. See openAiProposalCompare.
             setCompareSwapped(true);
-            aiProposalExpectedCurrentHashRef.current = editProposal?.expectedCurrentContentHash || null;
-            aiProposalExpectedCurrentIdentityHashRef.current = editProposal?.expectedCurrentIdentityHash || null;
-            aiProposalBaseXmlRef.current = proposalBaseXml;
-            aiProposalApplyErrorRef.current = null;
-            setAiProposalApplyError(null);
+            captureAiProposal(editProposal, proposalBaseXml);
             setCompareView({
                 title: 'Assistant Proposal',
                 currentXml: proposalBaseXml,
@@ -6901,7 +6826,7 @@ ${partsBodyXml}
             setAiDiffFeedbackError(null);
             setAiDiffBlockErrors({});
             const revisionAnnotations = extractPatchAnnotations({ annotations: (result as Record<string, unknown>).annotations });
-            aiProposalSessionRef.current = advanceClientProposalSession(proposalSession, {
+            setAiProposalSession(advanceClientProposalSession(proposalSession, {
                 responseId: result.proposalSessionId,
                 newCycle: result.cycle,
                 proposal: editProposal,
@@ -6910,7 +6835,7 @@ ${partsBodyXml}
                 continuityToken: result.continuityToken,
                 sentBlocks: allFeedbackBlocks,
                 sentGlobalComment: aiDiffGlobalComment,
-            });
+            }));
             const feedbackAudit = asRecord(result.audit);
             setAiProposalAudit({
                 ...(feedbackAudit ?? {}),
@@ -6924,12 +6849,16 @@ ${partsBodyXml}
             // Surface the assistant's annotations for this revision as measure-thread notes.
             mergeAiAnnotations(revisionAnnotations);
             setCompareAlignmentRevision((value) => value + 1);
+            requestOutcome = 'success';
         } catch (err) {
             const wasCancelled = requestController.signal.aborted
                 && requestController.signal.reason instanceof DOMException
                 && requestController.signal.reason.name === 'AbortError';
             const rawMessage = errorMessage(err) || 'Failed to request revised proposal.';
             const surfacedMessage = formatAiDiffFeedbackError(rawMessage);
+            if (wasCancelled) {
+                requestOutcome = 'cancelled';
+            }
             setAiError(wasCancelled ? null : surfacedMessage);
             setAiDiffFeedbackError(wasCancelled ? null : surfacedMessage);
             setCompareRightError(wasCancelled ? null : surfacedMessage);
@@ -6949,23 +6878,28 @@ ${partsBodyXml}
                 currentLabel: 'Current',
                 checkpointLabel: 'Assistant Proposal',
             });
-            aiProposalExpectedCurrentHashRef.current = previousExpectedContentHash;
-            aiProposalExpectedCurrentIdentityHashRef.current = previousExpectedIdentityHash;
-            aiProposalBaseXmlRef.current = previousBaseXml || currentXml;
-            aiProposalApplyErrorRef.current = null;
-            setAiProposalApplyError(null);
+            restoreAiProposalContinuity({
+                ...previousContinuity,
+                baseXml: previousContinuity.baseXml || currentXml,
+            });
         } finally {
-            if (aiEditAbortControllerRef.current === requestController) {
-                aiEditAbortControllerRef.current = null;
-                setAiEditWork(null);
-            }
-            setAiDiffFeedbackBusy(false);
+            finishAiEdit(editRequest, requestOutcome);
             setCompareRightLoading(false);
         }
     }, [
         compareView,
         isAiCompareMode,
         aiDiffFeedbackBusy,
+        beginAiEdit,
+        captureAiProposal,
+        finishAiEdit,
+        getAiProposalExpectedHashes,
+        getAiProposalSession,
+        restoreAiProposalContinuity,
+        setAiProposalAudit,
+        setAiProposalSession,
+        snapshotAiProposalContinuity,
+        updateAiEditProgress,
         aiApiKey,
         aiModel,
         aiProvider,
@@ -6987,7 +6921,6 @@ ${partsBodyXml}
         aiTemperature,
         aiPrompt,
         captureApiTraceContext,
-        updateAiEditProgress,
         parseMusicXmlPatch,
         getScoreMusicXmlText,
         score,
@@ -7875,8 +7808,7 @@ ${partsBodyXml}
                 setAiDiffGlobalComment('');
                 setAiDiffFeedbackError(null);
                 setAiDiffBlockErrors({});
-                aiProposalSessionRef.current = null;
-                setAiProposalAudit(null);
+                clearAiProposal();
                 setAiDiffGutterWidth(AI_DIFF_GUTTER_DEFAULT_WIDTH);
             }
             return;
@@ -7938,7 +7870,7 @@ ${partsBodyXml}
         return () => {
             canceled = true;
         };
-    }, [compareView, parsePartsFromMetadata, aiDiffFeedbackBusy]);
+    }, [compareView, parsePartsFromMetadata, aiDiffFeedbackBusy, clearAiProposal]);
 
     useEffect(() => {
         return () => {
@@ -8717,15 +8649,10 @@ ${partsBodyXml}
         setAiFocusedMeasureAnchor(null);
         setAiMeasureThreadDraft('');
         setAiDiffGlobalComment('');
-        setAiDiffFeedbackBusy(false);
         setAiDiffFeedbackError(null);
         setAiDiffBlockErrors({});
         setAiDiffGutterWidth(AI_DIFF_GUTTER_DEFAULT_WIDTH);
-        aiProposalExpectedCurrentHashRef.current = proposal?.expectedCurrentContentHash || null;
-        aiProposalExpectedCurrentIdentityHashRef.current = proposal?.expectedCurrentIdentityHash || null;
-        aiProposalBaseXmlRef.current = baseXml;
-        aiProposalApplyErrorRef.current = null;
-        setAiProposalApplyError(null);
+        captureAiProposal(proposal, baseXml);
         setCompareView({
             title: 'Assistant Proposal',
             currentXml: baseXml,
@@ -8734,7 +8661,7 @@ ${partsBodyXml}
             checkpointLabel: 'Assistant Proposal',
         });
         return true;
-    }, []);
+    }, [captureAiProposal]);
 
     const updateAiOutput = useCallback(async (
         nextText: string,
@@ -8758,7 +8685,7 @@ ${partsBodyXml}
         const annotations = parsed.annotations ?? [];
         setAiLastAnnotations(annotations);
         setAiPatch(parsed.patch);
-        const baseXml = baseXmlOverride ?? aiBaseXml ?? await resolveXmlContext();
+        const baseXml = baseXmlOverride ?? aiBaseXml ?? await aiScoreBridge.getContextXml();
         if (!baseXml.trim()) {
             const error = 'Unable to apply patch without MusicXML.';
             setAiPatchError(error);
@@ -8799,22 +8726,18 @@ ${partsBodyXml}
             alert('Enter a max output token limit.');
             return;
         }
-        const requestController = new AbortController();
+        const editRequest = beginAiEdit(
+            aiDeepEdit ? 'deep' : 'patch',
+            aiDeepEdit ? 'Preparing Deep Edit' : 'Preparing patch request',
+        );
+        const requestController = editRequest.controller;
         let clientTimeoutId: ReturnType<typeof setTimeout> | null = null;
-        aiEditAbortControllerRef.current = requestController;
-        setAiEditWork({
-            kind: aiDeepEdit ? 'deep' : 'patch',
-            startedAt: Date.now(),
-            message: aiDeepEdit ? 'Preparing Deep Edit' : 'Preparing patch request',
-        });
-        setAiBusy(true);
         setAiError(null);
         setAiOutput('');
         setAiPatch(null);
         setAiPatchError(null);
         setAiPatchedXml('');
-        aiProposalSessionRef.current = null;
-        setAiProposalAudit(null);
+        clearAiProposal();
         const requestStartedAt = Date.now();
         let requestIssued = false;
         let outcome: 'success' | 'failure' | 'cancelled' = 'failure';
@@ -8824,7 +8747,7 @@ ${partsBodyXml}
             // Proposal identity and later Apply/feedback gates must use the same live
             // webmscore serialization. The XML sidebar can briefly retain the source
             // representation after a new score is loaded.
-            const baseXml = await getScoreMusicXmlText(scoreRef.current ?? score, xmlText || null) || '';
+            const baseXml = await aiScoreBridge.getLiveXml(xmlText || null) || '';
             if (!baseXml.trim()) {
                 failureReason = 'Unable to load MusicXML for patch verification.';
                 setAiError(failureReason);
@@ -8842,7 +8765,7 @@ ${partsBodyXml}
                 });
             }
             const pdfAttachment = aiIncludePdf
-                ? await resolveScorePdfAttachment()
+                ? await aiScoreBridge.getScorePdf()
                 : null;
             if (aiIncludePdf) {
                 promptSections.push({
@@ -8853,7 +8776,7 @@ ${partsBodyXml}
                 });
             }
             if (aiIncludePage) {
-                const pageContextRaw = await resolveCurrentPageSvgContext();
+                const pageContextRaw = await aiScoreBridge.getPageSvgContext();
                 if (pageContextRaw.trim()) {
                     const pageContext = truncateAiContext(pageContextRaw, AI_PAGE_SVG_CONTEXT_MAX_CHARS);
                     promptSections.push({
@@ -8870,7 +8793,7 @@ ${partsBodyXml}
                 }
             }
             if (aiIncludeSelection) {
-                const selectionContext = await resolveSelectionContext();
+                const selectionContext = await aiScoreBridge.getSelectionContext();
                 promptSections.push({
                     title: 'Current selection context',
                     content: selectionContext || 'No active selection.',
@@ -8884,7 +8807,7 @@ ${partsBodyXml}
                 });
             }
             const imageAttachment = aiIncludeRenderedImage
-                ? await resolveCurrentPageImageAttachment()
+                ? await aiScoreBridge.getPageImage()
                 : null;
             if (aiIncludeRenderedImage && !imageAttachment) {
                 console.warn('Rendered image context requested, but PNG capture is unavailable.');
@@ -8926,7 +8849,10 @@ ${partsBodyXml}
                 }),
             });
             captureApiTraceContext(response.headers);
-            const serviceResponse = await readAiEditServiceResponse(response, updateAiEditProgress);
+            const serviceResponse = await readAiEditServiceResponse(
+                response,
+                (update) => updateAiEditProgress(editRequest, update),
+            );
             const result = asRecord(serviceResponse.body) || {};
             if (serviceResponse.status >= 400) {
                 const message = typeof result.error === 'string'
@@ -8985,7 +8911,7 @@ ${partsBodyXml}
             }
             // openAiProposalCompare resets threads, so seed the assistant annotations after it.
             mergeAiAnnotations(annotations);
-            aiProposalSessionRef.current = createClientProposalSession({
+            setAiProposalSession(createClientProposalSession({
                 id: typeof result.proposalSessionId === 'string' ? result.proposalSessionId : null,
                 originalInstruction: aiPrompt.trim(),
                 includeChat: aiIncludeChat,
@@ -8993,7 +8919,7 @@ ${partsBodyXml}
                 patch: parsedPatch.patch,
                 annotations,
                 continuityToken: result.continuityToken,
-            });
+            }));
             setAiProposalAudit({
                 cycle: 1,
                 verification: result.verification,
@@ -9019,11 +8945,7 @@ ${partsBodyXml}
             if (clientTimeoutId) {
                 clearTimeout(clientTimeoutId);
             }
-            if (aiEditAbortControllerRef.current === requestController) {
-                aiEditAbortControllerRef.current = null;
-                setAiEditWork(null);
-            }
-            setAiBusy(false);
+            finishAiEdit(editRequest, outcome, failureReason);
             if (requestIssued) {
                 if (outcome === 'failure') {
                     telemetryCountersRef.current.aiFailures += 1;
@@ -9067,7 +8989,7 @@ ${partsBodyXml}
         const nextMessages = [...aiChatMessages, userMessage];
         const shouldUseSourceRag = shouldEnableSourceRagForPrompt(userMessage.text);
 
-        setAiBusy(true);
+        setAiChatBusy(true);
         setAiError(null);
         const requestStartedAt = Date.now();
         let requestIssued = false;
@@ -9075,7 +8997,7 @@ ${partsBodyXml}
         let failureReason = '';
         try {
             const promptSections: AiPromptSection[] = [];
-            const xmlContext = aiIncludeXml ? await resolveXmlContext() : '';
+            const xmlContext = aiIncludeXml ? await aiScoreBridge.getContextXml() : '';
             if (aiIncludeXml && !xmlContext.trim()) {
                 alert('Unable to load MusicXML for context.');
                 return;
@@ -9087,7 +9009,7 @@ ${partsBodyXml}
                 });
             }
             const pdfAttachment = aiIncludePdf
-                ? await resolveScorePdfAttachment()
+                ? await aiScoreBridge.getScorePdf()
                 : null;
             if (aiIncludePdf) {
                 promptSections.push({
@@ -9098,7 +9020,7 @@ ${partsBodyXml}
                 });
             }
             if (aiIncludePage) {
-                const pageContextRaw = await resolveCurrentPageSvgContext();
+                const pageContextRaw = await aiScoreBridge.getPageSvgContext();
                 if (pageContextRaw.trim()) {
                     const pageContext = truncateAiContext(pageContextRaw, AI_PAGE_SVG_CONTEXT_MAX_CHARS);
                     promptSections.push({
@@ -9115,7 +9037,7 @@ ${partsBodyXml}
                 }
             }
             if (aiIncludeSelection) {
-                const selectionContext = await resolveSelectionContext();
+                const selectionContext = await aiScoreBridge.getSelectionContext();
                 promptSections.push({
                     title: 'Current selection context',
                     content: selectionContext || 'No active selection.',
@@ -9129,7 +9051,7 @@ ${partsBodyXml}
                 });
             }
             const imageAttachment = aiIncludeRenderedImage
-                ? await resolveCurrentPageImageAttachment()
+                ? await aiScoreBridge.getPageImage()
                 : null;
             if (aiIncludeRenderedImage && !imageAttachment) {
                 console.warn('Rendered image context requested, but PNG capture is unavailable.');
@@ -9172,7 +9094,7 @@ ${partsBodyXml}
             failureReason = message || 'AI chat request failed. See console for details.';
             setAiError(failureReason);
         } finally {
-            setAiBusy(false);
+            setAiChatBusy(false);
             if (requestIssued) {
                 if (outcome === 'failure') {
                     telemetryCountersRef.current.aiFailures += 1;
@@ -10054,7 +9976,7 @@ ${partsBodyXml}
             alert(aiPatchError || 'AI patch has not produced valid MusicXML.');
             return;
         }
-        const baseXml = aiBaseXml.trim() || (await resolveXmlContext()).trim();
+        const baseXml = aiBaseXml.trim() || (await aiScoreBridge.getContextXml()).trim();
         if (!baseXml) {
             alert('Unable to load MusicXML for diff review.');
             return;
@@ -14248,508 +14170,36 @@ ${partsBodyXml}
                             </>
                         )}
                         {xmlSidebarTab === 'assistant' && aiEnabled && (
-                            <div className="mt-3 flex min-h-full flex-col gap-3 text-sm text-gray-700">
-                                {aiEditWork && (
-                                    <div
-                                        data-testid={aiEditWork.kind === 'feedback'
-                                            ? 'ai-diff-feedback-working'
-                                            : 'ai-edit-working'}
-                                        role="status"
-                                        aria-live="polite"
-                                        className="flex items-center gap-2 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-blue-900"
-                                    >
-                                        <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
-                                        <div className="min-w-0 flex-1">
-                                            <div className="text-xs font-medium">
-                                                {aiEditWork.message}
-                                            </div>
-                                            <div className="mt-0.5 text-[11px] text-blue-700">
-                                                {AI_EDIT_EFFORT_PROFILES[aiEditEffort].label}
-                                                {' · '}
-                                                {formatAiEditBudgetDuration(aiEditElapsedMs)} elapsed
-                                                {' · up to '}
-                                                {formatAiEditBudgetDuration(activeAiEditBudgetMs)}
-                                            </div>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={cancelAiEditRequest}
-                                            title="Cancel AI edit"
-                                            aria-label="Cancel AI edit"
-                                            className="flex shrink-0 items-center gap-1 rounded border border-blue-300 bg-white px-2 py-1 text-xs font-medium text-blue-800 hover:bg-blue-100"
-                                        >
-                                            <Square className="h-3 w-3 fill-current" aria-hidden="true" />
-                                            <span>Cancel</span>
-                                        </button>
-                                    </div>
-                                )}
-                                {aiDiffFeedbackError && (
-                                    <div className="rounded border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-                                        Diff feedback failed: {aiDiffFeedbackError}
-                                    </div>
-                                )}
-                                <details className="rounded border border-gray-200 bg-gray-50/70 px-3 py-2" open>
-                                    <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                        Model &amp; Access
-                                    </summary>
-                                    <div className="mt-3 space-y-3">
-                                        <div>
-                                            <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                                Provider
-                                            </label>
-                                            <select
-                                                value={aiProvider}
-                                                onChange={(event) => setAiProvider(event.target.value as AiProvider)}
-                                                className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
-                                            >
-                                                {(Object.keys(AI_PROVIDER_LABELS) as AiProvider[]).map((provider) => (
-                                                    <option key={provider} value={provider}>
-                                                        {AI_PROVIDER_LABELS[provider]}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                                Model
-                                            </label>
-                                            {aiModels.length > 0 ? (
-                                                <select
-                                                    value={aiModels.includes(aiModel) ? aiModel : ''}
-                                                    onChange={(event) => setAiModel(event.target.value)}
-                                                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
-                                                >
-                                                    {!aiModels.includes(aiModel) && (
-                                                        <option value="" disabled>
-                                                            Select a model…
-                                                        </option>
-                                                    )}
-                                                    {aiModels.map((modelId) => (
-                                                        <option key={modelId} value={modelId}>
-                                                            {aiModelDescriptors.find((descriptor) => descriptor.id === modelId)?.displayName || modelId}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            ) : (
-                                                <input
-                                                    value={aiModel}
-                                                    onChange={(event) => setAiModel(event.target.value)}
-                                                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
-                                                    placeholder="Enter model name"
-                                                />
-                                            )}
-                                            {aiModelsLoading && (
-                                                <div className="mt-1 text-[11px] text-gray-500">
-                                                    Loading models...
-                                                </div>
-                                            )}
-                                            {!aiModelsLoading && !aiModels.length && !aiModelsError && (
-                                                <div className="mt-1 text-[11px] text-gray-500">
-                                                    {aiApiKey.trim()
-                                                        ? 'No models loaded. Enter a model name manually.'
-                                                        : 'Enter your API key to load available models.'}
-                                                </div>
-                                            )}
-                                            {aiModelsError && (
-                                                <div className="mt-1 text-xs text-red-600">
-                                                    {aiModelsError}
-                                                </div>
-                                            )}
-                                            {aiModelHint && (
-                                                <div className="mt-1 text-[11px] text-amber-600">
-                                                    {aiModelHint}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <form onSubmit={(e) => e.preventDefault()}>
-                                            <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                                API Key ({AI_PROVIDER_LABELS[aiProvider]})
-                                            </label>
-                                            <input
-                                                type="password"
-                                                value={aiApiKey}
-                                                onChange={(event) => setAiApiKey(event.target.value)}
-                                                className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
-                                                placeholder="Paste your key"
-                                                autoComplete="off"
-                                            />
-                                            <div className="mt-1 text-[11px] text-gray-500">
-                                                Saved in this browser tab and sent through our server to{' '}
-                                                {AI_PROVIDER_LABELS[aiProvider]} with each request. We never store it on
-                                                our servers; it clears when you close the tab.
-                                            </div>
-                                            {AI_PROVIDER_CONFIGS[aiProvider].apiKeyUrl && (
-                                                <div className="mt-1 text-[11px]">
-                                                    <a
-                                                        href={AI_PROVIDER_CONFIGS[aiProvider].apiKeyUrl}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="text-blue-600 hover:text-blue-700 hover:underline"
-                                                    >
-                                                        Create {AI_PROVIDER_LABELS[aiProvider]} API key
-                                                    </a>
-                                                </div>
-                                            )}
-                                        </form>
-                                    </div>
-                                </details>
-                                <div className="flex min-h-0 flex-1 flex-col gap-2">
-                                    <div className="flex items-center gap-2 text-xs">
-                                        <button
-                                            type="button"
-                                            onClick={() => setAiMode('patch')}
-                                            className={`rounded border px-2 py-1 ${aiMode === 'patch' ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
-                                        >
-                                            Patch
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setAiMode('chat')}
-                                            className={`rounded border px-2 py-1 ${aiMode === 'chat' ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
-                                        >
-                                            Chat
-                                        </button>
-                                        <div className="ml-auto flex flex-wrap items-center justify-end gap-2 text-xs text-gray-600">
-                                            <span>Effort</span>
-                                            <select
-                                                data-testid="ai-edit-effort"
-                                                value={aiEditEffort}
-                                                onChange={(event) => setAiEditEffort(event.target.value as AiEditEffort)}
-                                                disabled={aiBusy || aiDiffFeedbackBusy}
-                                                className="rounded border border-gray-300 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                                                title={AI_EDIT_EFFORT_PROFILES[aiEditEffort].description}
-                                            >
-                                                {AI_EDIT_EFFORTS.map((effort) => (
-                                                    <option key={effort} value={effort}>
-                                                        {AI_EDIT_EFFORT_PROFILES[effort].label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                            <span>Max output</span>
-                                            <select
-                                                value={aiMaxTokensMode}
-                                                onChange={(event) => setAiMaxTokensMode(event.target.value as 'auto' | 'custom')}
-                                                className="rounded border border-gray-300 px-2 py-1 text-xs"
-                                                title={aiSupportsCustomMaxTokens ? 'Configure maximum output tokens' : 'Custom output is not confirmed for this model'}
-                                            >
-                                                <option value="auto">Auto</option>
-                                                <option value="custom" disabled={!aiSupportsCustomMaxTokens}>Custom</option>
-                                            </select>
-                                            {aiMaxTokensMode === 'custom' && (
-                                                <input
-                                                    type="number"
-                                                    min={256}
-                                                    max={selectedAiModelDescriptor.maxOutputTokens ?? selectedAiModelDescriptor.parameters.maxOutputTokens.max}
-                                                    value={aiMaxTokens}
-                                                    onChange={(event) => setAiMaxTokens(Number(event.target.value) || 0)}
-                                                    className="w-20 rounded border border-gray-300 px-2 py-1 text-xs"
-                                                />
-                                            )}
-                                            <span>Temperature</span>
-                                            <select
-                                                value={aiTemperatureMode}
-                                                onChange={(event) => setAiTemperatureMode(event.target.value as 'auto' | 'custom')}
-                                                className="rounded border border-gray-300 px-2 py-1 text-xs"
-                                                title={aiSupportsTemperature ? 'Configure sampling temperature' : 'Temperature is unavailable for this model'}
-                                            >
-                                                <option value="auto">Auto</option>
-                                                <option value="custom" disabled={!aiSupportsTemperature}>Custom</option>
-                                            </select>
-                                            {aiTemperatureMode === 'custom' && (
-                                                <input
-                                                    type="number"
-                                                    step={0.1}
-                                                    min={selectedAiModelDescriptor.parameters.temperature.min}
-                                                    max={selectedAiModelDescriptor.parameters.temperature.max}
-                                                    value={aiTemperature}
-                                                    onChange={(event) => setAiTemperature(Number(event.target.value))}
-                                                    className="w-20 rounded border border-gray-300 px-2 py-1 text-xs"
-                                                    aria-label="Temperature"
-                                                />
-                                            )}
-                                        </div>
-                                    </div>
-                                    <details className="rounded border border-gray-200 bg-gray-50/70 px-3 py-2 text-xs text-gray-600" open>
-                                        <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                                            Context
-                                        </summary>
-                                        <div className="mt-3 space-y-2">
-                                            <div className="flex flex-col items-start gap-y-2">
-                                                <label className="flex items-center gap-2">
-                                                    <input
-                                                type="checkbox"
-                                                        checked={aiIncludeSelection}
-                                                        onChange={(event) => setAiIncludeSelection(event.target.checked)}
-                                                    />
-                                                    Include selection
-                                                </label>
-                                                <label className="flex items-center gap-2">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={aiIncludePage}
-                                                        onChange={(event) => setAiIncludePage(event.target.checked)}
-                                                    />
-                                                    Include current page
-                                                </label>
-                                                <label className="flex items-center gap-2">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={aiIncludeRenderedImage}
-                                                        onChange={(event) => setAiIncludeRenderedImage(event.target.checked)}
-                                                        disabled={!aiSupportsImageContext}
-                                                    />
-                                                    Include rendered image
-                                                </label>
-                                                <label className="flex items-center gap-2">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={aiIncludePdf}
-                                                        onChange={(event) => setAiIncludePdf(event.target.checked)}
-                                                        disabled={!aiSupportsPdfContext}
-                                                    />
-                                                    Include score PDF
-                                                </label>
-                                                <label className="flex items-center gap-2">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={aiIncludeChat}
-                                                        onChange={(event) => setAiIncludeChat(event.target.checked)}
-                                                    />
-                                                    Include chat
-                                                </label>
-                                                <label className="flex items-center gap-2">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={aiIncludeXml}
-                                                        onChange={(event) => setAiIncludeXml(event.target.checked)}
-                                                    />
-                                                    Include MusicXML text
-                                                </label>
-                                            </div>
-                                            {aiIncludeRenderedImage && !score?.savePng && (
-                                                <div className="text-[11px] text-amber-600">
-                                                    PNG capture is not available in this build. The request will continue without image context.
-                                                </div>
-                                            )}
-                                            {!aiSupportsImageContext && (
-                                                <div className="text-[11px] text-gray-500">
-                                                    Image input is not confirmed for {selectedAiModelDescriptor.id || 'this model'}.
-                                                </div>
-                                            )}
-                                            {!aiSupportsPdfContext && (
-                                                <div className="text-[11px] text-gray-500">
-                                                    PDF input is not confirmed for {selectedAiModelDescriptor.id || 'this model'}.
-                                                </div>
-                                            )}
-                                            {aiIncludePdf && (
-                                                <div className="text-[11px] text-gray-500">
-                                                    PDF context is generated from the current score and attached when available.
-                                                </div>
-                                            )}
-                                        </div>
-                                    </details>
-                                    {aiMode === 'patch' && (
-                                        <div className="space-y-2">
-                                            <div>
-                                                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                                    Instruction
-                                                </label>
-                                                <textarea
-                                                    value={aiPrompt}
-                                                    onChange={(event) => setAiPrompt(event.target.value)}
-                                                    rows={4}
-                                                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
-                                                    placeholder="Describe the change you want in the MusicXML."
-                                                />
-                                            </div>
-                                            <label className="flex items-center gap-2 text-xs text-gray-700">
-                                                <input
-                                                    type="checkbox"
-                                                    data-testid="ai-deep-edit-toggle"
-                                                    checked={aiDeepEdit}
-                                                    onChange={(event) => setAiDeepEdit(event.target.checked)}
-                                                    disabled={aiBusy || aiDiffFeedbackBusy}
-                                                />
-                                                Deep Edit (slower, tries and verifies alternatives; ignores image/PDF context)
-                                            </label>
-                                            <button
-                                                type="button"
-                                                onClick={handleAiRequest}
-                                                disabled={aiBusy || aiDiffFeedbackBusy}
-                                                className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            >
-                                                {aiBusy ? 'Working...' : aiDeepEdit ? 'Deep Edit' : 'Generate Patch'}
-                                            </button>
-                                            {aiOutput && (
-                                                <div className="space-y-2">
-                                                    <div className="flex items-center justify-between text-xs text-gray-500">
-                                                        <span>AI Patch</span>
-                                                        {aiOutputValidation.message && (
-                                                            <span className={aiOutputValidation.valid ? 'text-gray-500' : 'text-red-600'}>
-                                                                {aiOutputValidation.message}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleApplyAiOutput}
-                                                        disabled={aiApplyDisabled}
-                                                        title="Review AI changes in the diff editor before applying."
-                                                        data-testid="btn-ai-review-diff"
-                                                        className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    >
-                                                        Review in Diff Editor
-                                                    </button>
-                                                    <CodeMirrorEditor
-                                                        value={aiOutput}
-                                                        onChange={(nextValue) => {
-                                                            void updateAiOutput(nextValue);
-                                                        }}
-                                                        readOnly={false}
-                                                        language="json"
-                                                        placeholderText="AI patch will appear here."
-                                                        height={patchEditorHeight}
-                                                        maxHeight={patchEditorMaxHeight}
-                                                        themeMode={codeEditorTheme}
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                    {aiMode === 'chat' && (
-                                        <div className="flex min-h-0 flex-1 flex-col gap-2">
-                                            <div className="flex items-center justify-between text-xs text-gray-500">
-                                                <span>Open Chat</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setAiChatMessages([])}
-                                                    disabled={aiBusy || !aiChatMessages.length}
-                                                    className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    Clear
-                                                </button>
-                                            </div>
-                                            <div
-                                                className="min-h-[260px] flex-1 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2"
-                                                style={{ resize: 'vertical' }}
-                                            >
-                                                {aiChatMessages.length ? (
-                                                    <div className="space-y-2">
-                                                        {aiChatMessages.map((message, index) => (
-                                                            <div
-                                                                key={`${message.role}-${index}-${message.text.slice(0, 12)}`}
-                                                                className={`rounded px-2 py-1 text-xs ${message.role === 'assistant' ? 'bg-blue-50 text-blue-900' : 'bg-white text-gray-800'}`}
-                                                            >
-                                                                <span className="mb-1 block text-[10px] uppercase tracking-wide text-gray-500">
-                                                                    {message.role === 'assistant' ? 'Assistant' : 'You'}
-                                                                </span>
-                                                                <div className="leading-relaxed">
-                                                                    <ReactMarkdown
-                                                                        remarkPlugins={[remarkGfm, remarkBreaks]}
-                                                                        components={{
-                                                                            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                                                                            ul: ({ children }) => <ul className="mb-2 list-disc pl-5 last:mb-0">{children}</ul>,
-                                                                            ol: ({ children }) => <ol className="mb-2 list-decimal pl-5 last:mb-0">{children}</ol>,
-                                                                            li: ({ children }) => <li className="mb-1 last:mb-0">{children}</li>,
-                                                                            code: ({ className, children }) => {
-                                                                                const languageClass = className ?? '';
-                                                                                const isBlock = languageClass.includes('language-');
-                                                                                if (isBlock) {
-                                                                                    return (
-                                                                                        <code className="block overflow-x-auto rounded bg-black/10 px-2 py-1 font-mono text-[11px]">
-                                                                                            {children}
-                                                                                        </code>
-                                                                                    );
-                                                                                }
-                                                                                return (
-                                                                                    <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">
-                                                                                        {children}
-                                                                                    </code>
-                                                                                );
-                                                                            },
-                                                                            pre: ({ children }) => <pre className="mb-2 overflow-x-auto rounded bg-black/5 p-2">{children}</pre>,
-                                                                            hr: () => <hr className="my-2 border-gray-300/70" />,
-                                                                        }}
-                                                                    >
-                                                                        {message.text}
-                                                                    </ReactMarkdown>
-                                                                </div>
-                                                                {message.role === 'assistant' && message.sourceRag?.enabled && (
-                                                                    <div className="mt-2 rounded border border-blue-100 bg-white/70 p-2 text-[10px] text-gray-600">
-                                                                        <div className="font-semibold uppercase tracking-wide text-gray-500">
-                                                                            External Sources
-                                                                        </div>
-                                                                        {message.sourceRag.used && message.sourceRag.sources?.length ? (
-                                                                            <div className="mt-1 space-y-1">
-                                                                                {message.sourceRag.sources.map((source) => (
-                                                                                    <div key={`${source.id}-${source.url}`} className="leading-relaxed">
-                                                                                        <a
-                                                                                            href={source.url}
-                                                                                            target="_blank"
-                                                                                            rel="noreferrer"
-                                                                                            className="font-medium text-blue-700 hover:underline"
-                                                                                        >
-                                                                                            {source.label}
-                                                                                        </a>
-                                                                                        <span className="ml-1 text-gray-500">[{source.tier}]</span>
-                                                                                    </div>
-                                                                                ))}
-                                                                            </div>
-                                                                        ) : (
-                                                                            <div className="mt-1 text-gray-500">
-                                                                                Retrieval not used{message.sourceRag.reason ? `: ${message.sourceRag.reason}` : '.'}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <div className="text-xs text-gray-500">
-                                                        Start a conversation about this score. You can include this chat when generating patches. Ask for source history, background, or “look this up on IMSLP/Wikipedia” to trigger external-source retrieval.
-                                                    </div>
-                                                )}
-                                            </div>
-                                            {!aiChatSourceRagHintDismissed && (
-                                                <div className="flex items-start justify-between gap-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
-                                                    <div>
-                                                        External-source lookup is on-demand. Ask for source history, background, citations, or explicitly mention IMSLP/Wikipedia/web search to use it.
-                                                    </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setAiChatSourceRagHintDismissed(true)}
-                                                        className="shrink-0 rounded border border-amber-300 bg-white/80 px-2 py-0.5 text-[10px] font-medium text-amber-900 hover:bg-white"
-                                                        aria-label="Dismiss external-source lookup hint"
-                                                    >
-                                                        Dismiss
-                                                    </button>
-                                                </div>
-                                            )}
-                                            <textarea
-                                                value={aiChatInput}
-                                                onChange={(event) => setAiChatInput(event.target.value)}
-                                                rows={3}
-                                                className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
-                                                placeholder="Ask a question or request guidance. Mention source history, IMSLP, Wikipedia, or citations to use external lookup."
-                                            />
-                                            <button
-                                                type="button"
-                                                onClick={handleAiChatSend}
-                                                disabled={aiBusy}
-                                                className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            >
-                                                {aiBusy ? 'Working...' : 'Send Message'}
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                                {aiError && (
-                                    <div className="text-xs text-red-600">
-                                        {aiError}
-                                    </div>
-                                )}
-                            </div>
+                            <AiAssistantPanel
+                                controller={aiAssistantController}
+                                presentation={{
+                                    work: aiEditWork,
+                                    elapsedMs: aiEditElapsedMs,
+                                    budgetMs: activeAiEditBudgetMs,
+                                    busy: aiBusy,
+                                    feedbackBusy: aiDiffFeedbackBusy,
+                                    feedbackError: aiDiffFeedbackError,
+                                    modelHint: aiModelHint,
+                                    selectedModel: selectedAiModelDescriptor,
+                                    supportsCustomMaxTokens: aiSupportsCustomMaxTokens,
+                                    supportsTemperature: aiSupportsTemperature,
+                                    supportsImageContext: aiSupportsImageContext,
+                                    supportsPdfContext: aiSupportsPdfContext,
+                                    scoreCanSavePng: Boolean(score?.savePng),
+                                    outputValidation: aiOutputValidation,
+                                    applyDisabled: aiApplyDisabled,
+                                    patchEditorHeight,
+                                    patchEditorMaxHeight,
+                                    codeEditorTheme,
+                                }}
+                                actions={{
+                                    cancel: cancelAiEditRequest,
+                                    requestPatch: handleAiRequest,
+                                    reviewPatch: handleApplyAiOutput,
+                                    sendChat: handleAiChatSend,
+                                    updateOutput: updateAiOutput,
+                                }}
+                            />
                         )}
                         {xmlSidebarTab === 'notagen' && aiEnabled && (
                             <div className="mt-3 space-y-3 text-sm text-gray-700">
@@ -16184,24 +15634,14 @@ ${partsBodyXml}
                             </div>
                             <div className="flex items-center gap-2">
                                 {compareView.title === 'Assistant Proposal' && (
-                                    <>
-                                        <button
-                                            type="button"
-                                            onClick={() => void handleAcceptAllAiChanges()}
-                                            disabled={compareSwapBusy || aiDiffFeedbackBusy}
-                                            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                                        >
-                                            Apply All AI Changes
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => void handleSendDiffFeedback()}
-                                            disabled={!canSendDiffFeedback}
-                                            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                                        >
-                                            {aiDiffFeedbackBusy ? 'Sending...' : diffFeedbackButtonLabel}
-                                        </button>
-                                    </>
+                                    <AiCompareWorkspaceActions
+                                        applyBusy={compareSwapBusy}
+                                        feedbackBusy={aiDiffFeedbackBusy}
+                                        canSendFeedback={canSendDiffFeedback}
+                                        feedbackLabel={diffFeedbackButtonLabel}
+                                        onApplyAll={() => void handleAcceptAllAiChanges()}
+                                        onSendFeedback={() => void handleSendDiffFeedback()}
+                                    />
                                 )}
                                 <button
                                     type="button"
@@ -16214,94 +15654,16 @@ ${partsBodyXml}
                         </div>
                         )}
                         <div className={isEmbedMode ? "flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4" : "flex min-h-0 flex-1 flex-col gap-4 overflow-auto"}>
-                            {isAiCompareMode && aiProposalApplyError && (
-                                <div
-                                    role="alert"
-                                    className="rounded border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700"
-                                >
-                                    {aiProposalApplyError}
-                                </div>
-                            )}
-                            {isAiCompareMode && aiProposalAudit && (() => {
-                                const auditVerification = asRecord(aiProposalAudit.verification);
-                                const auditBudget = asRecord(auditVerification?.budget);
-                                const contextFlags = asRecord(aiProposalAudit.proposalContext);
-                                const truncatedFields = Array.isArray(contextFlags?.truncated)
-                                    ? contextFlags.truncated.filter((entry): entry is string => typeof entry === 'string')
-                                    : [];
-                                const deepAudit = asRecord(aiProposalAudit.deepEdit);
-                                const deepCandidates = Array.isArray(deepAudit?.candidates) ? deepAudit.candidates.length : 0;
-                                const deepRationale = typeof deepAudit?.rationale === 'string' ? deepAudit.rationale.trim() : '';
-                                const auditEffort = typeof auditVerification?.effort === 'string'
-                                    && AI_EDIT_EFFORTS.includes(auditVerification.effort as AiEditEffort)
-                                    ? auditVerification.effort as AiEditEffort
-                                    : null;
-                                const statusParts = [
-                                    typeof aiProposalAudit.cycle === 'number' ? `Cycle ${aiProposalAudit.cycle}` : '',
-                                    typeof auditVerification?.level === 'string'
-                                        ? AI_PROPOSAL_VERIFICATION_LABELS[auditVerification.level] ?? ''
-                                        : '',
-                                    auditEffort ? `${AI_EDIT_EFFORT_PROFILES[auditEffort].label} effort` : '',
-                                    typeof auditBudget?.budgetMs === 'number'
-                                        ? `${formatAiEditBudgetDuration(auditBudget.budgetMs)} budget`
-                                        : '',
-                                    typeof auditVerification?.attempts === 'number'
-                                        ? `${auditVerification.attempts} attempt${auditVerification.attempts === 1 ? '' : 's'}`
-                                        : '',
-                                    typeof auditVerification?.llmCalls === 'number'
-                                        ? `${auditVerification.llmCalls} LLM call${auditVerification.llmCalls === 1 ? '' : 's'}`
-                                        : '',
-                                    deepAudit && deepCandidates
-                                        ? `${deepCandidates} candidate${deepCandidates === 1 ? '' : 's'}`
-                                        : '',
-                                ].filter(Boolean);
-                                const contextWarning = contextFlags?.previousCycleDropped === true
-                                    ? 'The score changed outside this proposal, so the previous cycle was not shown to the model.'
-                                    : truncatedFields.length
-                                        ? `Some session context was shortened to fit limits (${truncatedFields.join(', ')}).`
-                                        : '';
-                                return (
-                                    <div
-                                        data-testid="ai-proposal-audit"
-                                        className="rounded border border-gray-200 bg-gray-50 px-3 py-1.5 text-[11px] text-gray-600"
-                                    >
-                                        <span>{statusParts.join(' · ')}</span>
-                                        {contextWarning && (
-                                            <span className="ml-2 text-amber-700">{contextWarning}</span>
-                                        )}
-                                        {deepRationale && (
-                                            <details className="mt-1">
-                                                <summary className="cursor-pointer text-gray-500">Deep Edit rationale</summary>
-                                                <div className="mt-1 whitespace-pre-wrap text-gray-600">{deepRationale}</div>
-                                            </details>
-                                        )}
-                                    </div>
-                                );
-                            })()}
-                            {!isEmbedMode && isAiCompareMode && (
-                                <div className="rounded border border-gray-300 bg-gray-100 p-3">
-                                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-900">
-                                        Global Feedback for Next AI Iteration
-                                    </div>
-                                    <div className="mt-1 text-[11px] text-gray-700">
-                                        Optional. Use this for overall guidance that applies across multiple diff blocks.
-                                    </div>
-                                    <textarea
-                                        value={aiDiffGlobalComment}
-                                        onChange={(event) => setAiDiffGlobalComment(event.target.value)}
-                                        placeholder="Overall feedback for the next revision..."
-                                        className="mt-2 min-h-[56px] w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 placeholder-gray-500"
-                                        disabled={aiDiffFeedbackBusy}
-                                    />
-                                    <div className="mt-2 text-[11px] text-gray-700">
-                                        Iteration {aiDiffIteration + 1} review
-                                    </div>
-                                    {aiDiffFeedbackError && (
-                                        <div className="mt-2 rounded border border-rose-300 bg-rose-50 px-2 py-1 text-[11px] text-rose-700">
-                                            Last feedback request failed: {aiDiffFeedbackError}
-                                        </div>
-                                    )}
-                                </div>
+                            {isAiCompareMode && (
+                                <AiCompareWorkspace
+                                    proposalController={aiProposalController}
+                                    embedded={isEmbedMode}
+                                    feedbackBusy={aiDiffFeedbackBusy}
+                                    globalComment={aiDiffGlobalComment}
+                                    iteration={aiDiffIteration}
+                                    feedbackError={aiDiffFeedbackError}
+                                    onGlobalCommentChange={setAiDiffGlobalComment}
+                                />
                             )}
                             <div className="flex min-h-0 min-w-0 flex-1 overflow-x-hidden">
                                 <div className="flex min-h-0 min-w-0 flex-1 gap-4">
@@ -16938,129 +16300,40 @@ ${partsBodyXml}
                                                                             </span>
                                                                         </div>
                                                                         {!isEmbedMode && isAiCompareMode && (
-                                                                            <div className="mt-1 grid gap-1">
-                                                                                <div className="grid grid-cols-3 gap-1">
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        disabled={compareSwapBusy || compareAlignmentLoading || !compareLeftScore || !compareRightScoreDisplay || !canOverwrite || aiDiffFeedbackBusy || Boolean(compareRightError)}
-                                                                                        className={`h-6 rounded border text-[10px] ${
-                                                                                            reviewStatus === 'accepted'
-                                                                                                ? 'border-emerald-400 bg-emerald-50 text-emerald-700'
-                                                                                                : 'border-gray-200 bg-gray-100 text-gray-600'
-                                                                                        } disabled:opacity-50`}
-                                                                                        onClick={() => void handleAcceptAiDiffBlock(aiBlock, pairs)}
-                                                                                    >
-                                                                                        Apply
-                                                                                    </button>
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        disabled={aiDiffFeedbackBusy || compareAlignmentLoading}
-                                                                                        className={`h-6 rounded border text-[10px] ${
-                                                                                            reviewStatus === 'rejected'
-                                                                                                ? 'border-rose-400 bg-rose-50 text-rose-700'
-                                                                                                : 'border-gray-200 bg-gray-100 text-gray-600'
-                                                                                        } disabled:opacity-50`}
-                                                                                        onClick={() => {
-                                                                                            setAiDiffBlockStatus(aiBlock, 'rejected');
-                                                                                            setAiDiffBlockErrors((prev) => {
-                                                                                                if (!prev[blockKey]) {
-                                                                                                    return prev;
-                                                                                                }
-                                                                                                const next = { ...prev };
-                                                                                                delete next[blockKey];
-                                                                                                return next;
-                                                                                            });
-                                                                                        }}
-                                                                                    >
-                                                                                        Reject
-                                                                                    </button>
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        disabled={aiDiffFeedbackBusy || compareAlignmentLoading}
-                                                                                        className={`h-6 rounded border text-[10px] ${
-                                                                                            reviewStatus === 'comment'
-                                                                                                ? 'border-sky-400 bg-sky-50 text-sky-700'
-                                                                                                : 'border-gray-200 bg-gray-100 text-gray-600'
-                                                                                        } disabled:opacity-50`}
-                                                                                        onClick={() => {
-                                                                                            setAiDiffBlockStatus(aiBlock, 'comment');
-                                                                                            setAiDiffBlockErrors((prev) => {
-                                                                                                if (!prev[blockKey]) {
-                                                                                                    return prev;
-                                                                                                }
-                                                                                                const next = { ...prev };
-                                                                                                delete next[blockKey];
-                                                                                                return next;
-                                                                                            });
-                                                                                        }}
-                                                                                    >
-                                                                                        Comment
-                                                                                    </button>
-                                                                                </div>
-                                                                                {reviewStatus === 'comment' && (
-                                                                                    <>
-                                                                                        {!commentCommitted && (
-                                                                                            <>
-                                                                                                <textarea
-                                                                                                    ref={(element) => bindAiDiffCommentTextarea(blockKey, element)}
-                                                                                                    defaultValue={reviewComment}
-                                                                                                    onChange={() => handleAiDiffBlockCommentInput(aiBlock)}
-                                                                                                    onPointerUp={(event) => handleAiDiffCommentResize(event.currentTarget)}
-                                                                                                    onPointerMove={(event) => {
-                                                                                                        if (event.buttons === 1) {
-                                                                                                            handleAiDiffCommentResize(event.currentTarget);
-                                                                                                        }
-                                                                                                    }}
-                                                                                                    onMouseUp={(event) => handleAiDiffCommentResize(event.currentTarget)}
-                                                                                                    onMouseMove={(event) => {
-                                                                                                        if (event.buttons === 1) {
-                                                                                                            handleAiDiffCommentResize(event.currentTarget);
-                                                                                                        }
-                                                                                                    }}
-                                                                                                    placeholder="Describe the revision needed..."
-                                                                                                    className="min-h-[84px] min-w-[220px] w-full max-w-none resize rounded border border-sky-300 bg-white px-2 py-1 text-[10px] text-gray-900 placeholder-gray-400"
-                                                                                                    disabled={aiDiffFeedbackBusy}
-                                                                                                />
-                                                                                                <div className="flex justify-end">
-                                                                                                    <button
-                                                                                                        type="button"
-                                                                                                        disabled={aiDiffFeedbackBusy || compareAlignmentLoading}
-                                                                                                        className="h-6 rounded border border-sky-300 bg-sky-50 px-2 text-[10px] text-sky-700 disabled:opacity-50"
-                                                                                                        onClick={() => commitAiDiffBlockComment(aiBlock)}
-                                                                                                    >
-                                                                                                        Enter
-                                                                                                    </button>
-                                                                                                </div>
-                                                                                            </>
-                                                                                        )}
-                                                                                        {commentCommitted && (
-                                                                                            <div className="grid gap-1 rounded border border-sky-200 bg-sky-50 px-2 py-1">
-                                                                                                <div className="text-[9px] font-semibold uppercase tracking-wide text-sky-700">
-                                                                                                    Comment attached
-                                                                                                </div>
-                                                                                                <div className="whitespace-pre-wrap text-[10px] text-sky-900">
-                                                                                                    {reviewComment}
-                                                                                                </div>
-                                                                                                <div className="flex justify-end">
-                                                                                                    <button
-                                                                                                        type="button"
-                                                                                                        disabled={aiDiffFeedbackBusy || compareAlignmentLoading}
-                                                                                                        className="h-6 rounded border border-sky-300 bg-white px-2 text-[10px] text-sky-700 disabled:opacity-50"
-                                                                                                        onClick={() => editAiDiffBlockComment(aiBlock)}
-                                                                                                    >
-                                                                                                        Edit
-                                                                                                    </button>
-                                                                                                </div>
-                                                                                            </div>
-                                                                                        )}
-                                                                                    </>
-                                                                                )}
-                                                                                {blockError && (
-                                                                                    <div className="text-[9px] text-rose-600">
-                                                                                        {blockError}
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
+                                                                            <AiDiffBlockReview
+                                                                                review={{
+                                                                                    status: reviewStatus,
+                                                                                    comment: reviewComment,
+                                                                                    commentCommitted,
+                                                                                    error: blockError,
+                                                                                }}
+                                                                                disabled={{
+                                                                                    apply: compareSwapBusy
+                                                                                        || compareAlignmentLoading
+                                                                                        || !compareLeftScore
+                                                                                        || !compareRightScoreDisplay
+                                                                                        || !canOverwrite
+                                                                                        || aiDiffFeedbackBusy
+                                                                                        || Boolean(compareRightError),
+                                                                                    feedback: aiDiffFeedbackBusy || compareAlignmentLoading,
+                                                                                }}
+                                                                                actions={{
+                                                                                    apply: () => void handleAcceptAiDiffBlock(aiBlock, pairs),
+                                                                                    reject: () => {
+                                                                                        setAiDiffBlockStatus(aiBlock, 'rejected');
+                                                                                        clearAiDiffBlockError(blockKey);
+                                                                                    },
+                                                                                    comment: () => {
+                                                                                        setAiDiffBlockStatus(aiBlock, 'comment');
+                                                                                        clearAiDiffBlockError(blockKey);
+                                                                                    },
+                                                                                    commitComment: () => commitAiDiffBlockComment(aiBlock),
+                                                                                    editComment: () => editAiDiffBlockComment(aiBlock),
+                                                                                }}
+                                                                                bindTextarea={(element) => bindAiDiffCommentTextarea(blockKey, element)}
+                                                                                onTextareaInput={() => handleAiDiffBlockCommentInput(aiBlock)}
+                                                                                resizeTextarea={handleAiDiffCommentResize}
+                                                                            />
                                                                         )}
                                                                         {!isEmbedMode && canOverwrite && !isAiCompareMode && (
                                                                             <div className="mt-1 flex items-center justify-between gap-2">

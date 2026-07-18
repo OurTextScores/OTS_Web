@@ -192,15 +192,18 @@ export interface WebMscoreInstance {
 // runtime/bundler interop (CJS/ESM default wrapping). Resolve once so callers
 // always receive an object with { ready, load }.
 const resolveWebMscore = (mod: unknown): WebMscoreInstance => {
-    const moduleRecord = mod && typeof mod === 'object'
+    const isModuleCandidate = (value: unknown): value is Record<string, unknown> => (
+        value !== null && (typeof value === 'object' || typeof value === 'function')
+    );
+    const moduleRecord = isModuleCandidate(mod)
         ? mod as Record<string, unknown>
         : undefined;
-    const defaultRecord = moduleRecord?.default && typeof moduleRecord.default === 'object'
+    const defaultRecord = isModuleCandidate(moduleRecord?.default)
         ? moduleRecord.default as Record<string, unknown>
         : undefined;
     const candidates = [
         defaultRecord,
-        defaultRecord?.default && typeof defaultRecord.default === 'object'
+        isModuleCandidate(defaultRecord?.default)
             ? defaultRecord.default as Record<string, unknown>
             : undefined,
         moduleRecord,
