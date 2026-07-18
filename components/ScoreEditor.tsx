@@ -97,6 +97,8 @@ import {
     formatAiEditBudgetDuration,
     type AiEditEffort,
 } from '../lib/ai-edit-effort';
+import { readAiEditServiceResponse } from '../lib/ai-edit-progress-client';
+import { type AiEditProgressUpdate } from '../lib/ai-edit-progress';
 
 type SelectionBox = {
     index: number | null;
@@ -128,6 +130,7 @@ type AiEditWorkKind = 'patch' | 'deep' | 'feedback';
 type AiEditWorkState = {
     kind: AiEditWorkKind;
     startedAt: number;
+    message: string;
 };
 
 type AiEditProposal = {
@@ -1525,6 +1528,9 @@ export default function ScoreEditor() {
         if (controller && !controller.signal.aborted) {
             controller.abort(new DOMException('Request cancelled by user.', 'AbortError'));
         }
+    }, []);
+    const updateAiEditProgress = useCallback((update: AiEditProgressUpdate) => {
+        setAiEditWork((current) => current ? { ...current, message: update.message } : current);
     }, []);
 
     useEffect(() => {
@@ -6765,7 +6771,11 @@ ${partsBodyXml}
         const previousBaseXml = aiProposalBaseXmlRef.current;
         const requestController = new AbortController();
         aiEditAbortControllerRef.current = requestController;
-        setAiEditWork({ kind: 'feedback', startedAt: Date.now() });
+        setAiEditWork({
+            kind: 'feedback',
+            startedAt: Date.now(),
+            message: 'Preparing feedback context',
+        });
         setAiDiffFeedbackBusy(true);
         setAiError(null);
         setAiPatchError(null);
@@ -6798,6 +6808,7 @@ ${partsBodyXml}
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Accept: 'text/event-stream',
                 },
                 signal: requestController.signal,
                 body: JSON.stringify({
@@ -6819,15 +6830,15 @@ ${partsBodyXml}
                 }),
             });
             captureApiTraceContext(response.headers);
-            const payload = await response.json().catch(() => ({}));
-            const result = asRecord(payload) || {};
-            if (!response.ok) {
+            const serviceResponse = await readAiEditServiceResponse(response, updateAiEditProgress);
+            const result = asRecord(serviceResponse.body) || {};
+            if (serviceResponse.status >= 400) {
                 if (result.patch && typeof result.patch === 'object') {
                     setAiOutput(JSON.stringify(result.patch, null, 2));
                 }
                 const message = typeof result.error === 'string'
                     ? result.error
-                    : `Request failed: ${response.status}`;
+                    : `Request failed: ${serviceResponse.status}`;
                 throw new Error(message);
             }
 
@@ -6956,6 +6967,7 @@ ${partsBodyXml}
         aiTemperature,
         aiPrompt,
         captureApiTraceContext,
+        updateAiEditProgress,
         parseMusicXmlPatch,
         getScoreMusicXmlText,
         score,
@@ -8763,7 +8775,11 @@ ${partsBodyXml}
         const requestController = new AbortController();
         let clientTimeoutId: ReturnType<typeof setTimeout> | null = null;
         aiEditAbortControllerRef.current = requestController;
-        setAiEditWork({ kind: aiDeepEdit ? 'deep' : 'patch', startedAt: Date.now() });
+        setAiEditWork({
+            kind: aiDeepEdit ? 'deep' : 'patch',
+            startedAt: Date.now(),
+            message: aiDeepEdit ? 'Preparing Deep Edit' : 'Preparing patch request',
+        });
         setAiBusy(true);
         setAiError(null);
         setAiOutput('');
@@ -8865,7 +8881,7 @@ ${partsBodyXml}
             }, requestBudgetMs + 30_000);
             const response = await fetch(resolveScoreEditorApiPath(patchEndpoint), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
                 signal: requestController.signal,
                 body: JSON.stringify({
                     content: baseXml,
@@ -8883,12 +8899,12 @@ ${partsBodyXml}
                 }),
             });
             captureApiTraceContext(response.headers);
-            const payload = await response.json().catch(() => ({}));
-            const result = asRecord(payload) || {};
-            if (!response.ok) {
+            const serviceResponse = await readAiEditServiceResponse(response, updateAiEditProgress);
+            const result = asRecord(serviceResponse.body) || {};
+            if (serviceResponse.status >= 400) {
                 const message = typeof result.error === 'string'
                     ? result.error
-                    : `Patch request failed: ${response.status}`;
+                    : `Patch request failed: ${serviceResponse.status}`;
                 throw new Error(message);
             }
 
@@ -14205,11 +14221,7 @@ ${partsBodyXml}
                                         <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
                                         <div className="min-w-0 flex-1">
                                             <div className="text-xs font-medium">
-                                                {aiEditWork.kind === 'feedback'
-                                                    ? 'Generating the next proposal'
-                                                    : aiEditWork.kind === 'deep'
-                                                        ? 'Exploring and verifying alternatives'
-                                                        : 'Generating and validating a patch'}
+                                                {aiEditWork.message}
                                             </div>
                                             <div className="mt-0.5 text-[11px] text-blue-700">
                                                 {AI_EDIT_EFFORT_PROFILES[aiEditEffort].label}

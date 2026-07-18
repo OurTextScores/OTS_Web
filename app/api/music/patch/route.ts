@@ -3,6 +3,10 @@ import { requireSensitiveApiAccess } from '../../../../lib/api-access-control';
 import { logApiRouteSummary } from '../../../../lib/api-route-logging';
 import { runMusicPatchService } from '../../../../lib/music-services/patch-service';
 import { applyTraceHeaders, resolveTraceContext } from '../../../../lib/trace-http';
+import {
+  createAiEditProgressStreamResponse,
+  wantsAiEditProgressStream,
+} from '../../../../lib/ai-edit-progress-stream';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +19,44 @@ export async function POST(request: Request) {
   const trace = resolveTraceContext(request);
   let status = 500;
   let summaryExtra: Record<string, unknown> = {};
+  let streamOwnsSummary = false;
+  const recordResultSummary = (result: { status: number; body: Record<string, unknown> }) => {
+    status = result.status;
+    const verification = asRecord(result.body.verification);
+    const budget = asRecord(verification?.budget);
+    const authorizedModelDescriptor = asRecord(result.body.modelDescriptor);
+    const failures = Array.isArray(result.body.failures) ? result.body.failures : [];
+    const lastFailure = asRecord(failures.at(-1));
+    summaryExtra = {
+      ...summaryExtra,
+      verificationLevel: typeof verification?.level === 'string' ? verification.level : null,
+      attempts: typeof verification?.attempts === 'number' ? verification.attempts : null,
+      llmCalls: typeof verification?.llmCalls === 'number' ? verification.llmCalls : null,
+      verificationElapsedMs: typeof verification?.elapsedMs === 'number' ? verification.elapsedMs : null,
+      editEffort: typeof verification?.effort === 'string' ? verification.effort : null,
+      requestBudgetMs: typeof budget?.budgetMs === 'number' ? budget.budgetMs : null,
+      serverModelDescriptorSource: typeof authorizedModelDescriptor?.source === 'string'
+        ? authorizedModelDescriptor.source
+        : null,
+      errorCategory: typeof lastFailure?.category === 'string'
+        ? lastFailure.category
+        : status === 200 ? null
+          : status === 413 ? 'resource_limit'
+            : status === 504 ? 'timeout'
+              : status === 502 ? 'provider'
+                : status === 422 ? 'verification'
+                  : 'request',
+    };
+  };
+  const logSummary = () => logApiRouteSummary({
+    event: 'music.patch.summary',
+    route: '/api/music/patch',
+    method: 'POST',
+    status,
+    startedAt,
+    trace,
+    extra: summaryExtra,
+  });
   try {
     const access = requireSensitiveApiAccess({
       request,
@@ -55,48 +97,31 @@ export async function POST(request: Request) {
       return response;
     }
 
-    const result = await runMusicPatchService(body, {
-      traceContext: trace,
-      signal: request.signal,
-    });
-    status = result.status;
-    const verification = asRecord(result.body.verification);
-    const budget = asRecord(verification?.budget);
-    const authorizedModelDescriptor = asRecord(result.body.modelDescriptor);
-    const failures = Array.isArray(result.body.failures) ? result.body.failures : [];
-    const lastFailure = asRecord(failures.at(-1));
-    summaryExtra = {
-      ...summaryExtra,
-      verificationLevel: typeof verification?.level === 'string' ? verification.level : null,
-      attempts: typeof verification?.attempts === 'number' ? verification.attempts : null,
-      llmCalls: typeof verification?.llmCalls === 'number' ? verification.llmCalls : null,
-      verificationElapsedMs: typeof verification?.elapsedMs === 'number' ? verification.elapsedMs : null,
-      editEffort: typeof verification?.effort === 'string' ? verification.effort : null,
-      requestBudgetMs: typeof budget?.budgetMs === 'number' ? budget.budgetMs : null,
-      serverModelDescriptorSource: typeof authorizedModelDescriptor?.source === 'string'
-        ? authorizedModelDescriptor.source
-        : null,
-      errorCategory: typeof lastFailure?.category === 'string'
-        ? lastFailure.category
-        : status === 200 ? null
-          : status === 413 ? 'resource_limit'
-            : status === 504 ? 'timeout'
-              : status === 502 ? 'provider'
-                : status === 422 ? 'verification'
-                  : 'request',
-    };
+    if (wantsAiEditProgressStream(request)) {
+      streamOwnsSummary = true;
+      const response = createAiEditProgressStreamResponse({
+        operation: 'patch',
+        startedAt,
+        parentSignal: request.signal,
+        run: async (onProgress, signal) => {
+          const result = await runMusicPatchService(body, { traceContext: trace, signal, onProgress });
+          recordResultSummary(result);
+          return result;
+        },
+        onSettled: logSummary,
+      });
+      applyTraceHeaders(response.headers, trace);
+      return response;
+    }
+
+    const result = await runMusicPatchService(body, { traceContext: trace, signal: request.signal });
+    recordResultSummary(result);
     const response = NextResponse.json(result.body, { status });
     applyTraceHeaders(response.headers, trace);
     return response;
   } finally {
-    logApiRouteSummary({
-      event: 'music.patch.summary',
-      route: '/api/music/patch',
-      method: 'POST',
-      status,
-      startedAt,
-      trace,
-      extra: summaryExtra,
-    });
+    if (!streamOwnsSummary) {
+      logSummary();
+    }
   }
 }

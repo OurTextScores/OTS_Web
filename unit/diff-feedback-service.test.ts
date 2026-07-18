@@ -95,6 +95,7 @@ describe('diff-feedback-service', () => {
   });
 
   it('runs feedback flow and returns patch plus proposedXml', async () => {
+    const onProgress = vi.fn();
     mocked.runMusicPatchService.mockResolvedValue({
       status: 200,
       body: {
@@ -140,7 +141,7 @@ describe('diff-feedback-service', () => {
         { partIndex: 0, measureRange: '5-6', status: 'pending' },
       ],
       globalComment: 'Keep dynamics gentle',
-    });
+    }, { onProgress });
 
     expect(mocked.runMusicPatchService).toHaveBeenCalledTimes(1);
     expect(mocked.runMusicPatchService.mock.calls[0][0]).toMatchObject({
@@ -153,6 +154,11 @@ describe('diff-feedback-service', () => {
       content: '<score-partwise version="4.0"></score-partwise>',
     });
     expect(String(mocked.runMusicPatchService.mock.calls[0][0].prompt)).toContain('ACCEPTED');
+    expect(mocked.runMusicPatchService.mock.calls[0][1]).toMatchObject({ onProgress });
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'feedback.prepared',
+      message: 'Feedback context prepared',
+    }));
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({
       iteration: 3,

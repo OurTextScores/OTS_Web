@@ -9,6 +9,7 @@ vi.mock('../lib/music-services/patch-service', () => ({
 }));
 
 import { POST } from '../app/api/music/patch/route';
+import { readAiEditServiceResponse } from '../lib/ai-edit-progress-client';
 
 describe('POST /api/music/patch', () => {
   const priorAllowProxy = process.env.ALLOW_UNAUTHENTICATED_LLM_PROXY;
@@ -123,5 +124,40 @@ describe('POST /api/music/patch', () => {
     infoSpy.mockRestore();
     const serviceOptions = mocked.runMusicPatchService.mock.calls[0][1];
     expect(serviceOptions.signal.aborted).toBe(false);
+  });
+
+  it('streams progress and a terminal verified result when requested', async () => {
+    process.env.OTS_API_AUTH_TOKEN = 'app-token';
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    mocked.runMusicPatchService.mockImplementation(async (_body, options) => {
+      options?.onProgress?.({ phase: 'request.validated', message: 'Request validated' });
+      return {
+        status: 200,
+        body: {
+          proposedXml: '<score-partwise/>',
+          verification: { level: 'patch_apply', attempts: 1, llmCalls: 1 },
+        },
+      };
+    });
+    const response = await POST(new Request('http://localhost/api/music/patch', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'text/event-stream',
+        'x-ots-api-token': 'app-token',
+      },
+      body: JSON.stringify({ content: '<score-partwise/>', prompt: 'No changes.' }),
+    }));
+    const progress: Array<Record<string, unknown>> = [];
+
+    const result = await readAiEditServiceResponse(response, (event) => progress.push(event));
+
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    expect(result).toMatchObject({ status: 200, body: { proposedXml: '<score-partwise/>' } });
+    expect(progress.map((event) => event.phase)).toEqual(['request.accepted', 'request.validated']);
+    expect(mocked.runMusicPatchService).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ signal: expect.any(AbortSignal), onProgress: expect.any(Function) }),
+    );
   });
 });

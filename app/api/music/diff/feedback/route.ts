@@ -3,6 +3,10 @@ import { requireServerCredentialAccess } from '../../../../../lib/api-access-con
 import { logApiRouteSummary } from '../../../../../lib/api-route-logging';
 import { runDiffFeedbackService } from '../../../../../lib/music-services/diff-feedback-service';
 import { applyTraceHeaders, resolveTraceContext } from '../../../../../lib/trace-http';
+import {
+  createAiEditProgressStreamResponse,
+  wantsAiEditProgressStream,
+} from '../../../../../lib/ai-edit-progress-stream';
 
 export const runtime = 'nodejs';
 
@@ -42,20 +46,8 @@ export async function POST(request: Request) {
   const trace = resolveTraceContext(request);
   let status = 500;
   let summaryExtra: Record<string, unknown> = {};
-  try {
-    const body = await request.json();
-    if (routeWouldUseServerAiKey(body)) {
-      const access = requireServerCredentialAccess({
-        request,
-        trace,
-        route: '/api/music/diff/feedback',
-      });
-      if (!access.ok) {
-        status = access.response.status;
-        return access.response;
-      }
-    }
-    const result = await runDiffFeedbackService(body, { traceContext: trace, signal: request.signal });
+  let streamOwnsSummary = false;
+  const recordResultSummary = (result: { status: number; body: Record<string, unknown> }) => {
     status = result.status;
     const audit = asRecord(result.body.audit);
     const feedbackCounts = asRecord(audit?.feedbackCounts);
@@ -78,18 +70,54 @@ export async function POST(request: Request) {
       providerStatus: typeof result.body.providerStatus === 'number' ? result.body.providerStatus : null,
       errorCategory: status < 400 ? null : status === 400 ? 'request' : status === 422 ? 'verification' : status === 504 ? 'timeout' : 'provider',
     };
+  };
+  const logSummary = () => logApiRouteSummary({
+    event: 'diff.feedback.summary',
+    route: '/api/music/diff/feedback',
+    method: 'POST',
+    status,
+    startedAt,
+    trace,
+    extra: summaryExtra,
+  });
+  try {
+    const body = await request.json();
+    if (routeWouldUseServerAiKey(body)) {
+      const access = requireServerCredentialAccess({
+        request,
+        trace,
+        route: '/api/music/diff/feedback',
+      });
+      if (!access.ok) {
+        status = access.response.status;
+        return access.response;
+      }
+    }
+    if (wantsAiEditProgressStream(request)) {
+      streamOwnsSummary = true;
+      const response = createAiEditProgressStreamResponse({
+        operation: 'feedback',
+        startedAt,
+        parentSignal: request.signal,
+        run: async (onProgress, signal) => {
+          const result = await runDiffFeedbackService(body, { traceContext: trace, signal, onProgress });
+          recordResultSummary(result);
+          return result;
+        },
+        onSettled: logSummary,
+      });
+      applyTraceHeaders(response.headers, trace);
+      return response;
+    }
+
+    const result = await runDiffFeedbackService(body, { traceContext: trace, signal: request.signal });
+    recordResultSummary(result);
     const response = NextResponse.json(result.body, { status: result.status });
     applyTraceHeaders(response.headers, trace);
     return response;
   } finally {
-    logApiRouteSummary({
-      event: 'diff.feedback.summary',
-      route: '/api/music/diff/feedback',
-      method: 'POST',
-      status,
-      startedAt,
-      trace,
-      extra: summaryExtra,
-    });
+    if (!streamOwnsSummary) {
+      logSummary();
+    }
   }
 }

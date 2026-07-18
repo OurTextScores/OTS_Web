@@ -9,6 +9,7 @@ vi.mock('../lib/music-services/diff-feedback-service', () => ({
 }));
 
 import { POST } from '../app/api/music/diff/feedback/route';
+import { readAiEditServiceResponse } from '../lib/ai-edit-progress-client';
 
 describe('POST /api/music/diff/feedback', () => {
   afterEach(() => {
@@ -63,5 +64,29 @@ describe('POST /api/music/diff/feedback', () => {
     await expect(response.json()).resolves.toMatchObject({
       error: 'blocks must be an array.',
     });
+  });
+
+  it('streams feedback preparation and preserves a terminal error status', async () => {
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    mocked.runDiffFeedbackService.mockImplementation(async (_body, options) => {
+      options?.onProgress?.({ phase: 'feedback.prepared', message: 'Feedback context prepared' });
+      return { status: 422, body: { error: 'No revised proposal.' } };
+    });
+    const response = await POST(new Request('http://localhost/api/music/diff/feedback', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+      body: JSON.stringify({ apiKey: 'sk-test', content: '<score-partwise/>', blocks: [{}] }),
+    }));
+    const progress: Array<Record<string, unknown>> = [];
+
+    const result = await readAiEditServiceResponse(response, (event) => progress.push(event));
+
+    expect(response.status).toBe(200);
+    expect(result).toEqual({ status: 422, body: { error: 'No revised proposal.' } });
+    expect(progress.map((event) => event.phase)).toEqual(['request.accepted', 'feedback.prepared']);
+    expect(mocked.runDiffFeedbackService).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ signal: expect.any(AbortSignal), onProgress: expect.any(Function) }),
+    );
   });
 });

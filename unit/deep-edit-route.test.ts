@@ -9,6 +9,7 @@ vi.mock('../lib/music-services/deep-edit-service', () => ({
 }));
 
 import { POST } from '../app/api/music/patch/deep/route';
+import { readAiEditServiceResponse } from '../lib/ai-edit-progress-client';
 
 describe('POST /api/music/patch/deep', () => {
   const priorAllowProxy = process.env.ALLOW_UNAUTHENTICATED_LLM_PROXY;
@@ -114,6 +115,37 @@ describe('POST /api/music/patch/deep', () => {
     expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('"editEffort":"thorough"'));
     expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('"requestBudgetMs":600000'));
     infoSpy.mockRestore();
+  });
+
+  it('streams sandbox milestones and the terminal deep-edit result', async () => {
+    process.env.OTS_API_AUTH_TOKEN = 'app-token';
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    mocked.runDeepEditService.mockImplementation(async (_body, options) => {
+      options?.onProgress?.({ phase: 'deep.started', message: 'Deep Edit sandbox started' });
+      return {
+        status: 200,
+        body: { proposedXml: '<score-partwise/>', deepEdit: { counters: { llmCalls: 1 } } },
+      };
+    });
+    const response = await POST(new Request('http://localhost/api/music/patch/deep', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'text/event-stream',
+        'x-ots-api-token': 'app-token',
+      },
+      body: JSON.stringify({ content: '<score-partwise/>', prompt: 'Improve it.' }),
+    }));
+    const progress: Array<Record<string, unknown>> = [];
+
+    const result = await readAiEditServiceResponse(response, (event) => progress.push(event));
+
+    expect(result).toMatchObject({ status: 200, body: { proposedXml: '<score-partwise/>' } });
+    expect(progress.map((event) => event.phase)).toEqual(['request.accepted', 'deep.started']);
+    expect(mocked.runDeepEditService).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ signal: expect.any(AbortSignal), onProgress: expect.any(Function) }),
+    );
   });
 
   it('propagates typed service errors with their category', async () => {

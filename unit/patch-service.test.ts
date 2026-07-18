@@ -446,6 +446,37 @@ describe('generateApplyVerifiedPatch', () => {
     expect(requestText).toHaveBeenCalledTimes(1);
   });
 
+  it('reports provider and patch-verification milestones without candidate content', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const result = await generateApplyVerifiedPatch({
+      provider: 'openai',
+      apiKey: 'sk-test',
+      model: 'gpt-4.1',
+      baseXml: BASE_XML,
+      promptText: 'Fix the duration.',
+      maxTokens: null,
+      onProgress: (event) => progress.push(event),
+      requestText: async (args) => {
+        args.onRequest?.();
+        return validPatchText();
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(progress.map((event) => event.phase)).toEqual([
+      'provider.attempt_started',
+      'candidate.received',
+      'patch.applied',
+    ]);
+    expect(progress).toContainEqual(expect.objectContaining({
+      phase: 'patch.applied',
+      verificationLevel: 'patch_apply',
+      attempt: 1,
+      llmCalls: 1,
+    }));
+    expect(JSON.stringify(progress)).not.toContain('<score-partwise');
+  });
+
   it('includes the failed candidate and exact XPath error when repairing', async () => {
     const prompts: string[] = [];
     const badCandidate = JSON.stringify({

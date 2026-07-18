@@ -30,6 +30,7 @@ import {
   parseAiEditEffort,
   type AiEditEffort,
 } from '../ai-edit-effort';
+import { reportAiEditProgress, type AiEditProgressReporter } from '../ai-edit-progress';
 
 type PatchServiceResult = {
   status: number;
@@ -535,6 +536,7 @@ export type GenerateApplyVerifiedPatchArgs = {
   pdf?: TextPdfAttachment | null;
   signal?: AbortSignal;
   effort?: AiEditEffort;
+  onProgress?: AiEditProgressReporter;
   requestText?: (args: RequestAiTextDirectArgs) => Promise<string>;
 };
 
@@ -873,6 +875,13 @@ export async function generateApplyVerifiedPatch(
           signal: controller.signal,
           onRequest: () => {
             llmCalls += 1;
+            reportAiEditProgress(args.onProgress, {
+              phase: 'provider.attempt_started',
+              message: `Contacting the model for candidate ${attempts + 1} of ${maximumAttempts}`,
+              attempt: attempts + 1,
+              maxAttempts: maximumAttempts,
+              llmCalls,
+            });
           },
         });
         return { text, error: '', status: 200 as const, providerStatus: null };
@@ -923,6 +932,13 @@ export async function generateApplyVerifiedPatch(
     }
 
     attempts += 1;
+    reportAiEditProgress(args.onProgress, {
+      phase: 'candidate.received',
+      message: `Checking candidate ${attempts} of ${maximumAttempts}`,
+      attempt: attempts,
+      maxAttempts: maximumAttempts,
+      llmCalls,
+    });
     const rawText = response.text;
     const extracted = extractJsonFromResponse(rawText);
     const parsed = parseMusicXmlPatch(extracted);
@@ -930,6 +946,13 @@ export async function generateApplyVerifiedPatch(
       previousCandidate = rawText;
       previousError = parsed.error || 'Model response is not a musicxml-patch@1 payload.';
       failures.push({ attempt: attempts, category: 'parse', error: boundFailureMessage(previousError) });
+      reportAiEditProgress(args.onProgress, {
+        phase: 'candidate.rejected',
+        message: `Candidate ${attempts} needs JSON repair`,
+        attempt: attempts,
+        maxAttempts: maximumAttempts,
+        llmCalls,
+      });
       continue;
     }
 
@@ -938,14 +961,37 @@ export async function generateApplyVerifiedPatch(
       previousCandidate = extracted;
       previousError = applied.error || 'Patch application returned empty MusicXML.';
       failures.push({ attempt: attempts, category: 'apply', error: boundFailureMessage(previousError) });
+      reportAiEditProgress(args.onProgress, {
+        phase: 'candidate.rejected',
+        message: `Candidate ${attempts} did not apply and will be repaired`,
+        attempt: attempts,
+        maxAttempts: maximumAttempts,
+        llmCalls,
+      });
       continue;
     }
     if (byteLength(applied.xml) > maximumOutputBytes) {
       previousCandidate = extracted;
       previousError = `Applied MusicXML exceeds the ${maximumOutputBytes} byte output limit.`;
       failures.push({ attempt: attempts, category: 'output_size', error: boundFailureMessage(previousError) });
+      reportAiEditProgress(args.onProgress, {
+        phase: 'candidate.rejected',
+        message: `Candidate ${attempts} exceeded the output limit`,
+        attempt: attempts,
+        maxAttempts: maximumAttempts,
+        llmCalls,
+      });
       continue;
     }
+
+    reportAiEditProgress(args.onProgress, {
+      phase: 'patch.applied',
+      message: `Candidate ${attempts} passed patch verification`,
+      attempt: attempts,
+      maxAttempts: maximumAttempts,
+      llmCalls,
+      verificationLevel: 'patch_apply',
+    });
 
     return {
       ok: true,
@@ -968,7 +1014,7 @@ export async function generateApplyVerifiedPatch(
 
 export async function runMusicPatchService(
   body: unknown,
-  options?: { traceContext?: TraceContext; signal?: AbortSignal },
+  options?: { traceContext?: TraceContext; signal?: AbortSignal; onProgress?: AiEditProgressReporter },
 ): Promise<PatchServiceResult> {
   const data = asRecord(body);
   const prompt = typeof data?.prompt === 'string' ? data.prompt.trim() : '';
@@ -1166,6 +1212,11 @@ export async function runMusicPatchService(
     };
   }
 
+  reportAiEditProgress(options?.onProgress, {
+    phase: 'request.validated',
+    message: 'Request options and base score validated',
+  });
+
   try {
     const generated = await generateApplyVerifiedPatch({
       provider,
@@ -1180,6 +1231,7 @@ export async function runMusicPatchService(
       pdf: parsedPdf.attachment,
       signal: options?.signal,
       effort,
+      onProgress: options?.onProgress,
     });
     if (!generated.ok) {
       return {

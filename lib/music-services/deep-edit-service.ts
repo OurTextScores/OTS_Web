@@ -35,6 +35,11 @@ import {
   parseAiEditEffort,
   type AiEditEffort,
 } from '../ai-edit-effort';
+import {
+  reportAiEditProgress,
+  type AiEditProgressReporter,
+  type AiEditProgressTool,
+} from '../ai-edit-progress';
 
 // Phase 3 deep-edit loop (design §7): a bounded agent tries alternative edits against
 // capability-owned in-memory candidates, and the server-side finalize gate decides
@@ -73,6 +78,7 @@ export type DeepEditDriver = (args: {
   executeTool: (name: string, toolArgs: Record<string, unknown>) => Promise<DeepEditToolResult>;
   instructions: string;
   prompt: string;
+  onProgress?: AiEditProgressReporter;
 }) => Promise<{ candidateId: string; rationale: string } | null>;
 
 const MAX_BUDGET_MS = 600_000;
@@ -623,7 +629,11 @@ const modelForRequest = (provider: 'openai' | 'anthropic', apiKey: string, model
   return new OpenAIResponsesModel(client, modelName);
 };
 
-const withLlmBudget = (inner: Model, capability: DeepEditCapability): Model => new Proxy(inner, {
+const withLlmBudget = (
+  inner: Model,
+  capability: DeepEditCapability,
+  onProgress?: AiEditProgressReporter,
+): Model => new Proxy(inner, {
   get(target, prop, receiver) {
     if (prop === 'getResponse' || prop === 'getStreamedResponse') {
       return (...callArgs: unknown[]) => {
@@ -631,6 +641,11 @@ const withLlmBudget = (inner: Model, capability: DeepEditCapability): Model => n
         if (!charge.ok) {
           throw new DeepEditLlmBudgetError(charge.reason);
         }
+        reportAiEditProgress(onProgress, {
+          phase: 'provider.attempt_started',
+          message: `Starting Deep Edit model turn ${capability.counters.llmCalls}`,
+          llmCalls: capability.counters.llmCalls,
+        });
         return (target as unknown as Record<string, (...inner: unknown[]) => unknown>)[prop as string](...callArgs);
       };
     }
@@ -669,7 +684,7 @@ const defaultDriver: (
   apiKey,
   modelName,
   modelOverride,
-) => async ({ capability, executeTool, instructions, prompt }) => {
+) => async ({ capability, executeTool, instructions, prompt, onProgress }) => {
   const jsonTool = (
     name: string,
     description: string,
@@ -685,7 +700,11 @@ const defaultDriver: (
   const agent = new Agent({
     name: 'DeepEdit',
     instructions,
-    model: withLlmBudget(modelOverride ?? modelForRequest(provider, apiKey, modelName), capability),
+    model: withLlmBudget(
+      modelOverride ?? modelForRequest(provider, apiKey, modelName),
+      capability,
+      onProgress,
+    ),
     modelSettings: { toolChoice: 'required' },
     tools: [
       jsonTool('sandbox_apply_patch', 'Apply a musicxml-patch@1 to a candidate, minting a new candidate. Use null for op fields you do not need.'),
@@ -751,6 +770,7 @@ export async function runDeepEditService(
     budgets?: DeepEditBudgets;
     /** Test seam: run the real agents-SDK loop against a scripted model. */
     modelOverride?: Model;
+    onProgress?: AiEditProgressReporter;
   },
 ): Promise<DeepEditServiceResult> {
   const startedAt = Date.now();
@@ -822,10 +842,19 @@ export async function runDeepEditService(
     return errorResult(413, 'request', `Deep Edit prompt exceeds the ${maximumPromptChars} character limit.`);
   }
 
+  reportAiEditProgress(options?.onProgress, {
+    phase: 'request.validated',
+    message: 'Deep Edit request and base score validated',
+  });
+
   const capability = new DeepEditCapability({
     baseXml,
     budgets,
     parentSignal: options?.signal,
+  });
+  reportAiEditProgress(options?.onProgress, {
+    phase: 'deep.started',
+    message: 'Deep Edit sandbox started',
   });
   const auditFor = (finalizedCandidateId: string | null, rationale: string): DeepEditAudit => ({
     effort,
@@ -847,13 +876,64 @@ export async function runDeepEditService(
 
   try {
     const driver = options?.driveAgent ?? defaultDriver(provider, apiKey, requestedModel, options?.modelOverride);
+    const toolProgress = (name: string): { tool: AiEditProgressTool; label: string } | null => {
+      const tools: Record<string, { tool: AiEditProgressTool; label: string }> = {
+        sandbox_apply_patch: { tool: 'apply_patch', label: 'Applying a candidate patch' },
+        sandbox_scoreops: { tool: 'scoreops', label: 'Running structured score operations' },
+        sandbox_engine_check: { tool: 'engine_check', label: 'Checking a candidate in the notation engine' },
+        sandbox_render: { tool: 'render', label: 'Rendering a candidate for verification' },
+        sandbox_measure_diff: { tool: 'measure_diff', label: 'Comparing candidate measures' },
+        sandbox_analyze: { tool: 'analyze', label: 'Analyzing a candidate' },
+        sandbox_record_score: { tool: 'record_score', label: 'Recording a candidate assessment' },
+        finalize: { tool: 'finalize', label: 'Finalizing the selected candidate' },
+      };
+      return tools[name] ?? null;
+    };
+    const executeToolWithProgress = async (name: string, toolArgs: Record<string, unknown>) => {
+      const descriptor = toolProgress(name);
+      const verificationTool = name === 'sandbox_engine_check' || name === 'sandbox_render';
+      if (descriptor) {
+        reportAiEditProgress(options?.onProgress, {
+          phase: verificationTool ? 'verification.started' : 'tool.started',
+          message: descriptor.label,
+          tool: descriptor.tool,
+          toolCalls: capability.counters.toolCalls,
+          candidates: capability.auditCandidates().length,
+          renders: capability.counters.renders,
+        });
+      }
+      const result = await executeSandboxTool(capability, name, toolArgs);
+      if (descriptor) {
+        const verificationLevel = result.verification === 'tool_execution'
+          || result.verification === 'patch_apply'
+          || result.verification === 'engine_load'
+          || result.verification === 'render'
+          ? result.verification
+          : undefined;
+        reportAiEditProgress(options?.onProgress, {
+          phase: name === 'finalize' && result.ok
+            ? 'candidate.finalized'
+            : verificationTool ? 'verification.completed' : 'tool.completed',
+          message: name === 'finalize' && result.ok
+            ? 'Candidate selected for the final verification gate'
+            : `${descriptor.label} ${result.ok ? 'completed' : 'did not complete'}`,
+          tool: descriptor.tool,
+          toolCalls: capability.counters.toolCalls,
+          candidates: capability.auditCandidates().length,
+          renders: capability.counters.renders,
+          ...(verificationLevel ? { verificationLevel } : {}),
+        });
+      }
+      return result;
+    };
     let finalized: { candidateId: string; rationale: string } | null = null;
     try {
       finalized = await driver({
         capability,
-        executeTool: (name, toolArgs) => executeSandboxTool(capability, name, toolArgs),
+        executeTool: executeToolWithProgress,
         instructions: SANDBOX_INSTRUCTIONS,
         prompt: loopPrompt,
+        onProgress: options?.onProgress,
       });
     } catch (error) {
       const timedOut = capability.expired();
@@ -912,7 +992,7 @@ export async function runDeepEditService(
       const nextCheck = DEEP_EDIT_LEVEL_RANK[winner.verification] < DEEP_EDIT_LEVEL_RANK.engine_load
         ? 'sandbox_engine_check'
         : 'sandbox_render';
-      const checked = await executeSandboxTool(capability, nextCheck, { candidateId: winner.id });
+      const checked = await executeToolWithProgress(nextCheck, { candidateId: winner.id });
       if (!checked.ok) {
         const budgetReason = typeof checked.budget === 'string';
         return errorResult(

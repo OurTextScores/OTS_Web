@@ -13,6 +13,7 @@ import {
   type ProposalSessionContext,
 } from './proposal-session-context';
 import { type TraceContext } from '../trace-http';
+import { reportAiEditProgress, type AiEditProgressReporter } from '../ai-edit-progress';
 
 const BLOCK_STATUS_VALUES = new Set(['accepted', 'rejected', 'comment', 'pending']);
 const FEEDBACK_CHAT_MAX_MESSAGES = 24;
@@ -234,7 +235,7 @@ export function buildFeedbackPrompt(args: {
 
 export async function runDiffFeedbackService(
   body: unknown,
-  options?: { traceContext?: TraceContext; signal?: AbortSignal },
+  options?: { traceContext?: TraceContext; signal?: AbortSignal; onProgress?: AiEditProgressReporter },
 ): Promise<ServiceResult> {
   const data = asRecord(body);
   const parsedBlocks = parseBlocks(data?.blocks);
@@ -317,6 +318,11 @@ export async function runDiffFeedbackService(
     feedbackCounts,
     proposalContext: contextFlags,
   };
+
+  reportAiEditProgress(options?.onProgress, {
+    phase: 'feedback.prepared',
+    message: 'Feedback context prepared',
+  });
 
   const patchResult = await runMusicPatchService({
     provider,

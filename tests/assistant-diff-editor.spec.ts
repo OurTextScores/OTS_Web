@@ -359,6 +359,77 @@ test.describe('Assistant diff editor flow', () => {
     await expect(page.getByText('Request cancelled.')).toHaveCount(0);
   });
 
+  test('patch generation displays streamed server progress before the terminal result', async ({ page }) => {
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string'
+          ? input
+          : input instanceof URL ? input.toString() : input.url;
+        if (!url.includes('/api/music/patch') || url.includes('/api/music/patch/deep')) {
+          return originalFetch(input, init);
+        }
+        const encoder = new TextEncoder();
+        const event = (name: string, payload: Record<string, unknown>) => (
+          encoder.encode(`event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`)
+        );
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(event('progress', {
+              version: 'ai-edit-progress@1',
+              type: 'progress',
+              operation: 'patch',
+              sequence: 1,
+              elapsedMs: 5,
+              phase: 'request.accepted',
+              message: 'Request accepted',
+            }));
+            window.setTimeout(() => controller.enqueue(event('progress', {
+              version: 'ai-edit-progress@1',
+              type: 'progress',
+              operation: 'patch',
+              sequence: 2,
+              elapsedMs: 50,
+              phase: 'candidate.received',
+              message: 'Checking candidate 1 of 3',
+              attempt: 1,
+              maxAttempts: 3,
+              llmCalls: 1,
+            })), 50);
+            window.setTimeout(() => {
+              controller.enqueue(event('result', {
+                version: 'ai-edit-progress@1',
+                type: 'result',
+                operation: 'patch',
+                sequence: 3,
+                elapsedMs: 1_500,
+                status: 422,
+                body: { error: 'Synthetic stream failure.' },
+              }));
+              controller.close();
+            }, 1_500);
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+        });
+      };
+    });
+
+    await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
+    await page.waitForSelector('svg .Note', { timeout: 60_000 });
+    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('tab-ai').click();
+    await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
+    await page.getByPlaceholder('Paste your key').fill('test-key');
+    await page.getByPlaceholder('Describe the change you want in the MusicXML.').fill('Change the first note to G.');
+    await page.getByRole('button', { name: 'Generate Patch' }).click();
+
+    await expect(page.getByTestId('ai-edit-working')).toContainText('Checking candidate 1 of 3', { timeout: 5_000 });
+    await expect(page.getByText('Synthetic stream failure.').first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByTestId('ai-edit-working')).toHaveCount(0);
+  });
+
   test('invalid patch response shows error and does not open compare modal', async ({ page }) => {
     await page.route('**/api/music/patch', async (route) => {
       await route.fulfill({

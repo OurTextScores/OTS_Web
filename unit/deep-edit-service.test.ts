@@ -127,6 +127,7 @@ describe('runDeepEditService', () => {
 
   it('ships an engine-verified patch candidate and never touches user stores', async () => {
     engineLoadOk();
+    const progress: Array<Record<string, unknown>> = [];
     const driver: DeepEditDriver = async ({ executeTool }) => {
       const applied = await executeTool('sandbox_apply_patch', { baseCandidateId: 'base', patch: VALID_PATCH });
       expect(applied.ok).toBe(true);
@@ -135,7 +136,10 @@ describe('runDeepEditService', () => {
       return { candidateId: String(applied.candidateId), rationale: 'Only candidate; engine verified.' };
     };
 
-    const result = await runDeepEditService(request(), { driveAgent: driver });
+    const result = await runDeepEditService(request(), {
+      driveAgent: driver,
+      onProgress: (event) => progress.push(event),
+    });
 
     expect(result.status).toBe(200);
     expect(result.body.proposal).toMatchObject({
@@ -152,6 +156,15 @@ describe('runDeepEditService', () => {
     expect(audit.finalizedCandidateId).toBe('cand-1');
     expect(audit.counters.toolCalls).toBe(2);
     expect(JSON.stringify(audit.candidates)).not.toContain('<score-partwise');
+    expect(progress.map((event) => event.phase)).toEqual([
+      'request.validated',
+      'deep.started',
+      'tool.started',
+      'tool.completed',
+      'verification.started',
+      'verification.completed',
+    ]);
+    expect(JSON.stringify(progress)).not.toContain('<score-partwise');
 
     expect(mocked.updateScoreOpsSession).not.toHaveBeenCalled();
     expect(mocked.createScoreOpsSession).not.toHaveBeenCalled();
