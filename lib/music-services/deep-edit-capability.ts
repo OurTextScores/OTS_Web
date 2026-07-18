@@ -80,6 +80,18 @@ export class DeepEditCapability {
   private budgetDenials = new Set<string>();
   private finalizedState: { candidateId: string; rationale: string } | null = null;
 
+  /**
+   * Availability of the environment-dependent verification backends. webmscore and the
+   * MuseScore CLI are optional in some deployments (ScoreOps falls back to its XML
+   * executor); a check that fails against the base score marks the backend unavailable so
+   * candidates are not blamed for a missing runtime and the gate does not demand a level
+   * this deployment cannot produce.
+   */
+  readonly environment: { engine: 'unknown' | 'available' | 'unavailable'; render: 'unknown' | 'available' | 'unavailable' } = {
+    engine: 'unknown',
+    render: 'unknown',
+  };
+
   constructor(args: { baseXml: string; budgets: DeepEditBudgets; parentSignal?: AbortSignal }) {
     this.requestId = randomUUID();
     this.baseXml = args.baseXml;

@@ -46,6 +46,7 @@ export type DeepEditAudit = {
   rationale: string;
   candidates: ReturnType<DeepEditCapability['auditCandidates']>;
   counters: { llmCalls: number; toolCalls: number; renders: number };
+  environment: DeepEditCapability['environment'];
   elapsedMs: number;
 };
 
@@ -198,6 +199,33 @@ const withSandboxDeadline = async <T>(
   }
 };
 
+const describeError = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  const text = String(error ?? '').trim();
+  return text || fallback;
+};
+
+const engineLoadXml = async (capability: DeepEditCapability, xml: string): Promise<void> => {
+  let score: Score | null = null;
+  try {
+    score = await withSandboxDeadline(capability, (async () => {
+      const webMscore = await loadWebMscoreInProcess();
+      return webMscore.load('musicxml', new TextEncoder().encode(xml));
+    })(), 'Engine check');
+  } finally {
+    try {
+      score?.destroy?.();
+    } catch {
+      // destroy failures must not mask the verification result
+    }
+  }
+};
+
+const ENGINE_UNAVAILABLE_MESSAGE = 'The notation engine is unavailable in this deployment. Skip engine checks and finalize your best candidate.';
+const RENDER_UNAVAILABLE_MESSAGE = 'Rendering is unavailable in this deployment. Skip render checks and finalize your best candidate.';
+
 const verifyCandidateEngine = async (
   capability: DeepEditCapability,
   candidateId: string,
@@ -206,25 +234,39 @@ const verifyCandidateEngine = async (
   if (xml === null || candidateId === DEEP_EDIT_BASE_ID) {
     return invalidIdError(candidateId);
   }
-  capability.noteAttemptedLevel('engine_load');
-  let score: Score | null = null;
+  if (capability.environment.engine === 'unavailable') {
+    return { ok: false, candidateId, error: ENGINE_UNAVAILABLE_MESSAGE };
+  }
   try {
-    score = await withSandboxDeadline(capability, (async () => {
-      const webMscore = await loadWebMscoreInProcess();
-      return webMscore.load('musicxml', new TextEncoder().encode(xml));
-    })(), 'Engine check');
+    await engineLoadXml(capability, xml);
+    capability.environment.engine = 'available';
     capability.recordVerification(candidateId, 'engine_load');
     return { ok: true, candidateId, verification: 'engine_load' };
   } catch (error) {
-    const message = boundError(error instanceof Error ? error.message : 'Engine load failed.');
+    const message = boundError(describeError(error, 'Engine load failed.'));
+    // Cancellation/deadline is neither the candidate's fault nor evidence about the
+    // deployment; report it as-is without probing or raising the gate bar.
+    if (capability.expired()) {
+      return { ok: false, candidateId, error: message };
+    }
+    // Distinguish a bad candidate from a deployment without the engine: the user's own
+    // base score is known-good, so if it fails the same load, the runtime is missing and
+    // the candidate is not to blame — and the attempt must not raise the gate bar.
+    if (capability.environment.engine === 'unknown') {
+      try {
+        await engineLoadXml(capability, capability.baseXml);
+        capability.environment.engine = 'available';
+      } catch {
+        capability.environment.engine = 'unavailable';
+        console.warn('[deep-edit] Notation engine unavailable; engine verification disabled for this request.', {
+          detail: message.slice(0, 300),
+        });
+        return { ok: false, candidateId, error: ENGINE_UNAVAILABLE_MESSAGE };
+      }
+    }
+    capability.noteAttemptedLevel('engine_load');
     capability.recordVerification(candidateId, 'engine_load', message);
     return { ok: false, candidateId, error: message };
-  } finally {
-    try {
-      score?.destroy?.();
-    } catch {
-      // destroy failures must not mask the verification result
-    }
   }
 };
 
@@ -236,17 +278,37 @@ const verifyCandidateRender = async (
   if (xml === null || candidateId === DEEP_EDIT_BASE_ID) {
     return invalidIdError(candidateId);
   }
-  capability.noteAttemptedLevel('render');
+  if (capability.environment.render === 'unavailable') {
+    return { ok: false, candidateId, error: RENDER_UNAVAILABLE_MESSAGE };
+  }
+  const renderXml = (content: string) => withSandboxDeadline(capability, renderMusicSnapshot({
+    content,
+    format: 'png',
+    timeoutMs: Math.min(60_000, Math.max(1_000, capability.remainingMs())),
+  }), 'Render');
   try {
-    const { buffer, mimeType } = await withSandboxDeadline(capability, renderMusicSnapshot({
-      content: xml,
-      format: 'png',
-      timeoutMs: Math.min(60_000, Math.max(1_000, capability.remainingMs())),
-    }), 'Render');
+    const { buffer, mimeType } = await renderXml(xml);
+    capability.environment.render = 'available';
     capability.recordVerification(candidateId, 'render');
     return { ok: true, candidateId, verification: 'render', mimeType, renderedBytes: buffer.byteLength };
   } catch (error) {
-    const message = boundError(error instanceof Error ? error.message : 'Render failed.');
+    const message = boundError(describeError(error, 'Render failed.'));
+    if (capability.expired()) {
+      return { ok: false, candidateId, error: message };
+    }
+    if (capability.environment.render === 'unknown') {
+      try {
+        await renderXml(capability.baseXml);
+        capability.environment.render = 'available';
+      } catch {
+        capability.environment.render = 'unavailable';
+        console.warn('[deep-edit] Rendering unavailable; render verification disabled for this request.', {
+          detail: message.slice(0, 300),
+        });
+        return { ok: false, candidateId, error: RENDER_UNAVAILABLE_MESSAGE };
+      }
+    }
+    capability.noteAttemptedLevel('render');
     return { ok: false, candidateId, error: message };
   }
 };
@@ -735,6 +797,7 @@ export async function runDeepEditService(
       toolCalls: capability.counters.toolCalls,
       renders: capability.counters.renders,
     },
+    environment: { ...capability.environment },
     elapsedMs: Math.max(0, Date.now() - startedAt),
   });
 

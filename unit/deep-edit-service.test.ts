@@ -143,14 +143,22 @@ describe('runDeepEditService', () => {
     expect(audit.counters.toolCalls).toBe(4);
   });
 
-  it('fails the gate when the finalized candidate cannot load in the engine', async () => {
+  it('fails the gate when the finalized candidate cannot load in a working engine', async () => {
+    // The engine works (base loads fine); only the candidate is rejected.
     mocked.loadWebMscoreInProcess.mockResolvedValue({
-      load: vi.fn().mockRejectedValue(new Error('corrupt beam group')),
+      load: vi.fn().mockImplementation(async (_format: string, bytes: Uint8Array) => {
+        const content = new TextDecoder().decode(bytes);
+        if (content.includes('<step>G</step>')) {
+          throw new Error('corrupt beam group');
+        }
+        return { destroy: vi.fn() };
+      }),
     });
     const driver: DeepEditDriver = async ({ executeTool }) => {
       const first = await executeTool('sandbox_apply_patch', { baseCandidateId: 'base', patch: VALID_PATCH });
       const checked = await executeTool('sandbox_engine_check', { candidateId: first.candidateId });
       expect(checked.ok).toBe(false);
+      expect(String(checked.error)).toContain('corrupt beam group');
       return { candidateId: String(first.candidateId), rationale: 'Trying anyway.' };
     };
 
@@ -161,6 +169,48 @@ describe('runDeepEditService', () => {
     expect(String(result.body.error)).toContain('engine');
     const audit = result.body.deepEdit as Record<string, any>;
     expect(audit.candidates[0].engineError).toContain('corrupt beam group');
+    expect(audit.environment.engine).toBe('available');
+  });
+
+  it('ships a patch-verified winner when the deployment has no notation engine', async () => {
+    // Every load fails — including the user's own base score — so the runtime is absent,
+    // the candidate is not blamed, and the failed attempt does not raise the gate bar.
+    mocked.loadWebMscoreInProcess.mockRejectedValue(new Error('wasm runtime missing'));
+    const driver: DeepEditDriver = async ({ executeTool }) => {
+      const first = await executeTool('sandbox_apply_patch', { baseCandidateId: 'base', patch: VALID_PATCH });
+      const checked = await executeTool('sandbox_engine_check', { candidateId: first.candidateId });
+      expect(checked).toMatchObject({ ok: false });
+      expect(String(checked.error)).toContain('unavailable in this deployment');
+      const again = await executeTool('sandbox_engine_check', { candidateId: first.candidateId });
+      expect(String(again.error)).toContain('unavailable');
+      return { candidateId: String(first.candidateId), rationale: 'Best available without an engine.' };
+    };
+
+    const result = await runDeepEditService(request(), { driveAgent: driver });
+
+    expect(result.status).toBe(200);
+    expect((result.body.proposal as Record<string, any>).verification.level).toBe('patch_apply');
+    const audit = result.body.deepEdit as Record<string, any>;
+    expect(audit.environment.engine).toBe('unavailable');
+    expect(audit.candidates[0].engineError).toBeUndefined();
+  });
+
+  it('fails a scoreops-born winner clearly when the engine it requires is unavailable', async () => {
+    mocked.loadWebMscoreInProcess.mockRejectedValue(new Error('wasm runtime missing'));
+    const driver: DeepEditDriver = async ({ executeTool }) => {
+      const created = await executeTool('sandbox_scoreops', {
+        baseCandidateId: 'base',
+        ops: [{ op: 'set_metadata_text', field: 'title', value: 'No Engine' }],
+      });
+      expect(created.ok).toBe(true);
+      return { candidateId: String(created.candidateId), rationale: 'ScoreOps only.' };
+    };
+
+    const result = await runDeepEditService(request(), { driveAgent: driver });
+
+    expect(result.status).toBe(422);
+    expect(result.body.errorCategory).toBe('gate_failed');
+    expect(String(result.body.error)).toContain('unavailable in this deployment');
   });
 
   it('requires engine verification for scoreops-born candidates even when never attempted', async () => {
