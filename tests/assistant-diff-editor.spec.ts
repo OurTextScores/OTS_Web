@@ -351,6 +351,64 @@ test.describe('Assistant diff editor flow', () => {
     expect(genericLlmCalls).toBe(0);
   });
 
+  const fulfillPatchWithStaleHashes = async (route: Route) => {
+    const request = route.request().postDataJSON();
+    const baseXml = String(request?.content || '');
+    const applied = await applyMusicXmlPatch(baseXml, PATCH_RESPONSE.patch);
+    expect(applied.error).toBeFalsy();
+    // Hash a semantically different document, so neither the raw nor the identity hash
+    // can match the live score: the Apply gate must refuse.
+    const staleBasis = baseXml.replace(/<octave>\s*4\s*<\/octave>/, '<octave>5</octave>');
+    expect(staleBasis).not.toBe(baseXml);
+    const staleContentHash = scoreHash(staleBasis);
+    const staleIdentityHash = computeMusicXmlIdentityHashServer(staleBasis);
+    await route.fulfill({
+      status: 200,
+      body: JSON.stringify({
+        ...PATCH_RESPONSE,
+        proposedXml: applied.xml,
+        proposal: {
+          sourceTool: 'music.patch',
+          baseXml,
+          proposedXml: applied.xml,
+          baseScoreSessionId: null,
+          baseRevision: null,
+          baseContentHash: staleContentHash,
+          expectedCurrentContentHash: staleContentHash,
+          baseIdentityHash: staleIdentityHash,
+          expectedCurrentIdentityHash: staleIdentityHash,
+          proposedContentHash: scoreHash(applied.xml),
+          proposedIdentityHash: computeMusicXmlIdentityHashServer(applied.xml),
+          verification: PATCH_RESPONSE.verification,
+        },
+      }),
+    });
+  };
+
+  test('stale expected hash blocks Apply All', async ({ page }) => {
+    await page.route('**/api/music/patch', fulfillPatchWithStaleHashes);
+
+    await openAssistantProposalCompare(page);
+    await page.getByRole('button', { name: 'Apply All AI Changes' }).click();
+
+    await expect(page.getByTestId('checkpoint-compare-modal').getByRole('alert')).toContainText(
+      'The score changed after this proposal was generated. Regenerate or rebase the proposal before applying it.',
+    );
+    await expect.poll(() => countHighlights(page), { timeout: 15_000 }).toBeGreaterThan(0);
+  });
+
+  test('stale expected hash blocks a partial Apply', async ({ page }) => {
+    await page.route('**/api/music/patch', fulfillPatchWithStaleHashes);
+
+    await openAssistantProposalCompare(page);
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+
+    await expect(page.getByTestId('checkpoint-compare-modal').getByRole('alert')).toContainText(
+      'The score changed after this proposal was generated. Regenerate or rebase the proposal before applying it.',
+    );
+    await expect.poll(() => countHighlights(page), { timeout: 15_000 }).toBeGreaterThan(0);
+  });
+
   test('per-block apply applies the reviewed block immediately', async ({ page }) => {
     await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
 
