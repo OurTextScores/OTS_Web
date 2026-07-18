@@ -538,6 +538,100 @@ test.describe('Assistant diff editor flow', () => {
     expect(constraints.some((entry: any) => entry.kind === 'note' && entry.text === 'No slurs anywhere.')).toBe(true);
   });
 
+  test('deep edit toggle routes to the deep endpoint and surfaces the deep audit', async ({ page }) => {
+    let deepRequest: Record<string, unknown> | null = null;
+    let shallowCalls = 0;
+    await page.route('**/api/music/patch', async (route) => {
+      shallowCalls += 1;
+      await route.fulfill({ status: 500, body: '{}' });
+    });
+    await page.route('**/api/music/patch/deep', async (route) => {
+      deepRequest = route.request().postDataJSON();
+      const baseXml = String(deepRequest?.content || '');
+      const proposedXml = baseXml.replace(/<step>\s*C\s*<\/step>/, '<step>G</step>');
+      const baseContentHash = scoreHash(baseXml);
+      const baseIdentityHash = computeMusicXmlIdentityHashServer(baseXml);
+      await route.fulfill({
+        status: 200,
+        body: JSON.stringify({
+          proposal: {
+            sourceTool: 'music.deep_edit',
+            baseXml,
+            proposedXml,
+            baseScoreSessionId: null,
+            baseRevision: null,
+            baseContentHash,
+            expectedCurrentContentHash: baseContentHash,
+            baseIdentityHash,
+            expectedCurrentIdentityHash: baseIdentityHash,
+            proposedContentHash: scoreHash(proposedXml),
+            proposedIdentityHash: computeMusicXmlIdentityHashServer(proposedXml),
+            verification: { level: 'engine_load', llmCalls: 5 },
+          },
+          proposedXml,
+          annotations: [],
+          proposalSessionId: E2E_PROPOSAL_SESSION_ID,
+          cycle: 1,
+          verification: { level: 'engine_load', llmCalls: 5, elapsedMs: 42 },
+          deepEdit: {
+            finalizedCandidateId: 'cand-2',
+            rationale: 'Second candidate rendered cleanly and keeps the voicing.',
+            candidates: [
+              { id: 'cand-1', parentId: 'base', createdByTool: 'apply_patch', verification: 'patch_apply', scores: [] },
+              { id: 'cand-2', parentId: 'base', createdByTool: 'apply_patch', verification: 'engine_load', scores: [] },
+            ],
+            counters: { llmCalls: 5, toolCalls: 6, renders: 0 },
+            elapsedMs: 42,
+          },
+        }),
+      });
+    });
+
+    await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
+    await page.waitForSelector('svg .Note', { timeout: 60_000 });
+    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('tab-ai').click();
+    await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
+    await page.getByPlaceholder('Paste your key').fill('test-key');
+    await page.getByPlaceholder('Describe the change you want in the MusicXML.').fill('Change the first note to G.');
+    await page.getByTestId('ai-deep-edit-toggle').check();
+    await page.getByRole('button', { name: 'Deep Edit' }).click();
+
+    await waitForDiffReviewReady(page);
+    expect(shallowCalls).toBe(0);
+    expect(deepRequest).toMatchObject({ provider: 'openai', model: 'gpt-test-model' });
+    expect(deepRequest && 'image' in deepRequest).toBe(false);
+    await expect(page.getByTestId('ai-proposal-audit')).toContainText('engine-verified');
+    await expect(page.getByTestId('ai-proposal-audit')).toContainText('2 candidates');
+    await page.getByText('Deep Edit rationale').click();
+    await expect(page.getByTestId('ai-proposal-audit')).toContainText('rendered cleanly');
+  });
+
+  test('deep edit failure shows the typed error and does not open compare', async ({ page }) => {
+    await page.route('**/api/music/patch/deep', async (route) => {
+      await route.fulfill({
+        status: 422,
+        body: JSON.stringify({
+          error: 'Deep edit ran out of budget before finalizing a candidate.',
+          errorCategory: 'budget_exhausted',
+        }),
+      });
+    });
+
+    await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
+    await page.waitForSelector('svg .Note', { timeout: 60_000 });
+    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('tab-ai').click();
+    await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
+    await page.getByPlaceholder('Paste your key').fill('test-key');
+    await page.getByPlaceholder('Describe the change you want in the MusicXML.').fill('Change the first note to G.');
+    await page.getByTestId('ai-deep-edit-toggle').check();
+    await page.getByRole('button', { name: 'Deep Edit' }).click();
+
+    await expect(page.getByText('Deep edit ran out of budget before finalizing a candidate.').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('checkpoint-compare-modal')).toHaveCount(0);
+  });
+
   test('dropped previous-cycle context surfaces a warning in the audit line', async ({ page }) => {
     await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
     await page.route('**/api/music/diff/feedback', async (route) => {

@@ -128,8 +128,17 @@ type AiEditProposal = {
     proposedContentHash?: string;
     proposedIdentityHash?: string;
     verification: {
-        level: 'patch_apply' | 'tool_execution';
+        level: 'patch_apply' | 'tool_execution' | 'engine_load' | 'render';
     };
+};
+
+const AI_PROPOSAL_VERIFICATION_LEVELS = new Set(['patch_apply', 'tool_execution', 'engine_load', 'render']);
+
+const AI_PROPOSAL_VERIFICATION_LABELS: Record<string, string> = {
+    patch_apply: 'apply-verified',
+    tool_execution: 'tool-executed',
+    engine_load: 'engine-verified',
+    render: 'render-verified',
 };
 
 type CompareBlockComment = {
@@ -387,7 +396,8 @@ const findAiEditProposal = (value: unknown): AiEditProposal | null => {
             && typeof proposal.expectedCurrentContentHash === 'string'
             && (proposal.baseIdentityHash == null || typeof proposal.baseIdentityHash === 'string')
             && (proposal.expectedCurrentIdentityHash == null || typeof proposal.expectedCurrentIdentityHash === 'string')
-            && (verification?.level === 'patch_apply' || verification?.level === 'tool_execution')
+            && typeof verification?.level === 'string'
+            && AI_PROPOSAL_VERIFICATION_LEVELS.has(verification.level)
         ) {
             return proposal as AiEditProposal;
         }
@@ -1369,6 +1379,7 @@ export default function ScoreEditor() {
     const [aiIncludePage, setAiIncludePage] = useState(false);
     const [aiIncludeSelection, setAiIncludeSelection] = useState(false);
     const [aiIncludeChat, setAiIncludeChat] = useState(false);
+    const [aiDeepEdit, setAiDeepEdit] = useState(false);
     const [aiIncludeRenderedImage, setAiIncludeRenderedImage] = useState(false);
     const [aiMaxTokensMode, setAiMaxTokensMode] = useState<'auto' | 'custom'>('auto');
     const [aiMaxTokens, setAiMaxTokens] = useState(4096);
@@ -8771,7 +8782,10 @@ ${partsBodyXml}
             const promptText = buildAiPrompt(aiPrompt, promptSections);
             requestIssued = true;
             telemetryCountersRef.current.aiRequests += 1;
-            const response = await fetch(resolveScoreEditorApiPath('/api/music/patch'), {
+            // Deep Edit is a separate, more expensive endpoint; it does not take
+            // image/PDF context in v1.
+            const patchEndpoint = aiDeepEdit ? '/api/music/patch/deep' : '/api/music/patch';
+            const response = await fetch(resolveScoreEditorApiPath(patchEndpoint), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -8780,10 +8794,12 @@ ${partsBodyXml}
                     provider: aiProvider,
                     apiKey: aiApiKey.trim(),
                     model: aiModel.trim(),
-                    image: imageAttachment,
-                    pdf: pdfAttachment,
-                    maxTokens,
-                    temperature: aiTemperatureMode === 'custom' ? aiTemperature : null,
+                    ...(aiDeepEdit ? {} : {
+                        image: imageAttachment,
+                        pdf: pdfAttachment,
+                        maxTokens,
+                        temperature: aiTemperatureMode === 'custom' ? aiTemperature : null,
+                    }),
                 }),
             });
             captureApiTraceContext(response.headers);
@@ -8797,13 +8813,20 @@ ${partsBodyXml}
             }
 
             const verification = asRecord(result.verification);
-            if (verification?.level !== 'patch_apply') {
+            const verificationLevel = typeof verification?.level === 'string' ? verification.level : '';
+            const verifiedLevels = ['patch_apply', 'engine_load', 'render'];
+            if (!verifiedLevels.includes(verificationLevel)) {
                 throw new Error('Patch service returned an unverified proposal.');
             }
             const patchPayload = asRecord(result.patch);
-            const parsedPatch = parseMusicXmlPatch(JSON.stringify(patchPayload || {}));
-            if (parsedPatch.error || !parsedPatch.patch) {
+            const parsedPatch = patchPayload
+                ? parseMusicXmlPatch(JSON.stringify(patchPayload))
+                : { patch: null, error: '' };
+            if (patchPayload && (parsedPatch.error || !parsedPatch.patch)) {
                 throw new Error(parsedPatch.error || 'Patch service returned an invalid patch payload.');
+            }
+            if (!parsedPatch.patch && !aiDeepEdit) {
+                throw new Error('Patch service returned an invalid patch payload.');
             }
             const proposedXml = typeof result.proposedXml === 'string' ? result.proposedXml.trim() : '';
             if (!proposedXml) {
@@ -8811,10 +8834,20 @@ ${partsBodyXml}
             }
 
             const annotations = extractPatchAnnotations({ annotations: result.annotations });
-            setAiOutput(JSON.stringify({
-                ...parsedPatch.patch,
-                ...(annotations.length ? { annotations } : {}),
-            }, null, 2));
+            const deepEditAudit = asRecord(result.deepEdit);
+            if (parsedPatch.patch) {
+                setAiOutput(JSON.stringify({
+                    ...parsedPatch.patch,
+                    ...(annotations.length ? { annotations } : {}),
+                }, null, 2));
+            } else {
+                setAiOutput(JSON.stringify({
+                    deepEdit: {
+                        finalizedCandidateId: deepEditAudit?.finalizedCandidateId ?? null,
+                        rationale: deepEditAudit?.rationale ?? '',
+                    },
+                }, null, 2));
+            }
             setAiPatch(parsedPatch.patch);
             setAiPatchError(null);
             setAiPatchedXml(proposedXml);
@@ -8838,7 +8871,11 @@ ${partsBodyXml}
                 annotations,
                 continuityToken: result.continuityToken,
             });
-            setAiProposalAudit({ cycle: 1, verification: result.verification });
+            setAiProposalAudit({
+                cycle: 1,
+                verification: result.verification,
+                ...(deepEditAudit ? { deepEdit: deepEditAudit } : {}),
+            });
             outcome = 'success';
         } catch (err) {
             console.error('AI request failed', err);
@@ -14667,13 +14704,23 @@ ${partsBodyXml}
                                                     placeholder="Describe the change you want in the MusicXML."
                                                 />
                                             </div>
+                                            <label className="flex items-center gap-2 text-xs text-gray-700">
+                                                <input
+                                                    type="checkbox"
+                                                    data-testid="ai-deep-edit-toggle"
+                                                    checked={aiDeepEdit}
+                                                    onChange={(event) => setAiDeepEdit(event.target.checked)}
+                                                    disabled={aiBusy}
+                                                />
+                                                Deep Edit (slower, tries and verifies alternatives; ignores image/PDF context)
+                                            </label>
                                             <button
                                                 type="button"
                                                 onClick={handleAiRequest}
                                                 disabled={aiBusy}
                                                 className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
-                                                {aiBusy ? 'Working...' : 'Generate Patch'}
+                                                {aiBusy ? 'Working...' : aiDeepEdit ? 'Deep Edit' : 'Generate Patch'}
                                             </button>
                                             {aiOutput && (
                                                 <div className="space-y-2">
@@ -16526,16 +16573,22 @@ ${partsBodyXml}
                                 const truncatedFields = Array.isArray(contextFlags?.truncated)
                                     ? contextFlags.truncated.filter((entry): entry is string => typeof entry === 'string')
                                     : [];
+                                const deepAudit = asRecord(aiProposalAudit.deepEdit);
+                                const deepCandidates = Array.isArray(deepAudit?.candidates) ? deepAudit.candidates.length : 0;
+                                const deepRationale = typeof deepAudit?.rationale === 'string' ? deepAudit.rationale.trim() : '';
                                 const statusParts = [
                                     typeof aiProposalAudit.cycle === 'number' ? `Cycle ${aiProposalAudit.cycle}` : '',
-                                    auditVerification?.level === 'patch_apply'
-                                        ? 'apply-verified'
-                                        : auditVerification?.level === 'tool_execution' ? 'tool-executed' : '',
+                                    typeof auditVerification?.level === 'string'
+                                        ? AI_PROPOSAL_VERIFICATION_LABELS[auditVerification.level] ?? ''
+                                        : '',
                                     typeof auditVerification?.attempts === 'number'
                                         ? `${auditVerification.attempts} attempt${auditVerification.attempts === 1 ? '' : 's'}`
                                         : '',
                                     typeof auditVerification?.llmCalls === 'number'
                                         ? `${auditVerification.llmCalls} LLM call${auditVerification.llmCalls === 1 ? '' : 's'}`
+                                        : '',
+                                    deepAudit && deepCandidates
+                                        ? `${deepCandidates} candidate${deepCandidates === 1 ? '' : 's'}`
                                         : '',
                                 ].filter(Boolean);
                                 const contextWarning = contextFlags?.previousCycleDropped === true
@@ -16551,6 +16604,12 @@ ${partsBodyXml}
                                         <span>{statusParts.join(' · ')}</span>
                                         {contextWarning && (
                                             <span className="ml-2 text-amber-700">{contextWarning}</span>
+                                        )}
+                                        {deepRationale && (
+                                            <details className="mt-1">
+                                                <summary className="cursor-pointer text-gray-500">Deep Edit rationale</summary>
+                                                <div className="mt-1 whitespace-pre-wrap text-gray-600">{deepRationale}</div>
+                                            </details>
                                         )}
                                     </div>
                                 );
