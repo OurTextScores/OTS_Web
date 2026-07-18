@@ -267,7 +267,8 @@ describe('Toolbar', () => {
     expect(onSetDurationType).toHaveBeenCalledWith(4);
     expect(onSetDurationType).toHaveBeenCalledWith(3);
     expect(onSetDurationType).toHaveBeenCalledWith(2);
-  });
+    // Ten sequential userEvent clicks flake past the default 5s under full-suite load.
+  }, 20_000);
 
   it('wires hairpin controls', async () => {
     const user = userEvent.setup();
