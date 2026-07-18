@@ -193,6 +193,62 @@ describe('runDeepEditService', () => {
     const audit = result.body.deepEdit as Record<string, any>;
     expect(audit.environment.engine).toBe('unavailable');
     expect(audit.candidates[0].engineError).toBeUndefined();
+    expect(audit.candidates[0].diff).toMatchObject({ changedCount: 1 });
+  });
+
+  it('rejects a patch that gives one note both rest and pitch origins', async () => {
+    const invalidPatch = {
+      format: 'musicxml-patch@1',
+      ops: [{
+        op: 'insertBefore',
+        path: '/score-partwise/part[@id="P1"]/measure[@number="1"]/note[1]/pitch',
+        value: '<rest/>',
+      }],
+    };
+    const driver: DeepEditDriver = async ({ executeTool }) => {
+      const applied = await executeTool('sandbox_apply_patch', {
+        baseCandidateId: 'base',
+        patch: invalidPatch,
+      });
+      expect(applied.ok).toBe(false);
+      expect(String(applied.error)).toContain('exactly one of <pitch>, <unpitched>, or <rest>');
+      return null;
+    };
+
+    const result = await runDeepEditService(request(), { driveAgent: driver });
+
+    expect(result.status).toBe(422);
+    expect((result.body.deepEdit as { candidates?: unknown[] }).candidates).toHaveLength(0);
+  });
+
+  it('does not finalize an identity-equivalent candidate', async () => {
+    const sameValuePatch = {
+      format: 'musicxml-patch@1',
+      ops: [{
+        op: 'setText',
+        path: '/score-partwise/part[@id="P1"]/measure[@number="1"]/note[1]/pitch/step',
+        value: 'C',
+      }],
+    };
+    const driver: DeepEditDriver = async ({ capability, executeTool }) => {
+      const applied = await executeTool('sandbox_apply_patch', {
+        baseCandidateId: 'base',
+        patch: sameValuePatch,
+      });
+      expect(applied.ok).toBe(true);
+      const finalized = await executeTool('finalize', {
+        candidateId: String(applied.candidateId),
+        rationale: 'No effective change.',
+      });
+      expect(finalized.ok).toBe(false);
+      expect(String(finalized.error)).toContain('identity-equivalent');
+      return capability.finalized();
+    };
+
+    const result = await runDeepEditService(request(), { driveAgent: driver });
+
+    expect(result.status).toBe(422);
+    expect(result.body.errorCategory).toBe('no_finalize');
   });
 
   it('fails a scoreops-born winner clearly when the engine it requires is unavailable', async () => {

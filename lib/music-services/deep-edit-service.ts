@@ -28,6 +28,7 @@ import { runHarmonyAnalyzeService } from './harmony-service';
 import { runMusicScoreOpsPreviewService } from './scoreops-service';
 import { randomUUID } from 'node:crypto';
 import { type TraceContext } from '../trace-http';
+import { findIntroducedMusicXmlStructuralIssues } from '../musicxml-structural-validation';
 
 // Phase 3 deep-edit loop (design §7): a bounded agent tries alternative edits against
 // capability-owned in-memory candidates, and the server-side finalize gate decides
@@ -44,7 +45,9 @@ export type DeepEditErrorCategory =
 export type DeepEditAudit = {
   finalizedCandidateId: string | null;
   rationale: string;
-  candidates: ReturnType<DeepEditCapability['auditCandidates']>;
+  candidates: Array<ReturnType<DeepEditCapability['auditCandidates']>[number] & {
+    diff: ReturnType<typeof summarizeMeasureDifferences>;
+  }>;
   counters: { llmCalls: number; toolCalls: number; renders: number };
   environment: DeepEditCapability['environment'];
   elapsedMs: number;
@@ -375,6 +378,10 @@ export async function executeSandboxTool(
       if (applied.error || !applied.xml.trim()) {
         return { ok: false, error: boundError(applied.error || 'Patch application returned empty MusicXML.') };
       }
+      const structuralIssues = findIntroducedMusicXmlStructuralIssues(baseXml, applied.xml);
+      if (structuralIssues.length) {
+        return { ok: false, error: boundError(`Patch introduced invalid MusicXML: ${structuralIssues[0].message}`) };
+      }
       const minted = capability.mintCandidate({
         parentId: sourceId,
         xml: applied.xml,
@@ -425,6 +432,10 @@ export async function executeSandboxTool(
           ? result.body.error
           : typeof detail?.message === 'string' ? detail.message : 'ScoreOps execution failed.';
         return { ok: false, error: boundError(message) };
+      }
+      const structuralIssues = findIntroducedMusicXmlStructuralIssues(baseXml, proposedXml);
+      if (structuralIssues.length) {
+        return { ok: false, error: boundError(`ScoreOps introduced invalid MusicXML: ${structuralIssues[0].message}`) };
       }
       const minted = capability.mintCandidate({
         parentId: sourceId,
@@ -607,6 +618,8 @@ const SANDBOX_INSTRUCTIONS = [
   'You are a MusicXML deep-edit agent working in an isolated sandbox.',
   'The user\'s current score is candidate "base". You cannot modify base or the user\'s score; you create candidates.',
   'Workflow: create one or more candidate edits, verify them, compare them, then call finalize with the best candidate id.',
+  'Do not finalize until the candidate materially satisfies the user\'s musical request. A formatting-only change or an unrelated duration/metadata edit is not success.',
+  'When changing a rest into a pitched note, replace the note origin: a MusicXML <note> must contain exactly one of <pitch>, <unpitched>, or <rest>, never both <rest> and <pitch>.',
   '',
   'Tools:',
   '- sandbox_apply_patch(baseCandidateId, patch): apply a musicxml-patch@1 JSON object to a candidate. Ops: replace, setText, setAttr, insertBefore, insertAfter, delete. Each XPath must match exactly one node. On failure you get the exact apply error; fix the patch and retry.',
@@ -673,6 +686,7 @@ const defaultDriver: (
     await run(agent, prompt, {
       maxTurns: capability.budgets.maxLlmCalls + 2,
       signal: capability.signal,
+      tracingDisabled: true,
     });
   } catch (error) {
     if (error instanceof DeepEditLlmBudgetError || capability.signal.aborted) {
@@ -791,7 +805,10 @@ export async function runDeepEditService(
   const auditFor = (finalizedCandidateId: string | null, rationale: string): DeepEditAudit => ({
     finalizedCandidateId,
     rationale,
-    candidates: capability.auditCandidates(),
+    candidates: capability.auditCandidates().map((candidate) => ({
+      ...candidate,
+      diff: summarizeMeasureDifferences(baseXml, capability.resolveXml(candidate.id) || baseXml),
+    })),
     counters: {
       llmCalls: capability.counters.llmCalls,
       toolCalls: capability.counters.toolCalls,
@@ -846,6 +863,13 @@ export async function runDeepEditService(
     const winner = capability.getCandidate(finalized.candidateId);
     if (!winner) {
       return errorResult(422, 'gate_failed', `Finalized candidate "${finalized.candidateId.slice(0, 32)}" does not exist.`, auditFor(null, finalized.rationale));
+    }
+    if (!capability.differsFromBase(winner.id)) {
+      return errorResult(422, 'gate_failed', 'Finalized candidate does not materially differ from the base score.', auditFor(winner.id, finalized.rationale));
+    }
+    const structuralIssues = findIntroducedMusicXmlStructuralIssues(baseXml, winner.xml);
+    if (structuralIssues.length) {
+      return errorResult(422, 'gate_failed', `Finalized candidate contains invalid MusicXML: ${structuralIssues[0].message}`, auditFor(winner.id, finalized.rationale));
     }
 
     // Feasibility gate: the winner must hold the strongest level attempted during the

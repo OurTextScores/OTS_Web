@@ -747,6 +747,99 @@ test.describe('Assistant diff editor flow', () => {
     await expect(page.getByTestId('ai-proposal-audit')).toContainText('Cycle 2');
   });
 
+  test('new-score deep edit and feedback use the same live MusicXML base', async ({ page }) => {
+    let deepRequest: Record<string, unknown> | null = null;
+    let feedbackRequest: Record<string, unknown> | null = null;
+    const proposalSessionId = 'sess-new-score-live-base';
+
+    await page.route('**/api/music/patch/deep', async (route) => {
+      deepRequest = route.request().postDataJSON();
+      const baseXml = String(deepRequest?.content || '');
+      const patch: MusicXmlPatch = {
+        format: 'musicxml-patch@1',
+        ops: [{
+          op: 'replace',
+          path: '/score-partwise/part[1]/measure[@number="1"]/note[1]',
+          value: '<note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>whole</type></note>',
+        }],
+      };
+      const applied = await applyMusicXmlPatch(baseXml, patch);
+      expect(applied.error).toBeFalsy();
+      const baseContentHash = scoreHash(baseXml);
+      const baseIdentityHash = computeMusicXmlIdentityHashServer(baseXml);
+      await route.fulfill({
+        status: 200,
+        body: JSON.stringify({
+          patch,
+          proposedXml: applied.xml,
+          proposalSessionId,
+          cycle: 1,
+          continuityToken: `pct-v1:${'cd'.repeat(32)}`,
+          proposal: {
+            sourceTool: 'music.deep_edit',
+            baseXml,
+            proposedXml: applied.xml,
+            baseScoreSessionId: null,
+            baseRevision: null,
+            baseContentHash,
+            expectedCurrentContentHash: baseContentHash,
+            baseIdentityHash,
+            expectedCurrentIdentityHash: baseIdentityHash,
+            proposedContentHash: scoreHash(applied.xml),
+            proposedIdentityHash: computeMusicXmlIdentityHashServer(applied.xml),
+            verification: { level: 'patch_apply', llmCalls: 2 },
+          },
+          verification: { level: 'patch_apply', llmCalls: 2, elapsedMs: 10 },
+          deepEdit: {
+            finalizedCandidateId: 'cand-1',
+            rationale: 'Replaced the opening rest with a pitched note.',
+            candidates: [{
+              id: 'cand-1',
+              parentId: 'base',
+              createdByTool: 'apply_patch',
+              verification: 'patch_apply',
+              scores: [],
+            }],
+            counters: { llmCalls: 2, toolCalls: 2, renders: 0 },
+            elapsedMs: 10,
+          },
+        }),
+      });
+    });
+    await page.route('**/api/music/diff/feedback', async (route) => {
+      feedbackRequest = route.request().postDataJSON();
+      await route.fulfill({
+        status: 502,
+        body: JSON.stringify({ error: 'deliberate test stop after request capture' }),
+      });
+    });
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'New Score' }).click();
+    await page.getByTestId('new-score-modal').waitFor();
+    await page.getByRole('button', { name: 'Create Score' }).click();
+    await page.waitForSelector('svg .Rest', { timeout: 60_000 });
+    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('tab-ai').click();
+    await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
+    await page.getByPlaceholder('Paste your key').fill('test-key');
+    await page.getByPlaceholder('Describe the change you want in the MusicXML.').fill('Replace the first rest with C4.');
+    await page.getByTestId('ai-deep-edit-toggle').check();
+    await page.getByRole('button', { name: 'Deep Edit' }).click();
+    await waitForDiffReviewReady(page);
+
+    await page.getByPlaceholder('Overall feedback for the next revision...').fill('Use D4 instead.');
+    await page.getByRole('button', { name: /Send Feedback/ }).first().click();
+    await expect.poll(() => feedbackRequest, { timeout: 20_000 }).not.toBeNull();
+
+    const generationBase = String(deepRequest?.content || '');
+    const feedbackBase = String(feedbackRequest?.content || '');
+    expect(feedbackBase).toBe(generationBase);
+    expect(computeMusicXmlIdentityHashServer(feedbackBase)).toBe(
+      computeMusicXmlIdentityHashServer(generationBase),
+    );
+  });
+
   test('deep edit failure shows the typed error and does not open compare', async ({ page }) => {
     await page.route('**/api/music/patch/deep', async (route) => {
       await route.fulfill({

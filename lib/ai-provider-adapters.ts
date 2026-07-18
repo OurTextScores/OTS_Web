@@ -227,7 +227,27 @@ const isRetryableProviderStatus = (status: number) => (
     status === 408 || status === 409 || status === 425 || status === 429 || status >= 500
 );
 
-const responseRequestError = (response: Response, message: string) => new AiProviderRequestError(message, {
+const providerErrorSummary = (value: string) => {
+    let summary = value;
+    try {
+        const parsed = JSON.parse(value) as Record<string, unknown>;
+        const error = parsed?.error && typeof parsed.error === 'object'
+            ? parsed.error as Record<string, unknown>
+            : null;
+        summary = typeof error?.message === 'string'
+            ? error.message
+            : typeof parsed?.message === 'string' ? parsed.message : value;
+    } catch {
+        // Provider errors are not consistently JSON.
+    }
+    return summary
+        .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[redacted]')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 1_000);
+};
+
+const responseRequestError = (response: Response, message: string) => new AiProviderRequestError(providerErrorSummary(message), {
     requestStarted: true,
     retryable: isRetryableProviderStatus(response.status),
     status: response.status,
@@ -507,9 +527,11 @@ export async function requestAiTextDirect({
             });
             if (!fallbackResponse.ok) {
                 const fallbackError = await fallbackResponse.text();
+                const responsesDetail = providerErrorSummary(errorText || `${providerLabel} request failed.`);
+                const fallbackDetail = providerErrorSummary(fallbackError || `${providerLabel} request failed.`);
                 throw responseRequestError(
                     fallbackResponse,
-                    fallbackError || errorText || `${providerLabel} request failed.`,
+                    `Responses API HTTP ${response.status}: ${responsesDetail}; Chat Completions fallback HTTP ${fallbackResponse.status}: ${fallbackDetail}`,
                 );
             }
             const fallbackData = await fallbackResponse.json();

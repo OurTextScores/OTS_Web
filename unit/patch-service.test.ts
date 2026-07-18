@@ -520,6 +520,8 @@ describe('generateApplyVerifiedPatch', () => {
     expect(result).toMatchObject({
       ok: false,
       status: 502,
+      error: 'AI provider request failed (HTTP 401): invalid credentials',
+      providerStatus: 401,
       verification: { attempts: 0, llmCalls: 1 },
     });
     expect(requestText).toHaveBeenCalledTimes(1);
@@ -577,6 +579,28 @@ describe('generateApplyVerifiedPatch', () => {
 describe('requestAiTextDirect error metadata', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('preserves both Responses and Chat fallback rejection details', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { message: 'This model requires a different input shape.' },
+      }), { status: 400 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { message: 'This model is unavailable on Chat Completions.' },
+      }), { status: 404 }));
+
+    await expect(requestAiTextDirect({
+      provider: 'openai',
+      apiKey: 'sk-test',
+      model: 'gpt-4.1',
+      promptText: 'test',
+      systemPrompt: 'test',
+      maxTokens: null,
+    })).rejects.toMatchObject({
+      status: 404,
+      message: expect.stringContaining('Responses API HTTP 400: This model requires a different input shape.'),
+    });
   });
 
   it('marks capability failures as not started and non-retryable', async () => {

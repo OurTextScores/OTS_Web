@@ -8692,7 +8692,16 @@ ${partsBodyXml}
         let failureReason = '';
         try {
             const promptSections: AiPromptSection[] = [];
-            const xmlContext = aiIncludeXml ? await resolveXmlContext() : '';
+            // Proposal identity and later Apply/feedback gates must use the same live
+            // webmscore serialization. The XML sidebar can briefly retain the source
+            // representation after a new score is loaded.
+            const baseXml = await getScoreMusicXmlText(scoreRef.current ?? score, xmlText || null) || '';
+            if (!baseXml.trim()) {
+                failureReason = 'Unable to load MusicXML for patch verification.';
+                setAiError(failureReason);
+                return;
+            }
+            const xmlContext = aiIncludeXml ? baseXml : '';
             if (aiIncludeXml && !xmlContext.trim()) {
                 alert('Unable to load MusicXML for context.');
                 return;
@@ -8750,12 +8759,6 @@ ${partsBodyXml}
                 : null;
             if (aiIncludeRenderedImage && !imageAttachment) {
                 console.warn('Rendered image context requested, but PNG capture is unavailable.');
-            }
-            const baseXml = aiIncludeXml ? xmlContext : await resolveXmlContext();
-            if (!baseXml.trim()) {
-                failureReason = 'Unable to load MusicXML for patch verification.';
-                setAiError(failureReason);
-                return;
             }
             setAiBaseXml(baseXml);
             const maxTokens = aiMaxTokensMode === 'custom' ? aiMaxTokens : null;

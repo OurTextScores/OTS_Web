@@ -235,10 +235,20 @@ export const loadWebMscoreInProcess = async (): Promise<WebMscoreInstance> => {
 
     inProcessInitPromise = (async () => {
         ensureBrowserMscoreScriptUrl();
-        const inProcessImport = typeof window === 'undefined'
-            ? await import('../webmscore-fork/web-public/src/nodejs.js')
-            : await import('../webmscore-fork/web-public/src/index.js');
-        const resolved = resolveWebMscore(inProcessImport as unknown);
+        const originalFetch = globalThis.fetch;
+        let inProcessImport: unknown;
+        try {
+            inProcessImport = typeof window === 'undefined'
+                ? await import('../webmscore-fork/web-public/src/nodejs.js')
+                : await import('../webmscore-fork/web-public/src/index.js');
+        } finally {
+            // The vendored Node shim clears global fetch during module evaluation.
+            // Keep that compatibility behavior local to webmscore initialization.
+            if (typeof originalFetch === 'function' && typeof globalThis.fetch !== 'function') {
+                globalThis.fetch = originalFetch;
+            }
+        }
+        const resolved = resolveWebMscore(inProcessImport);
         await resolved.ready;
         inProcessWebMscore = resolved;
         inProcessInitialized = true;

@@ -537,6 +537,7 @@ export type GenerateApplyVerifiedPatchResult = {
   ok: false;
   status: 422 | 502 | 504;
   error: string;
+  providerStatus?: number | null;
   failures: PatchAttemptFailure[];
   verification: PatchApplyVerification;
 };
@@ -719,6 +720,15 @@ const MAX_FAILURE_MESSAGE_CHARS = 2_000;
 
 const boundFailureMessage = (message: string) => message.slice(0, MAX_FAILURE_MESSAGE_CHARS);
 
+const providerFailureMessage = (error: unknown) => {
+  if (!(error instanceof AiProviderRequestError)) {
+    return 'AI provider request failed.';
+  }
+  const detail = boundFailureMessage(error.message.replace(/\s+/g, ' ').trim());
+  const status = error.status === null ? '' : ` (HTTP ${error.status})`;
+  return detail ? `AI provider request failed${status}: ${detail}` : `AI provider request failed${status}.`;
+};
+
 const verificationFor = (startedAt: number, attempts: number, llmCalls: number): PatchApplyVerification => ({
   level: 'patch_apply',
   attempts,
@@ -775,7 +785,7 @@ export async function generateApplyVerifiedPatch(
     for (let transportAttempt = 0; transportAttempt <= transportRetries; transportAttempt += 1) {
       const remainingMs = deadlineAt - Date.now();
       if (remainingMs <= 0 || args.signal?.aborted) {
-        return { text: '', error: 'Music patch generation exceeded its request budget.', status: 504 as const };
+        return { text: '', error: 'Music patch generation exceeded its request budget.', status: 504 as const, providerStatus: null };
       }
 
       const controller = new AbortController();
@@ -803,19 +813,20 @@ export async function generateApplyVerifiedPatch(
             llmCalls += 1;
           },
         });
-        return { text, error: '', status: 200 as const };
+        return { text, error: '', status: 200 as const, providerStatus: null };
       } catch (error) {
         lastError = error;
         const deadlineExpired = Date.now() >= deadlineAt || args.signal?.aborted;
         if (deadlineExpired) {
-          return { text: '', error: 'Music patch generation exceeded its request budget.', status: 504 as const };
+          return { text: '', error: 'Music patch generation exceeded its request budget.', status: 504 as const, providerStatus: null };
         }
         const canRetry = transportAttempt < transportRetries && (timedOut || isRetryableTransportError(error));
         if (!canRetry) {
           return {
             text: '',
-            error: timedOut ? 'AI provider request timed out.' : 'AI provider request failed.',
+            error: timedOut ? 'AI provider request timed out.' : providerFailureMessage(error),
             status: timedOut ? 504 as const : 502 as const,
+            providerStatus: error instanceof AiProviderRequestError ? error.status : null,
           };
         }
         await sleep(Math.min(transportRetryDelayMs, Math.max(0, deadlineAt - Date.now())));
@@ -828,6 +839,7 @@ export async function generateApplyVerifiedPatch(
       text: '',
       error: lastError ? 'AI provider request failed.' : 'Music patch generation failed.',
       status: 502 as const,
+      providerStatus: lastError instanceof AiProviderRequestError ? lastError.status : null,
     };
   };
 
@@ -842,6 +854,7 @@ export async function generateApplyVerifiedPatch(
         ok: false,
         status: response.status,
         error: response.error,
+        providerStatus: response.providerStatus,
         failures,
         verification: verificationFor(startedAt, attempts, llmCalls),
       };
@@ -1108,6 +1121,7 @@ export async function runMusicPatchService(
         status: generated.status,
         body: {
           error: generated.error,
+          ...(generated.providerStatus !== undefined ? { providerStatus: generated.providerStatus } : {}),
           verification: generated.verification,
           failures: generated.failures,
         },

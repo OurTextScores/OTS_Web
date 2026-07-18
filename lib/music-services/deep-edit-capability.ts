@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { MusicXmlPatch } from './patch-service';
+import { canonicalizeMusicXmlIdentity } from '../musicxml-identity';
 
 // Phase 3 containment object (design §7). One instance per deep-edit request owns the
 // base snapshot, every candidate, and every budget counter. Candidate ids are minted
@@ -79,6 +80,7 @@ export class DeepEditCapability {
   private strongestAttempted: DeepEditVerificationLevel = 'tool_execution';
   private budgetDenials = new Set<string>();
   private finalizedState: { candidateId: string; rationale: string } | null = null;
+  private readonly baseIdentity: string;
 
   /**
    * Availability of the environment-dependent verification backends. webmscore and the
@@ -95,6 +97,7 @@ export class DeepEditCapability {
   constructor(args: { baseXml: string; budgets: DeepEditBudgets; parentSignal?: AbortSignal }) {
     this.requestId = randomUUID();
     this.baseXml = args.baseXml;
+    this.baseIdentity = canonicalizeMusicXmlIdentity(args.baseXml);
     this.budgets = args.budgets;
     this.counters = { llmCalls: 0, toolCalls: 0, renders: 0, candidateBytes: 0 };
     this.deadlineAt = Date.now() + args.budgets.budgetMs;
@@ -179,6 +182,12 @@ export class DeepEditCapability {
         error: `"${candidateId.slice(0, 64)}" is not a live candidate id; finalize requires a candidate you created.`,
       };
     }
+    if (!this.differsFromBase(candidateId)) {
+      return {
+        ok: false,
+        error: `"${candidateId.slice(0, 64)}" is identity-equivalent to base; create a material edit before finalizing.`,
+      };
+    }
     this.finalizedState = { candidateId, rationale };
     return { ok: true };
   }
@@ -201,6 +210,11 @@ export class DeepEditCapability {
 
   getCandidate(id: string): DeepEditCandidate | null {
     return this.candidates.get(id) ?? null;
+  }
+
+  differsFromBase(candidateId: string): boolean {
+    const candidate = this.candidates.get(candidateId);
+    return Boolean(candidate && canonicalizeMusicXmlIdentity(candidate.xml) !== this.baseIdentity);
   }
 
   mintCandidate(args: {

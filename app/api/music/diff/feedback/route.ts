@@ -72,6 +72,7 @@ export async function POST(request: Request) {
       verificationLevel: typeof verification?.level === 'string' ? verification.level : null,
       attempts: typeof verification?.attempts === 'number' ? verification.attempts : null,
       llmCalls: typeof verification?.llmCalls === 'number' ? verification.llmCalls : null,
+      providerStatus: typeof result.body.providerStatus === 'number' ? result.body.providerStatus : null,
       errorCategory: status < 400 ? null : status === 400 ? 'request' : status === 422 ? 'verification' : status === 504 ? 'timeout' : 'provider',
     };
     const response = NextResponse.json(result.body, { status: result.status });
