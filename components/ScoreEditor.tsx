@@ -9119,10 +9119,15 @@ ${partsBodyXml}
             const resultPayload = asRecord(parsedResult);
             const resultBody = asRecord(resultPayload?.body) || resultPayload;
             const editProposal = findAiEditProposal(parsedResult);
+            let hasSpecificPatchError = false;
+            const reportSpecificPatchError = (message: string) => {
+                hasSpecificPatchError = true;
+                setMusicAgentPatchError(message);
+            };
             const openAgentEditProposal = (proposal: AiEditProposal) => {
                 setAiBaseXml(proposal.baseXml);
                 if (!openAiProposalCompare(proposal.baseXml, proposal.proposedXml, proposal)) {
-                    setMusicAgentPatchError('The Agent returned an invalid edit proposal.');
+                    reportSpecificPatchError('The Agent returned an invalid edit proposal.');
                     return false;
                 }
                 setXmlSidebarTab('assistant');
@@ -9137,13 +9142,13 @@ ${partsBodyXml}
                     if (parsedPatch.patch) {
                         setMusicAgentPatch(parsedPatch.patch);
                     } else {
-                        setMusicAgentPatchError(parsedPatch.error || 'Agent returned an invalid patch payload.');
+                        reportSpecificPatchError(parsedPatch.error || 'Agent returned an invalid patch payload.');
                     }
                 }
                 if (editProposal) {
                     openAgentEditProposal(editProposal);
                 } else if (response.ok && !resultBody?.error) {
-                    setMusicAgentPatchError('The Agent did not return a verified edit proposal.');
+                    reportSpecificPatchError('The Agent did not return a verified edit proposal.');
                 }
             } else if (selectedTool === 'music.diff_feedback') {
                 const bodyPayload = resultBody;
@@ -9154,7 +9159,7 @@ ${partsBodyXml}
                     if (parsedPatch.patch) {
                         setMusicAgentPatch(parsedPatch.patch);
                     } else {
-                        setMusicAgentPatchError(parsedPatch.error || 'Diff feedback returned an invalid patch payload.');
+                        reportSpecificPatchError(parsedPatch.error || 'Diff feedback returned an invalid patch payload.');
                     }
                 }
                 if (proposedXml.trim()) {
@@ -9166,32 +9171,32 @@ ${partsBodyXml}
                         setAiDiffIteration(bodyPayload.iteration);
                     }
                 } else if (typeof bodyPayload?.error === 'string' && bodyPayload.error.trim()) {
-                    setMusicAgentPatchError(bodyPayload.error.trim());
+                    reportSpecificPatchError(bodyPayload.error.trim());
                 }
             } else if (selectedTool === 'music.scoreops') {
                 if (editProposal) {
                     openAgentEditProposal(editProposal);
                 } else if (response.ok && !resultBody?.error) {
-                    setMusicAgentPatchError('ScoreOps did not return a verified edit proposal.');
+                    reportSpecificPatchError('ScoreOps did not return a verified edit proposal.');
                 }
             } else if (selectedTool === 'music.harmony_analyze') {
                 if (shouldApplyAnalysisResult && editProposal) {
                     openAgentEditProposal(editProposal);
                 } else if (shouldApplyAnalysisResult && response.ok && !resultBody?.error) {
-                    setMusicAgentPatchError('Harmony analysis did not return a verified edit proposal.');
+                    reportSpecificPatchError('Harmony analysis did not return a verified edit proposal.');
                 }
             } else if (selectedTool === 'music.functional_harmony_analyze') {
                 if (shouldApplyAnalysisResult && editProposal) {
                     openAgentEditProposal(editProposal);
                 } else if (shouldApplyAnalysisResult && response.ok && !resultBody?.error) {
-                    setMusicAgentPatchError('Functional harmony analysis did not return a verified edit proposal.');
+                    reportSpecificPatchError('Functional harmony analysis did not return a verified edit proposal.');
                 }
             }
 
             const resultBodyError = asRecord(resultBody?.error);
-            if (typeof resultBodyError?.message === 'string' && resultBodyError.message.trim()) {
+            if (!hasSpecificPatchError && typeof resultBodyError?.message === 'string' && resultBodyError.message.trim()) {
                 setMusicAgentPatchError(resultBodyError.message.trim());
-            } else if (typeof resultBody?.error === 'string' && resultBody.error.trim()) {
+            } else if (!hasSpecificPatchError && typeof resultBody?.error === 'string' && resultBody.error.trim()) {
                 setMusicAgentPatchError(resultBody.error.trim());
             }
 

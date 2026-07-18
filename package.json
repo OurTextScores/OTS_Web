@@ -5,7 +5,7 @@
   "scripts": {
     "predev": "npm run check:wasm",
     "dev": "NEXT_DIST_DIR=.next-dev-${USER:-local} next dev --webpack",
-    "prebuild": "npm run check:wasm",
+    "prebuild": "npm run check:wasm && npm run check:score-editor-globals",
     "build": "next build --webpack",
     "build:local": "npm run typecheck && SKIP_NEXT_TYPECHECK=1 NODE_OPTIONS=--max-old-space-size=4096 npm run build",
     "build:embed": "node scripts/build-embed.js",
@@ -20,6 +20,7 @@
     "test:e2e:music": "playwright test tests/music-api-smoke.spec.ts --workers=1",
     "coverage": "vitest run --coverage",
     "check:wasm": "node scripts/check-wasm-cli.js",
+    "check:score-editor-globals": "eslint components/ScoreEditor.tsx --quiet --rule '@typescript-eslint/no-explicit-any: off' --rule 'no-undef: error' --global RequestInit --global BlobPart",
     "sync:wasm": "node scripts/sync-wasm-cli.js",
     "generate:data": "node scripts/generate-static-data.js",
     "audit:ai-models": "node scripts/audit-ai-models.mjs",

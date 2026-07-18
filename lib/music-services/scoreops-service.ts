@@ -2768,7 +2768,7 @@ async function applyOps(payload: z.infer<typeof APPLY_REQUEST_SCHEMA>): Promise<
       ok: true,
       mutationMode,
       scoreSessionId: session.scoreSessionId || null,
-      baseRevision: session.revision,
+      baseRevision: session.scoreSessionId ? session.revision : null,
       state: {
         artifactId: session.artifactId,
         contentHash: session.contentHash,

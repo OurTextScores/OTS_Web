@@ -314,6 +314,7 @@ describe('runMusicScoreOpsService', () => {
     expect(preview.status).toBe(200);
     expect(preview.body).toMatchObject({
       scoreSessionId: null,
+      baseRevision: null,
       proposal: {
         baseScoreSessionId: null,
         baseRevision: null,

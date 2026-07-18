@@ -153,3 +153,42 @@ test('Music Agent proposal blocks a partial Apply when the expected hash is stal
   );
   expect(state.getSyncCount()).toBe(state.syncCountBeforeAgent);
 });
+
+test('Music Agent preserves a specific patch error over a generic result error', async ({ page }) => {
+  await page.route('**/api/music/scoreops/session/open', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ scoreSessionId: 'proposal-error-session', revision: 0 }),
+    });
+  });
+  await page.route('**/api/music/agent', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        selectedTool: 'music.patch',
+        result: {
+          body: {
+            patch: { format: 'unsupported-patch', ops: [] },
+            error: { message: 'Generic provider failure.' },
+          },
+        },
+      }),
+    });
+  });
+
+  await page.goto('/?score=/test_scores/three_notes_cde.musicxml', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('svg .Note', { timeout: 60_000 });
+  const openSidebar = page.getByRole('button', { name: 'Open MusicXML sidebar' });
+  if (await openSidebar.isVisible()) {
+    await openSidebar.click();
+  }
+  await page.getByTestId('tab-ai').click();
+  await page.getByRole('button', { name: 'Agent' }).click();
+  await page.getByPlaceholder('Describe what you want the agent to do.').fill('Change the first note.');
+  await page.getByRole('button', { name: 'Send to Agent' }).click();
+
+  await expect(page.getByText('AI response is not a musicxml-patch@1 payload.')).toBeVisible();
+  await expect(page.getByText('Generic provider failure.')).not.toBeVisible();
+});

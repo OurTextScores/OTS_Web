@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Route } from '@playwright/test';
 import { computeMusicXmlIdentityHashServer } from '../lib/musicxml-identity-server';
+import { applyMusicXmlPatch, type MusicXmlPatch } from '../lib/music-services/patch-service';
 
 const OPENAI_MODELS_RESPONSE = {
   models: ['gpt-test-model'],
@@ -10,7 +11,16 @@ const OPENAI_MODELS_RESPONSE = {
 const SCORE_SESSION_ID = 'sess_assistant_diff_test';
 const scoreHash = (xml: string) => `sha256:${createHash('sha256').update(xml, 'utf8').digest('hex')}`;
 
-const PATCH_RESPONSE = {
+const PATCH_RESPONSE: {
+  patch: MusicXmlPatch;
+  annotations: unknown[];
+  verification: {
+    level: 'patch_apply';
+    attempts: number;
+    llmCalls: number;
+    elapsedMs: number;
+  };
+} = {
   patch: {
     format: 'musicxml-patch@1',
     ops: [
@@ -22,7 +32,6 @@ const PATCH_RESPONSE = {
     ],
   },
   annotations: [],
-  proposedXml: '',
   verification: {
     level: 'patch_apply',
     attempts: 1,
@@ -82,7 +91,34 @@ const buildThreeNotesXml = (firstStep: string) => `<?xml version="1.0" encoding=
   </part>
 </score-partwise>`;
 
-PATCH_RESPONSE.proposedXml = buildThreeNotesXml('G');
+const fulfillPatchFromRequestBase = async (route: Route) => {
+  const request = route.request().postDataJSON();
+  const baseXml = String(request?.content || '');
+  const applied = await applyMusicXmlPatch(baseXml, PATCH_RESPONSE.patch);
+  expect(applied.error).toBeFalsy();
+  expect(applied.xml).toContain('<step>G</step>');
+  const baseContentHash = scoreHash(baseXml);
+  const baseIdentityHash = computeMusicXmlIdentityHashServer(baseXml);
+  await route.fulfill({
+    status: 200,
+    body: JSON.stringify({
+      ...PATCH_RESPONSE,
+      proposedXml: applied.xml,
+      proposal: {
+        sourceTool: 'music.patch',
+        baseXml,
+        proposedXml: applied.xml,
+        baseScoreSessionId: null,
+        baseRevision: null,
+        baseContentHash,
+        expectedCurrentContentHash: baseContentHash,
+        baseIdentityHash,
+        expectedCurrentIdentityHash: baseIdentityHash,
+        verification: PATCH_RESPONSE.verification,
+      },
+    }),
+  });
+};
 
 const buildDiffFeedbackResponse = (step: string, iteration: number) => ({
   scoreSessionId: SCORE_SESSION_ID,
@@ -271,9 +307,7 @@ test.describe('Assistant diff editor flow', () => {
   });
 
   test('per-block apply applies the reviewed block immediately', async ({ page }) => {
-    await page.route('**/api/music/patch', async (route) => {
-      await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
-    });
+    await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
 
     await openAssistantProposalCompare(page);
     await expect.poll(() => countHighlights(page), { timeout: 20_000 }).toBeGreaterThan(0);
@@ -285,9 +319,7 @@ test.describe('Assistant diff editor flow', () => {
   });
 
   test('per-block reject marks block and leaves score unchanged', async ({ page }) => {
-    await page.route('**/api/music/patch', async (route) => {
-      await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
-    });
+    await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
 
     await openAssistantProposalCompare(page);
     const before = await countHighlights(page);
@@ -299,9 +331,7 @@ test.describe('Assistant diff editor flow', () => {
   });
 
   test('per-block comment reveals input and stores text', async ({ page }) => {
-    await page.route('**/api/music/patch', async (route) => {
-      await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
-    });
+    await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
 
     await openAssistantProposalCompare(page);
 
@@ -323,9 +353,7 @@ test.describe('Assistant diff editor flow', () => {
       releaseFeedback = resolve;
     });
 
-    await page.route('**/api/music/patch', async (route) => {
-      await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
-    });
+    await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
     await page.route('**/api/music/diff/feedback', async (route) => {
       feedbackCalls += 1;
       lastFeedbackPayload = route.request().postDataJSON();
@@ -357,9 +385,7 @@ test.describe('Assistant diff editor flow', () => {
   test('global comment is sent in diff feedback request', async ({ page }) => {
     let capturedGlobalComment = '';
 
-    await page.route('**/api/music/patch', async (route) => {
-      await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
-    });
+    await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
     await page.route('**/api/music/diff/feedback', async (route) => {
       const payload = route.request().postDataJSON();
       capturedGlobalComment = String(payload.globalComment || '');
@@ -383,9 +409,7 @@ test.describe('Assistant diff editor flow', () => {
     let callCount = 0;
     const requests: any[] = [];
 
-    await page.route('**/api/music/patch', async (route) => {
-      await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
-    });
+    await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
     await page.route('**/api/music/diff/feedback', async (route) => {
       callCount += 1;
       requests.push(route.request().postDataJSON());
