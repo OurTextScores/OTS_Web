@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { computeMusicXmlIdentityHashServer } from '../lib/musicxml-identity-server';
 import { computeScoreHash } from '../lib/music-services/scoreops-session-store';
 import {
+  createProposalContinuityToken,
   evaluateProposalLineage,
   parseProposalSessionContext,
+  verifyProposalContinuityToken,
   type ProposalPreviousCycle,
 } from '../lib/music-services/proposal-session-context';
 
@@ -147,6 +149,13 @@ describe('parseProposalSessionContext', () => {
 });
 
 describe('evaluateProposalLineage', () => {
+  const SESSION = { proposalSessionId: 'sess-lineage-1', cycle: 1 };
+  const tokenFor = (base: string, proposed: string) => createProposalContinuityToken({
+    proposalSessionId: SESSION.proposalSessionId,
+    cycle: SESSION.cycle,
+    baseContentHash: computeScoreHash(base),
+    proposedContentHash: computeScoreHash(proposed),
+  });
   const previousCycle = (overrides: Partial<ProposalPreviousCycle> = {}): ProposalPreviousCycle => ({
     cycle: 1,
     baseContentHash: computeScoreHash(BASE_XML),
@@ -155,40 +164,78 @@ describe('evaluateProposalLineage', () => {
     proposedIdentityHash: computeMusicXmlIdentityHashServer(PROPOSED_XML),
     expectedCurrentContentHash: null,
     expectedCurrentIdentityHash: null,
+    continuityToken: null,
     patchJson: '',
     annotations: [],
     ...overrides,
   });
 
   it('returns none without a previous cycle', () => {
-    expect(evaluateProposalLineage(BASE_XML, null)).toBe('none');
+    expect(evaluateProposalLineage(BASE_XML, null)).toEqual({ lineage: 'none', continuity: 'none' });
   });
 
-  it('verifies when current equals the previous base (nothing applied)', () => {
-    expect(evaluateProposalLineage(BASE_XML, previousCycle())).toBe('verified');
+  it('marks a base match as client_attested when no continuity token is present', () => {
+    expect(evaluateProposalLineage(BASE_XML, previousCycle(), SESSION))
+      .toEqual({ lineage: 'client_attested', continuity: 'client' });
   });
 
-  it('verifies when current equals the previous proposal (all applied)', () => {
-    expect(evaluateProposalLineage(PROPOSED_XML, previousCycle())).toBe('verified');
+  it('verifies base and proposal matches when the server continuity token checks out', () => {
+    const withToken = previousCycle({ continuityToken: tokenFor(BASE_XML, PROPOSED_XML) });
+    expect(evaluateProposalLineage(BASE_XML, withToken, SESSION))
+      .toEqual({ lineage: 'verified', continuity: 'server' });
+    expect(evaluateProposalLineage(PROPOSED_XML, withToken, SESSION))
+      .toEqual({ lineage: 'verified', continuity: 'server' });
   });
 
-  it('verifies a partial-apply state via the expected-current hash', () => {
-    expect(evaluateProposalLineage(OTHER_XML, previousCycle({
+  it('keeps a partial-apply expectation match client_attested even with a valid token', () => {
+    const result = evaluateProposalLineage(OTHER_XML, previousCycle({
+      continuityToken: tokenFor(BASE_XML, PROPOSED_XML),
       expectedCurrentContentHash: computeScoreHash(OTHER_XML),
-    }))).toBe('verified');
+    }), SESSION);
+    expect(result).toEqual({ lineage: 'client_attested', continuity: 'server' });
   });
 
-  it('verifies via identity hash when raw bytes drifted', () => {
+  it('treats a token bound to different hashes or session as client continuity', () => {
+    const foreignToken = createProposalContinuityToken({
+      proposalSessionId: 'someone-else',
+      cycle: 1,
+      baseContentHash: computeScoreHash(BASE_XML),
+      proposedContentHash: computeScoreHash(PROPOSED_XML),
+    });
+    expect(evaluateProposalLineage(BASE_XML, previousCycle({ continuityToken: foreignToken }), SESSION))
+      .toEqual({ lineage: 'client_attested', continuity: 'client' });
+  });
+
+  it('matches identity hashes when raw bytes drifted', () => {
     const reserialized = `${BASE_XML}\n`;
     expect(computeScoreHash(reserialized)).not.toBe(computeScoreHash(BASE_XML));
-    expect(evaluateProposalLineage(reserialized, previousCycle())).toBe('verified');
+    expect(evaluateProposalLineage(reserialized, previousCycle(), SESSION).lineage).toBe('client_attested');
   });
 
   it('reports mismatch when no hash matches', () => {
-    expect(evaluateProposalLineage(OTHER_XML, previousCycle())).toBe('mismatch');
+    expect(evaluateProposalLineage(OTHER_XML, previousCycle(), SESSION).lineage).toBe('mismatch');
   });
 
   it('reports mismatch for unparseable current XML instead of throwing', () => {
-    expect(evaluateProposalLineage('<score-partwise><unclosed>', previousCycle())).toBe('mismatch');
+    expect(evaluateProposalLineage('<score-partwise><unclosed>', previousCycle(), SESSION).lineage).toBe('mismatch');
+  });
+});
+
+describe('continuity tokens', () => {
+  it('round-trips and rejects tampering', () => {
+    const args = {
+      proposalSessionId: 'sess-token-1',
+      cycle: 2,
+      baseContentHash: computeScoreHash(BASE_XML),
+      proposedContentHash: computeScoreHash(PROPOSED_XML),
+    };
+    const token = createProposalContinuityToken(args);
+    expect(token).toMatch(/^pct-v1:[0-9a-f]{64}$/);
+    expect(verifyProposalContinuityToken(token, args)).toBe(true);
+    expect(verifyProposalContinuityToken(token, { ...args, cycle: 3 })).toBe(false);
+    expect(verifyProposalContinuityToken(token, { ...args, proposalSessionId: 'other' })).toBe(false);
+    const tampered = `${token.slice(0, -1)}${token.endsWith('0') ? '1' : '0'}`;
+    expect(verifyProposalContinuityToken(tampered, args)).toBe(false);
+    expect(verifyProposalContinuityToken(null, args)).toBe(false);
   });
 });

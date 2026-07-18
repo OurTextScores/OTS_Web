@@ -5,6 +5,7 @@ import {
   runMusicPatchService,
 } from './patch-service';
 import {
+  createProposalContinuityToken,
   evaluateProposalLineage,
   parseProposalSessionContext,
   type ProposalContextFlags,
@@ -262,7 +263,13 @@ export async function runDiffFeedbackService(
   }
   const proposalContext = parsedContext.context;
   const contextFlags: ProposalContextFlags = { ...parsedContext.flags };
-  contextFlags.lineage = evaluateProposalLineage(resolution.xml, proposalContext?.previousCycle ?? null);
+  const lineageResult = evaluateProposalLineage(
+    resolution.xml,
+    proposalContext?.previousCycle ?? null,
+    proposalContext ? { proposalSessionId: proposalContext.id, cycle: proposalContext.cycle } : undefined,
+  );
+  contextFlags.lineage = lineageResult.lineage;
+  contextFlags.continuity = lineageResult.continuity;
   // Design decision: a lineage mismatch degrades gracefully. The previous-cycle patch and
   // annotations describe a proposal against a different score state, so they are dropped;
   // the original instruction and standing constraints are lineage-independent user intent
@@ -335,6 +342,18 @@ export async function runDiffFeedbackService(
     };
   }
 
+  const proposalEnvelope = asRecord(patchResult.body.proposal);
+  const continuityToken = proposalEnvelope
+    && typeof proposalEnvelope.baseContentHash === 'string'
+    && typeof proposalEnvelope.proposedContentHash === 'string'
+    ? createProposalContinuityToken({
+      proposalSessionId,
+      cycle: newCycle,
+      baseContentHash: proposalEnvelope.baseContentHash,
+      proposedContentHash: proposalEnvelope.proposedContentHash,
+    })
+    : null;
+
   return {
     status: 200,
     body: {
@@ -344,9 +363,10 @@ export async function runDiffFeedbackService(
       patch: patchPayload,
       annotations: Array.isArray(patchResult.body.annotations) ? patchResult.body.annotations : [],
       proposedXml,
-      ...(asRecord(patchResult.body.proposal) ? { proposal: patchResult.body.proposal } : {}),
+      ...(proposalEnvelope ? { proposal: patchResult.body.proposal } : {}),
       proposalSessionId,
       cycle: newCycle,
+      ...(continuityToken ? { continuityToken } : {}),
       audit,
       failures: Array.isArray(patchResult.body.failures) ? patchResult.body.failures : [],
       verification: patchResult.body.verification,

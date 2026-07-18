@@ -21,6 +21,7 @@ vi.mock('../lib/music-services/patch-service', () => ({
 }));
 
 import { buildFeedbackPrompt, runDiffFeedbackService } from '../lib/music-services/diff-feedback-service';
+import { createProposalContinuityToken } from '../lib/music-services/proposal-session-context';
 import { computeScoreHash } from '../lib/music-services/scoreops-session-store';
 import { computeMusicXmlIdentityHashServer } from '../lib/musicxml-identity-server';
 
@@ -200,7 +201,8 @@ describe('diff-feedback-service', () => {
         feedbackCounts: { accepted: 0, rejected: 0, revise: 1, pending: 0 },
         proposalContext: {
           provided: true,
-          lineage: 'verified',
+          lineage: 'client_attested',
+          continuity: 'client',
           previousCycleDropped: false,
           truncated: [],
         },
@@ -224,8 +226,47 @@ describe('diff-feedback-service', () => {
 
     expect(result.status).toBe(200);
     const audit = result.body.audit as Record<string, any>;
-    expect(audit.proposalContext.lineage).toBe('verified');
+    expect(audit.proposalContext.lineage).toBe('client_attested');
     expect(audit.proposalContext.previousCycleDropped).toBe(false);
+  });
+
+  it('reports verified lineage and issues a fresh continuity token when the chain is server-signed', async () => {
+    mocked.runMusicPatchService.mockResolvedValue({
+      status: 200,
+      body: {
+        ...successPatchBody().body,
+        proposal: {
+          sourceTool: 'music.patch',
+          baseXml: SESSION_BASE_XML,
+          proposedXml: SESSION_PROPOSED_XML,
+          baseContentHash: computeScoreHash(SESSION_BASE_XML),
+          proposedContentHash: computeScoreHash(SESSION_PROPOSED_XML),
+        },
+      },
+    });
+    const context = proposalSessionInput(SESSION_BASE_XML);
+    (context.previousCycle as Record<string, unknown>).continuityToken = createProposalContinuityToken({
+      proposalSessionId: context.id,
+      cycle: 1,
+      baseContentHash: computeScoreHash(SESSION_BASE_XML),
+      proposedContentHash: computeScoreHash(SESSION_PROPOSED_XML),
+    });
+
+    const result = await runDiffFeedbackService({
+      content: SESSION_BASE_XML,
+      iteration: 0,
+      provider: 'openai',
+      model: 'gpt-5.5',
+      apiKey: 'sk-test',
+      blocks: [{ partIndex: 0, measureRange: '1-1', status: 'pending' }],
+      proposalSession: context,
+    });
+
+    expect(result.status).toBe(200);
+    const audit = result.body.audit as Record<string, any>;
+    expect(audit.proposalContext.lineage).toBe('verified');
+    expect(audit.proposalContext.continuity).toBe('server');
+    expect(String(result.body.continuityToken)).toMatch(/^pct-v1:[0-9a-f]{64}$/);
   });
 
   it('drops the previous cycle but keeps instruction and constraints on a lineage mismatch', async () => {

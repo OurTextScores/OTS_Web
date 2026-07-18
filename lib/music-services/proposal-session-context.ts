@@ -1,3 +1,4 @@
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { extractPatchAnnotations, type PatchAnnotation } from '../patch-annotations';
 import { computeMusicXmlIdentityHashServer } from '../musicxml-identity-server';
 import { computeScoreHash } from './scoreops-session-store';
@@ -23,6 +24,7 @@ export type ProposalPreviousCycle = {
   proposedIdentityHash: string | null;
   expectedCurrentContentHash: string | null;
   expectedCurrentIdentityHash: string | null;
+  continuityToken: string | null;
   patchJson: string;
   annotations: PatchAnnotation[];
 };
@@ -35,9 +37,13 @@ export type ProposalSessionContext = {
   constraints: ProposalSessionConstraint[];
 };
 
+export type ProposalLineage = 'verified' | 'client_attested' | 'mismatch' | 'none';
+export type ProposalContinuity = 'server' | 'client' | 'none';
+
 export type ProposalContextFlags = {
   provided: boolean;
-  lineage: 'verified' | 'mismatch' | 'none';
+  lineage: ProposalLineage;
+  continuity: ProposalContinuity;
   previousCycleDropped: boolean;
   truncated: string[];
 };
@@ -83,9 +89,57 @@ export type ParseProposalSessionContextResult =
 const emptyFlags = (): ProposalContextFlags => ({
   provided: false,
   lineage: 'none',
+  continuity: 'none',
   previousCycleDropped: false,
   truncated: [],
 });
+
+// Stateless continuity signing. The token binds a session id, cycle number, and the
+// base/proposed hashes the server actually returned, so a later feedback request can prove
+// its previous-cycle chain came from this server rather than being client-invented. The
+// key is env-provided for multi-instance deployments; the per-process fallback degrades
+// gracefully to client-attested continuity after a restart (never a hard failure).
+const CONTINUITY_TOKEN_PATTERN = /^pct-v1:[0-9a-f]{64}$/;
+
+const continuityKeyGlobal = globalThis as typeof globalThis & {
+  __otsProposalContinuityKey?: Buffer;
+};
+
+const continuityKey = (): Buffer => {
+  const envSecret = (process.env.MUSIC_PROPOSAL_CONTINUITY_SECRET || '').trim();
+  if (envSecret) {
+    return Buffer.from(envSecret, 'utf8');
+  }
+  if (!continuityKeyGlobal.__otsProposalContinuityKey) {
+    continuityKeyGlobal.__otsProposalContinuityKey = randomBytes(32);
+  }
+  return continuityKeyGlobal.__otsProposalContinuityKey;
+};
+
+export function createProposalContinuityToken(args: {
+  proposalSessionId: string;
+  cycle: number;
+  baseContentHash: string;
+  proposedContentHash: string;
+}): string {
+  const digest = createHmac('sha256', continuityKey())
+    .update(`pct-v1|${args.proposalSessionId}|${args.cycle}|${args.baseContentHash}|${args.proposedContentHash}`, 'utf8')
+    .digest('hex');
+  return `pct-v1:${digest}`;
+}
+
+export function verifyProposalContinuityToken(token: string | null, args: {
+  proposalSessionId: string;
+  cycle: number;
+  baseContentHash: string;
+  proposedContentHash: string;
+}): boolean {
+  if (!token || !CONTINUITY_TOKEN_PATTERN.test(token)) {
+    return false;
+  }
+  const expected = createProposalContinuityToken(args);
+  return timingSafeEqual(Buffer.from(token, 'utf8'), Buffer.from(expected, 'utf8'));
+}
 
 /**
  * Validate and bound the client-supplied `proposalSession` request field.
@@ -197,6 +251,7 @@ export function parseProposalSessionContext(
       proposedIdentityHash: readOptionalHash(prev.proposedIdentityHash, IDENTITY_HASH_PATTERN),
       expectedCurrentContentHash: readOptionalHash(prev.expectedCurrentContentHash, RAW_HASH_PATTERN),
       expectedCurrentIdentityHash: readOptionalHash(prev.expectedCurrentIdentityHash, IDENTITY_HASH_PATTERN),
+      continuityToken: readOptionalHash(prev.continuityToken, CONTINUITY_TOKEN_PATTERN),
       patchJson,
       annotations,
     };
@@ -272,43 +327,67 @@ export function parseProposalSessionContext(
   };
 }
 
+const matchesAny = (value: string, candidates: Array<string | null>) => (
+  candidates.some((candidate) => candidate !== null && candidate === value)
+);
+
 /**
  * Lineage check for the previous cycle against the authoritative current XML.
  * Legitimate states: current equals the previous base (nothing applied), the previous
  * proposal (all applied), or the client's tracked partial-Apply expectation. A mismatch of
  * every raw and identity hash means an unrelated edit occurred; the caller drops the
  * previous-cycle context (design decision: degrade, flag, never block).
+ *
+ * Honesty of the result depends on who attested the hashes:
+ * - `continuity: 'server'` — the request's continuity token proves the base/proposed
+ *   hashes were issued by this server for this session and cycle. A current match against
+ *   those hashes is `verified`.
+ * - `continuity: 'client'` — no valid token; every hash is a client claim. A match is
+ *   reported as `client_attested`, never `verified`.
+ * - The partial-Apply expectation is tracked by the client's Apply gate, so a match
+ *   against only the expected-current hash is `client_attested` even with a valid token.
  */
 export function evaluateProposalLineage(
   currentXml: string,
   previousCycle: ProposalPreviousCycle | null,
-): 'verified' | 'mismatch' | 'none' {
+  session?: { proposalSessionId: string; cycle: number },
+): { lineage: ProposalLineage; continuity: ProposalContinuity } {
   if (!previousCycle) {
-    return 'none';
+    return { lineage: 'none', continuity: 'none' };
   }
-  const rawCandidates = [
-    previousCycle.expectedCurrentContentHash,
-    previousCycle.proposedContentHash,
-    previousCycle.baseContentHash,
-  ].filter((hash): hash is string => Boolean(hash));
+  const continuity: ProposalContinuity = session && verifyProposalContinuityToken(previousCycle.continuityToken, {
+    proposalSessionId: session.proposalSessionId,
+    cycle: session.cycle,
+    baseContentHash: previousCycle.baseContentHash,
+    proposedContentHash: previousCycle.proposedContentHash,
+  }) ? 'server' : 'client';
+
   const currentRawHash = computeScoreHash(currentXml);
-  if (rawCandidates.includes(currentRawHash)) {
-    return 'verified';
-  }
-  const identityCandidates = [
-    previousCycle.expectedCurrentIdentityHash,
-    previousCycle.proposedIdentityHash,
-    previousCycle.baseIdentityHash,
-  ].filter((hash): hash is string => Boolean(hash));
-  if (identityCandidates.length) {
+  let currentIdentityHash: string | null = null;
+  const identityCandidatesPresent = Boolean(
+    previousCycle.baseIdentityHash
+    || previousCycle.proposedIdentityHash
+    || previousCycle.expectedCurrentIdentityHash,
+  );
+  if (identityCandidatesPresent) {
     try {
-      const currentIdentityHash = computeMusicXmlIdentityHashServer(currentXml);
-      if (identityCandidates.includes(currentIdentityHash)) {
-        return 'verified';
-      }
+      currentIdentityHash = computeMusicXmlIdentityHashServer(currentXml);
     } catch {
-      // Unparseable current XML cannot confirm lineage; fall through to mismatch.
+      // Unparseable current XML cannot confirm identity-level lineage.
     }
   }
-  return 'mismatch';
+
+  const matchesAttested = matchesAny(currentRawHash, [previousCycle.baseContentHash, previousCycle.proposedContentHash])
+    || (currentIdentityHash !== null
+      && matchesAny(currentIdentityHash, [previousCycle.baseIdentityHash, previousCycle.proposedIdentityHash]));
+  if (matchesAttested) {
+    return { lineage: continuity === 'server' ? 'verified' : 'client_attested', continuity };
+  }
+  const matchesExpectation = matchesAny(currentRawHash, [previousCycle.expectedCurrentContentHash])
+    || (currentIdentityHash !== null
+      && matchesAny(currentIdentityHash, [previousCycle.expectedCurrentIdentityHash]));
+  if (matchesExpectation) {
+    return { lineage: 'client_attested', continuity };
+  }
+  return { lineage: 'mismatch', continuity };
 }

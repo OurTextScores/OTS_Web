@@ -6704,12 +6704,14 @@ ${partsBodyXml}
         try {
             // The session snapshot (not the live sidebar toggle) decides chat inclusion; a
             // lazily created session adopts the current iteration so the server's
-            // cycle-consistency check holds for pre-session compare views.
+            // cycle-consistency check holds for pre-session compare views. A cycle that no
+            // longer matches the iteration counter means local state diverged, so the
+            // previous-cycle claim is dropped rather than relabeled with a new cycle.
             const existingSession = aiProposalSessionRef.current;
             const proposalSession: ClientProposalSession = existingSession
                 ? (existingSession.cycle === aiDiffIteration + 1
                     ? existingSession
-                    : { ...existingSession, cycle: aiDiffIteration + 1 })
+                    : { ...existingSession, cycle: aiDiffIteration + 1, previousCycle: null })
                 : {
                     ...createClientProposalSession({
                         originalInstruction: aiPrompt.trim(),
@@ -6796,6 +6798,7 @@ ${partsBodyXml}
                 proposal: editProposal,
                 patch: parsedPatch.patch,
                 annotations: revisionAnnotations,
+                continuityToken: result.continuityToken,
                 sentBlocks: allFeedbackBlocks,
                 sentGlobalComment: aiDiffGlobalComment,
             });
@@ -8807,6 +8810,7 @@ ${partsBodyXml}
                 proposal: serviceProposal,
                 patch: parsedPatch.patch,
                 annotations,
+                continuityToken: result.continuityToken,
             });
             setAiProposalAudit({ cycle: 1, verification: result.verification });
             outcome = 'success';
@@ -9201,6 +9205,7 @@ ${partsBodyXml}
                     proposal,
                     patch: asRecord(resultBody?.patch),
                     annotations: extractPatchAnnotations({ annotations: resultBody?.annotations }),
+                    continuityToken: resultBody?.continuityToken,
                 });
                 setAiProposalAudit({ cycle: 1, verification: proposal.verification });
                 return true;

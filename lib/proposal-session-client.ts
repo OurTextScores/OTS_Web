@@ -19,6 +19,7 @@ export type ClientProposalPreviousCycle = {
   baseIdentityHash: string | null;
   proposedContentHash: string;
   proposedIdentityHash: string | null;
+  continuityToken: string | null;
   patch: unknown | null;
   annotations: PatchAnnotation[];
 };
@@ -57,6 +58,7 @@ const buildPreviousCycle = (
   proposal: ProposalHashSource,
   patch: unknown | null,
   annotations: PatchAnnotation[],
+  continuityToken: unknown,
 ): ClientProposalPreviousCycle | null => {
   const baseContentHash = readHash(proposal?.baseContentHash);
   const proposedContentHash = readHash(proposal?.proposedContentHash);
@@ -69,6 +71,7 @@ const buildPreviousCycle = (
     baseIdentityHash: readHash(proposal?.baseIdentityHash),
     proposedContentHash,
     proposedIdentityHash: readHash(proposal?.proposedIdentityHash),
+    continuityToken: readHash(continuityToken),
     patch: patch ?? null,
     annotations,
   };
@@ -81,13 +84,14 @@ export function createClientProposalSession(args: {
   proposal?: ProposalHashSource;
   patch?: unknown | null;
   annotations?: PatchAnnotation[];
+  continuityToken?: unknown;
 }): ClientProposalSession {
   return {
     id: (typeof args.id === 'string' && args.id.trim()) ? args.id.trim() : fallbackSessionId(),
     originalInstruction: args.originalInstruction,
     includeChat: args.includeChat,
     cycle: 1,
-    previousCycle: buildPreviousCycle(1, args.proposal, args.patch ?? null, args.annotations ?? []),
+    previousCycle: buildPreviousCycle(1, args.proposal, args.patch ?? null, args.annotations ?? [], args.continuityToken),
     constraints: [],
   };
 }
@@ -162,18 +166,21 @@ export function advanceClientProposalSession(session: ClientProposalSession, arg
   proposal?: ProposalHashSource;
   patch?: unknown | null;
   annotations?: PatchAnnotation[];
+  continuityToken?: unknown;
   sentBlocks: SentFeedbackBlock[];
   sentGlobalComment: string;
 }): ClientProposalSession {
   const revisedCycle = session.cycle;
-  const newCycle = typeof args.newCycle === 'number' && Number.isInteger(args.newCycle) && args.newCycle > session.cycle
+  // Only the exact successor cycle is a valid transition; anything else means local state
+  // diverged from the server, so keep counting locally rather than adopting the jump.
+  const newCycle = typeof args.newCycle === 'number' && args.newCycle === session.cycle + 1
     ? args.newCycle
     : session.cycle + 1;
   return {
     ...session,
     id: (typeof args.responseId === 'string' && args.responseId.trim()) ? args.responseId.trim() : session.id,
     cycle: newCycle,
-    previousCycle: buildPreviousCycle(newCycle, args.proposal, args.patch ?? null, args.annotations ?? []),
+    previousCycle: buildPreviousCycle(newCycle, args.proposal, args.patch ?? null, args.annotations ?? [], args.continuityToken),
     constraints: accumulateProposalConstraints(
       session.constraints,
       revisedCycle,
@@ -206,6 +213,7 @@ export function buildProposalSessionRequestPayload(
         proposedIdentityHash: session.previousCycle.proposedIdentityHash,
         expectedCurrentContentHash: expectedCurrent.contentHash,
         expectedCurrentIdentityHash: expectedCurrent.identityHash,
+        continuityToken: session.previousCycle.continuityToken,
         patch: session.previousCycle.patch,
         annotations: session.previousCycle.annotations,
       },

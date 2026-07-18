@@ -23,6 +23,7 @@ import { summarizeScoreArtifact } from '../score-artifacts';
 import { type TraceContext } from '../trace-http';
 import { asRecord, looksLikeMusicXml, resolvedScoreSnapshot, resolveScoreContent } from './common';
 import { buildAiEditProposal } from './ai-edit-proposal';
+import { createProposalContinuityToken } from './proposal-session-context';
 
 type PatchServiceResult = {
   status: number;
@@ -1120,6 +1121,15 @@ export async function runMusicPatchService(
       proposedXml: generated.proposedXml,
       verification: generated.verification,
     });
+    const proposalSessionId = randomUUID();
+    const continuityToken = proposal
+      ? createProposalContinuityToken({
+        proposalSessionId,
+        cycle: 1,
+        baseContentHash: proposal.baseContentHash,
+        proposedContentHash: proposal.proposedContentHash,
+      })
+      : null;
 
     return {
       status: 200,
@@ -1138,8 +1148,9 @@ export async function runMusicPatchService(
         annotations: generated.annotations,
         proposedXml: generated.proposedXml,
         ...(proposal ? { proposal } : {}),
-        proposalSessionId: randomUUID(),
+        proposalSessionId,
         cycle: 1,
+        ...(continuityToken ? { continuityToken } : {}),
         failures: generated.failures,
         verification: generated.verification,
       },
