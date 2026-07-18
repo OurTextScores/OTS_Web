@@ -2,6 +2,7 @@ import {
     convertMusicNotation,
     ensureKernMusicXmlConversionToolsAvailable,
     ensureMusicConversionToolsAvailable,
+    isMusicFormat,
     normalizeMusicFormat,
     type MusicConversionHealthProbeResult,
     runMusicConversionHealthProbe,
@@ -344,7 +345,9 @@ export async function runMusicConvertService(body: unknown, options?: ConvertSer
             inputContent = resolution.xml;
             inputArtifact = resolution.artifact;
             session = resolution.session;
-            inferredFormat = inputArtifact?.format ?? inferTextFormat(inputContent);
+            inferredFormat = isMusicFormat(inputArtifact?.format)
+                ? inputArtifact.format
+                : inferTextFormat(inputContent);
         }
     }
 

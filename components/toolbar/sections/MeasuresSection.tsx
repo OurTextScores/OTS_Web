@@ -3,7 +3,7 @@ import { Button } from '../../ui/Button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { ToolbarSectionProps } from '../types';
 import { toolbarInputBaseClass } from '../constants';
-import { MeasureInsertTarget } from '../Toolbar';
+import { MeasureInsertTarget } from '../../Toolbar';
 import { Plus, Trash2, ListStart } from 'lucide-react';
 
 export const MeasuresSection: React.FC<ToolbarSectionProps> = ({

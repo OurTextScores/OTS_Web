@@ -21,7 +21,7 @@ const redirectTo = (location: string, status = 302) =>
     new Response(null, { status, headers: { location } });
 
 const okBody = (bytes: Uint8Array, contentType = 'application/xml') =>
-    new Response(bytes, { status: 200, headers: { 'content-type': contentType } });
+    new Response(new Uint8Array(bytes).buffer, { status: 200, headers: { 'content-type': contentType } });
 
 describe('fetch-score route — SSRF & size hardening (M1)', () => {
     beforeEach(() => {

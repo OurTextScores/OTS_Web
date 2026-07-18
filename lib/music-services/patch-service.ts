@@ -18,7 +18,11 @@ import {
   type AiModelRequestCapabilities,
 } from '../ai-model-capabilities';
 import { allowServerCredentialFallback } from '../api-access-control';
-import { extractPatchAnnotations, PATCH_ANNOTATIONS_INSTRUCTION } from '../patch-annotations';
+import {
+  extractPatchAnnotations,
+  PATCH_ANNOTATIONS_INSTRUCTION,
+  type PatchAnnotation,
+} from '../patch-annotations';
 import { summarizeScoreArtifact } from '../score-artifacts';
 import { type TraceContext } from '../trace-http';
 import { asRecord, looksLikeMusicXml, resolvedScoreSnapshot, resolveScoreContent } from './common';
@@ -180,7 +184,11 @@ ${PATCH_ANNOTATIONS_INSTRUCTION}`;
     : [{ title: 'Patch Format Requirements', content: patchSpec }]);
 };
 
-export const parseMusicXmlPatch = (text: string) => {
+export const parseMusicXmlPatch = (text: string): {
+  patch: MusicXmlPatch | null;
+  annotations?: PatchAnnotation[];
+  error: string;
+} => {
   if (!text.trim()) {
     return { patch: null as MusicXmlPatch | null, error: 'AI response is empty.' };
   }

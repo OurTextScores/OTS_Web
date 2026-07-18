@@ -1,4 +1,11 @@
-import { Agent, run, tool, type AgentInputItem, type Model } from '@openai/agents';
+import {
+  Agent,
+  run,
+  tool,
+  type AgentInputItem,
+  type Model,
+  type ToolInputParameters,
+} from '@openai/agents';
 import { aisdk } from '@openai/agents-extensions';
 import { OpenAIResponsesModel } from '@openai/agents-openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
@@ -110,7 +117,6 @@ function extractTextFromPrompt(prompt: string | AgentInputItem[]): string {
   return prompt
     .map((item) => {
       if ('text' in item) return item.text;
-      if ('type' in item && item.type === 'input_text') return (item as any).text;
       return '';
     })
     .filter(Boolean)
@@ -127,11 +133,12 @@ const MAX_TOOL_RESULT_CHARS = 100000;
  */
 function summarizeForModel(
   fullResult: Record<string, unknown>,
-  runContext: { context: MusicAgentRunnerContext } | undefined,
+  runContext: unknown,
 ): Record<string, unknown> {
   // Store the full result for later injection into the structured output
-  if (runContext?.context) {
-    runContext.context.lastToolResult = fullResult;
+  const context = asRecord(asRecord(runContext)?.context) as MusicAgentRunnerContext | null;
+  if (context) {
+    context.lastToolResult = fullResult;
   }
 
   const serialized = JSON.stringify(fullResult);
@@ -657,7 +664,14 @@ async function runFallbackRouter(
       };
     }
 
-    const scoreOpsPayload = {
+    const scoreOpsPayload: Record<string, unknown> & {
+      scoreSessionId?: string;
+      baseRevision?: number;
+      inputArtifactId?: string;
+      input_artifact_id?: string;
+      content?: string;
+      text?: string;
+    } = {
       ...scoreOpsDefaults,
       mutationMode: 'proposal',
       prompt: typeof scoreOpsDefaults.prompt === 'string' && scoreOpsDefaults.prompt.trim()
@@ -802,10 +816,16 @@ async function runFallbackRouter(
 }
 
 function createMusicRouterAgent() {
+  // Contracts use our runtime-validated JSON Schema type. The SDK accepts the same
+  // shape, but its nominal schema type is not structurally compatible.
+  type NonStrictToolParameters = Extract<ToolInputParameters, { additionalProperties: true }>;
+  const toolParameters = (schema: unknown): NonStrictToolParameters => (
+    schema as NonStrictToolParameters
+  );
   const musicContextTool = tool({
     name: MUSIC_CONTEXT_TOOL_CONTRACT.name,
     description: MUSIC_CONTEXT_TOOL_CONTRACT.description,
-    parameters: MUSIC_CONTEXT_TOOL_CONTRACT.inputSchema,
+    parameters: toolParameters(MUSIC_CONTEXT_TOOL_CONTRACT.inputSchema),
     strict: false,
     execute: async (input, runContext) => {
       console.info('[music-agent] Tool called: music.context');
@@ -835,7 +855,7 @@ function createMusicRouterAgent() {
   const musicConvertTool = tool({
     name: MUSIC_CONVERT_TOOL_CONTRACT.name,
     description: MUSIC_CONVERT_TOOL_CONTRACT.description,
-    parameters: MUSIC_CONVERT_TOOL_CONTRACT.inputSchema,
+    parameters: toolParameters(MUSIC_CONVERT_TOOL_CONTRACT.inputSchema),
     strict: false,
     execute: async (input, runContext) => {
       console.info('[music-agent] Tool called: music.convert');
@@ -863,7 +883,7 @@ function createMusicRouterAgent() {
   const musicDiffFeedbackTool = tool({
     name: MUSIC_DIFF_FEEDBACK_TOOL_CONTRACT.name,
     description: MUSIC_DIFF_FEEDBACK_TOOL_CONTRACT.description,
-    parameters: MUSIC_DIFF_FEEDBACK_TOOL_CONTRACT.inputSchema,
+    parameters: toolParameters(MUSIC_DIFF_FEEDBACK_TOOL_CONTRACT.inputSchema),
     strict: false,
     execute: async (input, runContext) => {
       console.info('[music-agent] Tool called: music.diff_feedback');
@@ -894,7 +914,7 @@ function createMusicRouterAgent() {
   const musicGenerateTool = tool({
     name: MUSIC_GENERATE_TOOL_CONTRACT.name,
     description: MUSIC_GENERATE_TOOL_CONTRACT.description,
-    parameters: MUSIC_GENERATE_TOOL_CONTRACT.inputSchema,
+    parameters: toolParameters(MUSIC_GENERATE_TOOL_CONTRACT.inputSchema),
     strict: false,
     execute: async (input, runContext) => {
       console.info('[music-agent] Tool called: music.generate');
@@ -919,7 +939,7 @@ function createMusicRouterAgent() {
   const musicHarmonyAnalyzeTool = tool({
     name: MUSIC_HARMONY_ANALYZE_TOOL_CONTRACT.name,
     description: MUSIC_HARMONY_ANALYZE_TOOL_CONTRACT.description,
-    parameters: MUSIC_HARMONY_ANALYZE_TOOL_CONTRACT.inputSchema,
+    parameters: toolParameters(MUSIC_HARMONY_ANALYZE_TOOL_CONTRACT.inputSchema),
     strict: false,
     execute: async (input, runContext) => {
       console.info('[music-agent] Tool called: music.harmony_analyze');
@@ -959,7 +979,7 @@ function createMusicRouterAgent() {
   const musicFunctionalHarmonyAnalyzeTool = tool({
     name: MUSIC_FUNCTIONAL_HARMONY_ANALYZE_TOOL_CONTRACT.name,
     description: MUSIC_FUNCTIONAL_HARMONY_ANALYZE_TOOL_CONTRACT.description,
-    parameters: MUSIC_FUNCTIONAL_HARMONY_ANALYZE_TOOL_CONTRACT.inputSchema,
+    parameters: toolParameters(MUSIC_FUNCTIONAL_HARMONY_ANALYZE_TOOL_CONTRACT.inputSchema),
     strict: false,
     execute: async (input, runContext) => {
       console.info('[music-agent] Tool called: music.functional_harmony_analyze');
@@ -998,7 +1018,7 @@ function createMusicRouterAgent() {
   const musicPatchTool = tool({
     name: MUSIC_PATCH_TOOL_CONTRACT.name,
     description: MUSIC_PATCH_TOOL_CONTRACT.description,
-    parameters: MUSIC_PATCH_TOOL_CONTRACT.inputSchema,
+    parameters: toolParameters(MUSIC_PATCH_TOOL_CONTRACT.inputSchema),
     strict: false,
     execute: async (input, runContext) => {
       console.info('[music-agent] Tool called: music.patch');
@@ -1033,7 +1053,7 @@ function createMusicRouterAgent() {
   const musicScoreOpsTool = tool({
     name: MUSIC_SCOREOPS_TOOL_CONTRACT.name,
     description: MUSIC_SCOREOPS_TOOL_CONTRACT.description,
-    parameters: MUSIC_SCOREOPS_TOOL_CONTRACT.inputSchema,
+    parameters: toolParameters(MUSIC_SCOREOPS_TOOL_CONTRACT.inputSchema),
     strict: false,
     execute: async (input, runContext) => {
       console.info('[music-agent] Tool called: music.scoreops');
@@ -1076,7 +1096,7 @@ function createMusicRouterAgent() {
         if (toolTrace) {
           traceLog(toolTrace, 'music_agent.scoreops.direct_ops.result', {
             status: result.status,
-            hasOutput: Boolean(result.body?.output?.content),
+            hasOutput: Boolean(asRecord(asRecord(result.body)?.output)?.content),
             bodyKeys: Object.keys(result.body || {}),
           });
         }
@@ -1113,7 +1133,7 @@ function createMusicRouterAgent() {
   const musicRenderTool = tool({
     name: MUSIC_RENDER_TOOL_CONTRACT.name,
     description: MUSIC_RENDER_TOOL_CONTRACT.description,
-    parameters: MUSIC_RENDER_TOOL_CONTRACT.inputSchema,
+    parameters: toolParameters(MUSIC_RENDER_TOOL_CONTRACT.inputSchema),
     strict: false,
     execute: async (input, runContext) => {
       console.info('[music-agent] Tool called: music.render');
@@ -1325,8 +1345,9 @@ export async function runMusicAgentRouter(
   if (data?.scoreSessionId) {
     const sessionId = String(data.scoreSessionId);
     const revision = Number(data.revision ?? data.baseRevision ?? 0);
+    const baseInstructions = typeof agent.instructions === 'string' ? agent.instructions : '';
     agent.instructions = [
-      ...agent.instructions.split('\n'),
+      ...baseInstructions.split('\n'),
       '',
       `IMPORTANT: You are operating on an active score session: ${sessionId} (revision ${revision}).`,
       'Tools will automatically reference this session if you do not provide explicit content.',

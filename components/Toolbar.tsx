@@ -24,7 +24,7 @@ export type MeasureInsertTarget = 'beginning' | 'after-selection' | 'end';
 export type HeaderTextTarget = 'title' | 'subtitle' | 'composer' | 'lyricist';
 export type HeaderEditorPoint = { clientX: number; clientY: number };
 
-interface InstrumentTemplate {
+export interface InstrumentTemplate {
     id: string;
     name: string;
     groupId?: string;
@@ -35,13 +35,13 @@ interface InstrumentTemplate {
     isExtended?: boolean;
 }
 
-interface InstrumentTemplateGroup {
+export interface InstrumentTemplateGroup {
     id: string;
     name: string;
     instruments: InstrumentTemplate[];
 }
 
-interface PartSummary {
+export interface PartSummary {
     index: number;
     name: string;
     instrumentName: string;
@@ -49,7 +49,7 @@ interface PartSummary {
     isVisible: boolean;
 }
 
-export interface ToolbarProps extends ToolbarSectionProps {}
+export type ToolbarProps = ToolbarSectionProps;
 
 const SECTION_COMPONENTS: Record<ToolbarSectionId, { label: string; bgColor: string; Component: React.FC<ToolbarSectionProps> }> = {
     file: { label: 'File', bgColor: 'bg-blue-50/40', Component: FileSection },

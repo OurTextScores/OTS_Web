@@ -7,16 +7,14 @@ import {
 } from '../lib/editor-analytics';
 
 describe('editor analytics helper', () => {
-    const originalNodeEnv = process.env.NODE_ENV;
-
     beforeEach(() => {
-        process.env.NODE_ENV = 'development';
+        vi.stubEnv('NODE_ENV', 'development');
         sessionStorage.clear();
         vi.restoreAllMocks();
     });
 
     afterEach(() => {
-        process.env.NODE_ENV = originalNodeEnv;
+        vi.unstubAllEnvs();
     });
 
     it('extracts request/trace ids from response headers', () => {

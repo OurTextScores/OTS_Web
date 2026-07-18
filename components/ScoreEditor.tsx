@@ -6,7 +6,15 @@ import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { LoaderCircle, Square } from 'lucide-react';
-import { loadWebMscore, loadWebMscoreInProcess, Score, InputFileFormat, Positions, type LayoutProgressState } from '../lib/webmscore-loader';
+import {
+    loadWebMscore,
+    loadWebMscoreInProcess,
+    Score,
+    InputFileFormat,
+    Positions,
+    type LayoutProgressState,
+    type WebMscoreInstance,
+} from '../lib/webmscore-loader';
 import {
     deleteCheckpoint,
     getCheckpoint,
@@ -109,7 +117,8 @@ type SelectionBox = {
     h: number;
     centerX: number;
     centerY: number;
-    classes: string;
+    classes?: string;
+    isMeasureBbox?: boolean;
 };
 
 type SelectionFallback = {
@@ -305,13 +314,13 @@ export function buildPartLocalizedChangeReviewHighlights(
         }
         const rawWidth = typeof element.sx === 'number'
             ? element.sx
-            : typeof (element as { width?: number }).width === 'number'
-                ? (element as { width?: number }).width
+            : typeof element.width === 'number'
+                ? element.width
                 : 0;
         const rawHeight = typeof element.sy === 'number'
             ? element.sy
-            : typeof (element as { height?: number }).height === 'number'
-                ? (element as { height?: number }).height
+            : typeof element.height === 'number'
+                ? element.height
                 : 0;
         const partHeight = rawHeight / partCount;
         const needsPageOffset = pageHeight > 0
@@ -350,13 +359,13 @@ export function buildPartLocalizedChangeReviewBarHighlights(
         }
         const rawWidth = typeof element.sx === 'number'
             ? element.sx
-            : typeof (element as { width?: number }).width === 'number'
-                ? (element as { width?: number }).width
+            : typeof element.width === 'number'
+                ? element.width
                 : 0;
         const rawHeight = typeof element.sy === 'number'
             ? element.sy
-            : typeof (element as { height?: number }).height === 'number'
-                ? (element as { height?: number }).height
+            : typeof element.height === 'number'
+                ? element.height
                 : 0;
         const partHeight = rawHeight / partCount;
         const needsPageOffset = pageHeight > 0
@@ -481,7 +490,11 @@ type MutationMethods = Pick<
     | 'selectElementAtPointWithMode'
     | 'selectNextChord'
     | 'selectPrevChord'
+    | 'extendSelectionNextChord'
+    | 'extendSelectionPrevChord'
+    | 'selectAll'
     | 'getSelectionBoundingBox'
+    | 'getSelectionBoundingBoxes'
     | 'clearSelection'
     | 'selectionMimeType'
     | 'selectionMimeData'
@@ -856,7 +869,7 @@ const hasMutationApi = (score: Score | null): score is Score & MutationMethods =
         return false;
     }
 
-    const candidate = score as Record<string, unknown>;
+    const candidate = score as unknown as Record<string, unknown>;
     return Boolean(
         candidate.deleteSelection
         || candidate.undo
@@ -946,6 +959,9 @@ const encodeBase64 = (data: Uint8Array) => {
     }
     throw new Error('No base64 encoder available in this environment.');
 };
+
+const toOwnedBytes = (data: Uint8Array): Uint8Array<ArrayBuffer> => new Uint8Array(data);
+const toOwnedArrayBuffer = (data: Uint8Array): ArrayBuffer => toOwnedBytes(data).buffer;
 
 const buildAiChatTranscript = (messages: AiChatMessage[]) => {
     const recentMessages = messages.slice(-AI_CHAT_CONTEXT_MAX_MESSAGES);
@@ -1266,7 +1282,7 @@ export default function ScoreEditor() {
     const [compareContinuousMode, setCompareContinuousMode] = useState(false);
     const [compareReflowMode, setCompareReflowMode] = useState(false);
     const compareLayoutRestoreRef = useRef<number | null>(null);
-    const compareLineBreakRestoreRef = useRef<{ current: boolean[]; checkpoint: boolean[] } | null>(null);
+    const compareLineBreakRestoreRef = useRef<{ left: boolean[]; right: boolean[] } | null>(null);
     const compareLeftContainerRef = useRef<HTMLDivElement>(null);
     const compareRightContainerRef = useRef<HTMLDivElement>(null);
     const compareLeftWrapperRef = useRef<HTMLDivElement>(null);
@@ -1336,7 +1352,7 @@ export default function ScoreEditor() {
     const [aiModel, setAiModel] = useState('');
     const [aiApiKey, setAiApiKey] = useState('');
     const [musicNotaGenBackend, setMusicNotaGenBackend] = useState<'huggingface' | 'huggingface-space'>(
-        MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_BACKEND === 'huggingface-space' ? 'huggingface-space' : 'huggingface',
+        MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_BACKEND,
     );
     const [musicNotaGenModelId, setMusicNotaGenModelId] = useState(MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_MODEL);
     const [musicNotaGenRevision, setMusicNotaGenRevision] = useState(MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_REVISION);
@@ -1597,7 +1613,7 @@ export default function ScoreEditor() {
         data: Uint8Array,
         logStage?: (stage: string, extra?: unknown) => void,
     ) => {
-        let resolvedEngine = await resolveWebMscoreEngine();
+        let resolvedEngine: { webMscore: WebMscoreInstance; mode: 'worker' | 'in_process' } = await resolveWebMscoreEngine();
         try {
             const workerData = resolvedEngine.mode === 'worker' ? data.slice() : data;
             const loadResult = await loadScoreWithInitialLayout(resolvedEngine.webMscore, format, workerData);
@@ -3080,7 +3096,7 @@ export default function ScoreEditor() {
         positions: Positions | null,
         clientX: number,
         clientY: number,
-        wrapperRef: React.RefObject<HTMLDivElement>,
+        wrapperRef: React.RefObject<HTMLDivElement | null>,
         zoom: number,
     ): number => {
         if (!positions?.elements.length || !wrapperRef.current) return -1;
@@ -3310,8 +3326,8 @@ export default function ScoreEditor() {
                 }
                 const rawHeight = typeof element.sy === 'number'
                     ? element.sy
-                    : typeof (element as { height?: number }).height === 'number'
-                        ? (element as { height?: number }).height
+                    : typeof element.height === 'number'
+                        ? element.height
                         : 0;
                 const needsPageOffset = pageHeight > 0
                     && element.page > 0
@@ -3336,8 +3352,8 @@ export default function ScoreEditor() {
         return positions.elements.map((element) => {
             const rawHeight = typeof element.sy === 'number'
                 ? element.sy
-                : typeof (element as { height?: number }).height === 'number'
-                    ? (element as { height?: number }).height
+                : typeof element.height === 'number'
+                    ? element.height
                     : 0;
             const needsPageOffset = pageHeight > 0
                 && element.page > 0
@@ -3417,13 +3433,13 @@ export default function ScoreEditor() {
             }
             const rawWidth = typeof element.sx === 'number'
                 ? element.sx
-                : typeof (element as { width?: number }).width === 'number'
-                    ? (element as { width?: number }).width
+                : typeof element.width === 'number'
+                    ? element.width
                     : 0;
             const rawHeight = typeof element.sy === 'number'
                 ? element.sy
-                : typeof (element as { height?: number }).height === 'number'
-                    ? (element as { height?: number }).height
+                : typeof element.height === 'number'
+                    ? element.height
                     : 0;
             const needsPageOffset = pageHeight > 0
                 && element.page > 0
@@ -4002,7 +4018,11 @@ ${partsBodyXml}
         return () => clearTimeout(timer);
     }, [score, openScoreSession]);
 
-    const parseMusicXmlPatch = (text: string) => {
+    const parseMusicXmlPatch = (text: string): {
+        patch: MusicXmlPatch | null;
+        annotations?: PatchAnnotation[];
+        error: string;
+    } => {
         if (!text.trim()) {
             return { patch: null as MusicXmlPatch | null, error: 'AI response is empty.' };
         }
@@ -4301,7 +4321,7 @@ ${partsBodyXml}
             }
         }
         if (needsCheckpoint) {
-            const buffer = currentData.buffer.slice(currentData.byteOffset, currentData.byteOffset + currentData.byteLength);
+            const buffer = toOwnedArrayBuffer(currentData);
             const title = buildCheckpointTitle('', 'Auto checkpoint');
             await saveCheckpoint({
                 title,
@@ -4506,7 +4526,7 @@ ${partsBodyXml}
                 title: 'Init on Load Score',
                 createdAt: Date.now(),
                 format: 'musicxml',
-                data: xmlData.buffer.slice(xmlData.byteOffset, xmlData.byteOffset + xmlData.byteLength),
+                data: toOwnedArrayBuffer(xmlData),
                 size: xmlData.byteLength,
                 scoreId: activeScoreId,
                 ...buildCheckpointMetadata(),
@@ -5223,7 +5243,7 @@ ${partsBodyXml}
         }
         const pageIndex = Math.max(0, currentPageRef.current || 0);
         try {
-            const png = await runSerializedScoreOperation(
+            const png: unknown = await runSerializedScoreOperation(
                 () => Promise.resolve(activeScore.savePng!(pageIndex, true, true)),
                 `savePng(ai-context-page=${pageIndex + 1})`,
             );
@@ -5251,7 +5271,7 @@ ${partsBodyXml}
             return null;
         }
         try {
-            const pdf = await runSerializedScoreOperation(
+            const pdf: unknown = await runSerializedScoreOperation(
                 () => Promise.resolve(activeScore.savePdf()),
                 'savePdf(ai-context)',
             );
@@ -5598,7 +5618,7 @@ ${partsBodyXml}
             engineMode = actualEngineMode;
             if (signal?.aborted) {
                 loadedScore.destroy();
-                return;
+                return false;
             }
             setScore(loadedScore);
             scoreRef.current = loadedScore;
@@ -7546,7 +7566,7 @@ ${partsBodyXml}
                 || activeLaunchContext?.revisionId
                 || undefined;
             const filenameBase = scoreTitle ? toSafeFilename(scoreTitle) : otsSourceContext.sourceId;
-            const file = new File([data], `${filenameBase || 'score'}.musicxml`, { type: 'application/xml' });
+            const file = new File([toOwnedBytes(data)], `${filenameBase || 'score'}.musicxml`, { type: 'application/xml' });
             const form = new FormData();
             form.append('file', file);
             if (versionsCommitMessage.trim()) {
@@ -7632,7 +7652,7 @@ ${partsBodyXml}
                 return;
             }
             const activeScoreId = ensureScoreId('score');
-            const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+            const buffer = toOwnedArrayBuffer(data);
             const title = buildCheckpointTitle(checkpointLabel, scoreTitle);
             await saveCheckpoint({
                 title,
@@ -7695,7 +7715,7 @@ ${partsBodyXml}
                 title,
                 createdAt: Date.now(),
                 format: 'musicxml',
-                data: xmlData.buffer.slice(xmlData.byteOffset, xmlData.byteOffset + xmlData.byteLength),
+                data: toOwnedArrayBuffer(xmlData),
                 size: xmlData.byteLength,
                 scoreId: activeScoreId,
                 ...buildCheckpointMetadata({
@@ -8015,10 +8035,9 @@ ${partsBodyXml}
             const restoreMode = compareLayoutRestoreRef.current;
             compareLayoutRestoreRef.current = null;
             if (restoreMode !== null && score?.setLayoutMode) {
-                void score
-                    .setLayoutMode(restoreMode)
+                void Promise.resolve(score.setLayoutMode(restoreMode))
                     .then(() => renderScore(score, currentPageRef.current))
-                    .catch((err) => {
+                    .catch((err: unknown) => {
                         console.warn('Failed to restore layout mode after compare:', err);
                     });
             }
@@ -8033,25 +8052,33 @@ ${partsBodyXml}
             setCompareContinuousMode(false);
             return;
         }
+        const currentScore = score;
+        const checkpointScore = compareRightScore;
+        const leftScore = compareLeftScore;
+        const rightScore = compareRightScoreDisplay;
+        if (!leftScore || !rightScore) {
+            setCompareContinuousMode(false);
+            return;
+        }
 
         let canceled = false;
         const enableContinuous = async () => {
             try {
-                if (compareLayoutRestoreRef.current === null && score.getLayoutMode) {
-                    compareLayoutRestoreRef.current = await score.getLayoutMode();
+                if (compareLayoutRestoreRef.current === null && currentScore.getLayoutMode) {
+                    compareLayoutRestoreRef.current = await currentScore.getLayoutMode();
                 }
                 const targetLayout = compareReflowMode ? LAYOUT_MODES.SYSTEM : LAYOUT_MODES.LINE;
-                await score.setLayoutMode(targetLayout);
-                await compareRightScore.setLayoutMode(targetLayout);
+                await currentScore.setLayoutMode!(targetLayout);
+                await checkpointScore.setLayoutMode!(targetLayout);
                 if (canceled) {
                     return;
                 }
                 setCompareContinuousMode(true);
                 const targetPage = 0;
                 // Use swapped scores to render to the correct panes
-                await renderScoreToContainer(compareLeftScore, compareLeftContainerRef.current, targetPage, false);
+                await renderScoreToContainer(leftScore, compareLeftContainerRef.current, targetPage, false);
                 syncCompareSvgSize(compareLeftContainerRef.current, setCompareLeftSvgSize);
-                await renderScoreToContainer(compareRightScoreDisplay, compareRightContainerRef.current, targetPage, false);
+                await renderScoreToContainer(rightScore, compareRightContainerRef.current, targetPage, false);
                 syncCompareSvgSize(compareRightContainerRef.current, setCompareRightSvgSize);
             } catch (err) {
                 console.warn('Failed to enable continuous layout for compare:', err);
@@ -9377,10 +9404,11 @@ ${partsBodyXml}
                     throw new Error(failureReason);
                 }
 
-                setMusicNotaGenResult(finalResult);
-                const content = asRecord(finalResult.content);
-                const abc = typeof finalResult.abc === 'string'
-                    ? finalResult.abc
+                const resultRecord = finalResult as Record<string, unknown>;
+                setMusicNotaGenResult(resultRecord);
+                const content = asRecord(resultRecord.content);
+                const abc = typeof resultRecord.abc === 'string'
+                    ? resultRecord.abc
                     : (typeof content?.abc === 'string' ? content.abc : '');
                 const musicxml = typeof content?.musicxml === 'string' ? content.musicxml : '';
                 setMusicNotaGenGeneratedAbc(abc);
@@ -10201,7 +10229,7 @@ ${partsBodyXml}
         setSelectedElement({ x: primary.x, y: primary.y, w: primary.w, h: primary.h });
         setSelectedPoint({ page: primary.page, x: primary.centerX, y: primary.centerY });
         setSelectedIndex(primary.index);
-        setSelectedElementClasses(primary.classes);
+        setSelectedElementClasses(primary.classes ?? '');
     };
 
     const advanceSelectionOverlay = (
@@ -10640,7 +10668,17 @@ ${partsBodyXml}
         if (typeof getBBoxesFn === 'function') {
             const boxes = await getBBoxesFn.call(activeScore);
             if (Array.isArray(boxes) && boxes.length > 0) {
-                setSelectionBoxes(boxes);
+                setSelectionBoxes(boxes.map((box, index) => ({
+                    index,
+                    page: box.page,
+                    x: box.x,
+                    y: box.y,
+                    w: box.width,
+                    h: box.height,
+                    centerX: box.x + box.width / 2,
+                    centerY: box.y + box.height / 2,
+                    classes: '',
+                })));
             }
         }
     };
@@ -11589,8 +11627,9 @@ ${partsBodyXml}
         }
     };
 
-    const downloadBlob = (data: BlobPart, filename: string, mime: string) => {
-        const blob = new Blob([data], { type: mime });
+    const downloadBlob = (data: BlobPart | Uint8Array, filename: string, mime: string) => {
+        const blobPart = data instanceof Uint8Array ? toOwnedBytes(data) : data;
+        const blob = new Blob([blobPart], { type: mime });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -12136,7 +12175,7 @@ ${partsBodyXml}
                     }
                     const buffer = audioCtx.createBuffer(channels, framesPerChannel, audioCtx.sampleRate);
                     for (let ch = 0; ch < channels; ch += 1) {
-                        buffer.copyToChannel(channelSlices[ch], ch);
+                        buffer.copyToChannel(new Float32Array(channelSlices[ch]), ch);
                     }
                     enqueueBuffer(buffer, relativeChunkStart, hitDone);
                 }
@@ -12173,8 +12212,9 @@ ${partsBodyXml}
             return;
         }
 
-        if (lastSource) {
-            lastSource.onended = () => {
+        const finalSource = lastSource as AudioBufferSourceNode | null;
+        if (finalSource) {
+            finalSource.onended = () => {
                 if (options.generationRef.current !== generation) {
                     return;
                 }
@@ -12227,7 +12267,7 @@ ${partsBodyXml}
             await stopAudio({ awaitCancel: true });
             const { startMeasureIndex, endMeasureIndex } = await getPageMeasureRange(score, pageIndex);
             const wav = await score.saveAudioForMeasureRange('wav', startMeasureIndex, endMeasureIndex);
-            const blob = new Blob([wav], { type: 'audio/wav' });
+            const blob = new Blob([toOwnedBytes(wav)], { type: 'audio/wav' });
             const url = URL.createObjectURL(blob);
             await playFromUrl(url, { revokeOnEnded: true });
         } catch (err) {
@@ -12305,7 +12345,7 @@ ${partsBodyXml}
                     await playFromUrl(audioUrlRef.current);
                 } else {
                     const wav = await score.saveAudio('wav');
-                    const blob = new Blob([wav], { type: 'audio/wav' });
+                    const blob = new Blob([toOwnedBytes(wav)], { type: 'audio/wav' });
                     const url = URL.createObjectURL(blob);
                     audioUrlRef.current = url;
                     await playFromUrl(url);
@@ -12538,7 +12578,7 @@ ${partsBodyXml}
                 setSelectedElementClasses('');
                 setSelectedLayoutBreakSubtype(null);
                 if (score.clearSelection) {
-                    await score.clearSelection().catch(err => {
+                    await Promise.resolve(score.clearSelection()).catch((err: unknown) => {
                         console.warn('clearSelection not available or failed:', err);
                     });
                 }
@@ -12636,7 +12676,7 @@ ${partsBodyXml}
         }
 
         if (!additive && score.clearSelection) {
-            await score.clearSelection().catch(err => {
+            await Promise.resolve(score.clearSelection()).catch((err: unknown) => {
                 console.warn('clearSelection not available or failed:', err);
             });
         }
@@ -12952,7 +12992,7 @@ ${partsBodyXml}
             ignoreNextClickRef.current = false;
             return;
         }
-        if (!containerRef.current) return;
+        if (!containerRef.current || !score) return;
 
         const clearSelectionState = () => {
             setSelectedElement(null);
@@ -12966,10 +13006,10 @@ ${partsBodyXml}
             blockOverlayRefreshRef.current = true;
             selectionOverlayGenerationRef.current += 1;
             setOverlaySuppressed(true);
-            if (score?.clearSelection) {
-                score.clearSelection()
+            if (score.clearSelection) {
+                Promise.resolve(score.clearSelection())
                     .then(refreshAfterClear)
-                    .catch(err => {
+                    .catch((err: unknown) => {
                         console.warn('clearSelection not available or failed:', err);
                         refreshAfterClear();
                     });
@@ -13187,8 +13227,8 @@ ${partsBodyXml}
                 : null;
 
             const selectionPromise = canModeSelect
-                ? score!.selectElementAtPointWithMode!(pageIndex, centerX, centerY, mode as number)
-                : score?.selectElementAtPoint?.(pageIndex, centerX, centerY);
+                ? score.selectElementAtPointWithMode!(pageIndex, centerX, centerY, mode as 0 | 1 | 2 | 3)
+                : score.selectElementAtPoint?.(pageIndex, centerX, centerY);
 
             if (selectionPromise !== undefined) {
                 Promise.resolve(selectionPromise)

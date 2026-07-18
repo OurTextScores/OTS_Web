@@ -143,7 +143,7 @@ describe('runMusicContextService', () => {
 
     const context = (result.body as ContextResponse).context;
     expect(context.fullXml).toBeTruthy();
-    expect(context.fullXml.truncated).toBe(true);
+    expect(context.fullXml!.truncated).toBe(true);
   });
 
   it('includes source context when provided directly', async () => {

@@ -1,5 +1,6 @@
 import {
     convertMusicNotation,
+    isMusicFormat,
     type MusicConversionResult,
     type ValidationCheck,
 } from '../music-conversion';
@@ -129,8 +130,11 @@ function parseHfGeneratedText(data: unknown, prompt: string): string {
     return '';
 }
 
-function extractAbcFromGeneratedText(text: string): { abc: string | null; strategy: string } {
-    const raw = text.trim();
+function extractAbcFromGeneratedText(text: string, prompt = ''): { abc: string | null; strategy: string } {
+    const trimmed = text.trim();
+    const raw = prompt && trimmed.startsWith(prompt)
+        ? trimmed.slice(prompt.length).trim()
+        : trimmed;
     if (!raw) {
         return { abc: null, strategy: 'empty' };
     }
@@ -466,6 +470,9 @@ async function prepareSeedArtifact(args: {
     persistArtifact: boolean;
     prompt: string;
 }) : Promise<PreparedSeed> {
+    if (!isMusicFormat(args.seedArtifact.format)) {
+        throw new Error(`Seed artifact format "${args.seedArtifact.format}" cannot be converted to ABC.`);
+    }
     const converted = await convertMusicNotation({
         inputFormat: args.seedArtifact.format,
         outputFormat: 'abc',

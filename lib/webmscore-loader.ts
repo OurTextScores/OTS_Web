@@ -1,6 +1,39 @@
-import type { InputFileFormat, Positions } from '../webmscore-fork/web-public/schemas';
+export type InputFileFormat =
+    | 'mscz'
+    | 'mscx'
+    | 'mxl'
+    | 'musicxml'
+    | 'xml'
+    | 'midi'
+    | 'kar'
+    | 'gtp'
+    | 'gp3'
+    | 'gp4'
+    | 'gp5'
+    | 'gpx'
+    | 'gp'
+    | 'ptb';
 
-export type { InputFileFormat, Positions };
+export interface Positions {
+    elements: Array<{
+        id: number;
+        x: number;
+        y: number;
+        sx: number;
+        sy: number;
+        width?: number;
+        height?: number;
+        page: number;
+    }>;
+    events: Array<{
+        elid: number;
+        position: number;
+    }>;
+    pageSize: {
+        height: number;
+        width: number;
+    };
+}
 
 export interface Score {
     destroy: (soft?: boolean) => void;
@@ -18,6 +51,7 @@ export interface Score {
     synthAudioBatchForMeasureRange?: (startMeasureIndex: number, endMeasureIndex: number, batchSize: number) => Promise<(cancel?: boolean) => Promise<unknown[]>> | ((cancel?: boolean) => Promise<unknown[]>);
     synthSelectionPreviewBatch?: (batchSize: number, durationMs?: number) => Promise<(cancel?: boolean) => Promise<unknown[]>> | ((cancel?: boolean) => Promise<unknown[]>);
     metadata: () => Promise<Record<string, unknown>>;
+    npages?: () => Promise<number>;
     measurePositions: () => Promise<Positions>;
     measureRangeForPage?: (pageIndex: number) => Promise<{ startMeasureIndex: number; endMeasureIndex: number } | null> | { startMeasureIndex: number; endMeasureIndex: number } | null;
     selectionMeasureRange?: () => Promise<{ startMeasureIndex: number; endMeasureIndex: number } | null> | { startMeasureIndex: number; endMeasureIndex: number } | null;
@@ -39,7 +73,7 @@ export interface Score {
         pageNumber: number,
         x: number,
         y: number,
-        mode: 0 | 1 | 2,
+        mode: 0 | 1 | 2 | 3,
     ) => Promise<unknown> | unknown;
     selectNextChord?: () => Promise<unknown> | unknown;
     selectPrevChord?: () => Promise<unknown> | unknown;
@@ -158,10 +192,18 @@ export interface WebMscoreInstance {
 // runtime/bundler interop (CJS/ESM default wrapping). Resolve once so callers
 // always receive an object with { ready, load }.
 const resolveWebMscore = (mod: unknown): WebMscoreInstance => {
+    const moduleRecord = mod && typeof mod === 'object'
+        ? mod as Record<string, unknown>
+        : undefined;
+    const defaultRecord = moduleRecord?.default && typeof moduleRecord.default === 'object'
+        ? moduleRecord.default as Record<string, unknown>
+        : undefined;
     const candidates = [
-        (mod as any)?.default as Record<string, unknown> | undefined,
-        (mod as any)?.default?.default as Record<string, unknown> | undefined,
-        mod as Record<string, unknown> | undefined,
+        defaultRecord,
+        defaultRecord?.default && typeof defaultRecord.default === 'object'
+            ? defaultRecord.default as Record<string, unknown>
+            : undefined,
+        moduleRecord,
     ];
 
     for (const candidate of candidates) {
@@ -210,7 +252,7 @@ export const loadWebMscore = async (): Promise<WebMscoreInstance> => {
     }
 
     initPromise = (async () => {
-        const imported = await import('../webmscore-fork/web-public/webmscore.webpack.mjs');
+        const imported = await import('./webmscore-worker-runtime.js');
         const resolved = resolveWebMscore(imported as unknown);
         await resolved.ready;
         webMscore = resolved;
@@ -239,8 +281,8 @@ export const loadWebMscoreInProcess = async (): Promise<WebMscoreInstance> => {
         let inProcessImport: unknown;
         try {
             inProcessImport = typeof window === 'undefined'
-                ? await import('../webmscore-fork/web-public/src/nodejs.js')
-                : await import('../webmscore-fork/web-public/src/index.js');
+                ? await import('./webmscore-in-process-node-runtime.js')
+                : await import('./webmscore-in-process-browser-runtime.js');
         } finally {
             // The vendored Node shim clears global fetch during module evaluation.
             // Keep that compatibility behavior local to webmscore initialization.

@@ -8,6 +8,12 @@ import { type TraceContext } from './trace-http';
 export type MusicFormat = 'abc' | 'musicxml' | 'midi' | 'kern';
 export type MusicContentEncoding = 'utf8' | 'base64';
 
+const MUSIC_FORMATS = new Set<MusicFormat>(['abc', 'musicxml', 'midi', 'kern']);
+
+export const isMusicFormat = (value: unknown): value is MusicFormat => (
+    typeof value === 'string' && MUSIC_FORMATS.has(value as MusicFormat)
+);
+
 export type MusicConversionRequest = {
     inputFormat: MusicFormat;
     outputFormat: MusicFormat;

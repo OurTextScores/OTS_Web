@@ -1,4 +1,4 @@
-import { Agent, run, tool, type Model } from '@openai/agents';
+import { Agent, Runner, tool, type Model } from '@openai/agents';
 import { aisdk } from '@openai/agents-extensions';
 import { OpenAIResponsesModel } from '@openai/agents-openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
@@ -582,7 +582,7 @@ const STRICT_PATCH_SCHEMA = z.object({
   })),
 });
 
-export const DEEP_EDIT_TOOL_PARAMETERS: Record<string, z.ZodTypeAny> = {
+export const DEEP_EDIT_TOOL_PARAMETERS: Record<string, z.ZodObject> = {
   sandbox_apply_patch: z.object({
     baseCandidateId: CANDIDATE_ID_SCHEMA,
     patch: STRICT_PATCH_SCHEMA,
@@ -720,16 +720,16 @@ const defaultDriver: (
     // candidate id returns a tool error the model can recover from.
     toolUseBehavior: () => (
       capability.finalized()
-        ? { isFinalOutput: true, finalOutput: JSON.stringify({ ok: true }) }
-        : { isFinalOutput: false }
+        ? { isFinalOutput: true, isInterrupted: undefined, finalOutput: JSON.stringify({ ok: true }) }
+        : { isFinalOutput: false, isInterrupted: undefined }
     ),
   });
 
   try {
-    await run(agent, prompt, {
+    const runner = new Runner({ tracingDisabled: true });
+    await runner.run(agent, prompt, {
       maxTurns: capability.budgets.maxLlmCalls + 2,
       signal: capability.signal,
-      tracingDisabled: true,
     });
   } catch (error) {
     if (error instanceof DeepEditLlmBudgetError || capability.signal.aborted) {

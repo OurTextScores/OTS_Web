@@ -15,6 +15,9 @@ vi.mock('@openai/agents', () => {
   }
   return {
     Agent,
+    Runner: class Runner {
+      run = mocked.run;
+    },
     run: mocked.run,
     tool: (options: Record<string, unknown>) => options,
   };
@@ -22,7 +25,7 @@ vi.mock('@openai/agents', () => {
 
 vi.mock('openai', () => {
   return {
-    OpenAI: vi.fn().mockImplementation(function(config) {
+    OpenAI: vi.fn().mockImplementation(function(this: { apiKey?: string }, config: { apiKey: string }) {
       this.apiKey = config.apiKey;
     }),
   };
@@ -30,7 +33,11 @@ vi.mock('openai', () => {
 
 vi.mock('@openai/agents-openai', () => {
   return {
-    OpenAIResponsesModel: vi.fn().mockImplementation(function(client, model) {
+    OpenAIResponsesModel: vi.fn().mockImplementation(function(
+      this: { client?: unknown; model?: unknown },
+      client: unknown,
+      model: unknown,
+    ) {
       this.client = client;
       this.model = model;
     }),

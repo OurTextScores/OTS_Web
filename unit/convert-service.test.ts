@@ -19,6 +19,7 @@ vi.mock('../lib/music-conversion', () => ({
   ensureKernMusicXmlConversionToolsAvailable: mocked.ensureKernMusicXmlConversionToolsAvailable,
   ensureMusicConversionToolsAvailable: mocked.ensureMusicConversionToolsAvailable,
   normalizeMusicFormat: mocked.normalizeMusicFormat,
+  isMusicFormat: (value: unknown) => ['abc', 'musicxml', 'midi', 'kern'].includes(String(value)),
   runMusicConversionHealthProbe: mocked.runMusicConversionHealthProbe,
 }));
 

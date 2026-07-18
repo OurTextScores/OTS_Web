@@ -269,9 +269,10 @@ async function callTranscodaSpace(args: {
         });
     }
 
+    const imageBytes = new Uint8Array(args.imageBytes);
     const imageBlob = typeof File === 'function'
-        ? new File([args.imageBytes], 'score-page.png', { type: args.mimeType })
-        : new Blob([args.imageBytes], { type: args.mimeType });
+        ? new File([imageBytes], 'score-page.png', { type: args.mimeType })
+        : new Blob([imageBytes], { type: args.mimeType });
     const startedAt = Date.now();
     let prediction: unknown;
     try {

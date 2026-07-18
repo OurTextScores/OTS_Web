@@ -12,6 +12,7 @@ const mocked = vi.hoisted(() => ({
 
 vi.mock('../lib/music-conversion', () => ({
   convertMusicNotation: mocked.convertMusicNotation,
+  isMusicFormat: (value: unknown) => ['abc', 'musicxml', 'midi', 'kern'].includes(String(value)),
 }));
 
 vi.mock('../lib/score-artifacts', () => ({

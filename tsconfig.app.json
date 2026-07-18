@@ -1,7 +1,12 @@
 {
   "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": [
+      "node"
+    ],
+    "tsBuildInfoFile": "./.cache/typescript/app.tsbuildinfo"
+  },
   "include": [
-    "next-env.d.ts",
     "app/**/*.ts",
     "app/**/*.tsx",
     "components/**/*.ts",

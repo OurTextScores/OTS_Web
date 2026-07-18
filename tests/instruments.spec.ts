@@ -53,7 +53,7 @@ test('instruments can be added, hidden, and removed', async ({ page }) => {
   const previousVisibility = String(afterAddParts[newIndex]?.isVisible ?? '');
 
   await ensureDropdownOpen();
-  const visibilityButton = dropdown.getByTestId(`btn-part-visible-${newIndex}`);
+  const visibilityButton = page.getByTestId(`btn-part-visible-${newIndex}`);
   const previousLabel = (await visibilityButton.textContent())?.trim() ?? '';
   await clickPartAction(`btn-part-visible-${newIndex}`);
 
@@ -64,7 +64,7 @@ test('instruments can be added, hidden, and removed', async ({ page }) => {
 
   await ensureDropdownOpen();
   await expect.poll(async () => {
-    const label = await dropdown.getByTestId(`btn-part-visible-${newIndex}`).textContent();
+    const label = await page.getByTestId(`btn-part-visible-${newIndex}`).textContent();
     return label?.trim() ?? '';
   }, { timeout: 20_000 }).not.toBe(previousLabel);
 

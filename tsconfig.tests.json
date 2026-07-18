@@ -1,0 +1,32 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vitest/globals",
+      "@testing-library/jest-dom"
+    ],
+    "tsBuildInfoFile": "./.cache/typescript/tests.tsbuildinfo"
+  },
+  "include": [
+    "unit/**/*.ts",
+    "unit/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "types/**/*.d.ts",
+    "vitest.config.ts",
+    "vitest.setup.ts",
+    "playwright.config.ts",
+    "playwright.config.*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".claude",
+    ".next",
+    ".next-dev-*",
+    "webmscore-fork",
+    "out",
+    "release",
+    "build"
+  ]
+}

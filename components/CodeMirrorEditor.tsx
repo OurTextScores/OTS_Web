@@ -21,8 +21,8 @@ type CodeMirrorEditorProps = {
     className?: string;
     language?: 'xml' | 'json' | 'none';
     lint?: boolean;
-    height?: string;
-    maxHeight?: string;
+    height?: string | number;
+    maxHeight?: string | number;
     themeMode?: CodeEditorThemeMode;
 };
 
@@ -316,6 +316,9 @@ export const CodeMirrorEditor: React.FC<CodeMirrorEditorProps> = ({
     maxHeight,
     themeMode = 'light',
 }) => {
+    const cssLength = (value: string | number | undefined) => (
+        typeof value === 'number' ? `${value}px` : value
+    );
     const containerRef = useRef<HTMLDivElement | null>(null);
     const viewRef = useRef<EditorView | null>(null);
     const onChangeRef = useRef(onChange);
@@ -417,8 +420,8 @@ export const CodeMirrorEditor: React.FC<CodeMirrorEditorProps> = ({
             data-testid={testId}
             className={`w-full rounded border border-gray-300 ${className ?? ''}`}
             style={{
-                '--cm-height': height ?? undefined,
-                '--cm-max-height': maxHeight ?? undefined,
+                '--cm-height': cssLength(height),
+                '--cm-max-height': cssLength(maxHeight),
             } as React.CSSProperties}
         />
     );

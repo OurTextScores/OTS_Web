@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { expect, test, type Route } from '@playwright/test';
+import { expect, test, type Page, type Route } from '@playwright/test';
 import { AI_EDIT_EFFORT_PROFILES, type AiEditEffort } from '../lib/ai-edit-effort';
 import { computeMusicXmlIdentityHashServer } from '../lib/musicxml-identity-server';
 import { applyMusicXmlPatch, type MusicXmlPatch } from '../lib/music-services/patch-service';
@@ -200,18 +200,18 @@ const buildDiffFeedbackResponse = (
   };
 };
 
-const countHighlights = async (page: Parameters<typeof test>[0]['page']) => (
+const countHighlights = async (page: Page) => (
   await page.getByTestId('compare-left-highlight').count()
   + await page.getByTestId('compare-right-highlight').count()
 );
 
-const waitForDiffReviewReady = async (page: Parameters<typeof test>[0]['page']) => {
+const waitForDiffReviewReady = async (page: Page) => {
   await page.getByTestId('checkpoint-compare-modal').waitFor({ timeout: 20_000 });
   await expect(page.getByText('Aligning measures...')).toHaveCount(0, { timeout: 20_000 });
 };
 
 const openAssistantProposalCompare = async (
-  page: Parameters<typeof test>[0]['page'],
+  page: Page,
   options: { effort?: 'efficient' | 'balanced' | 'thorough' } = {},
 ) => {
   await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
@@ -294,8 +294,9 @@ test.describe('Assistant diff editor flow', () => {
       apiKey: 'test-key',
       editEffort: 'balanced',
     });
-    expect(String(patchRequest?.content)).toContain('<score-partwise');
-    expect(String(patchRequest?.promptText)).toContain('Change the first note to G.');
+    const capturedPatchRequest = patchRequest as Record<string, unknown> | null;
+    expect(String(capturedPatchRequest?.content)).toContain('<score-partwise');
+    expect(String(capturedPatchRequest?.promptText)).toContain('Change the first note to G.');
 
     await expect.poll(async () => (
       await page.getByTestId('compare-left-highlight').count()
@@ -352,7 +353,7 @@ test.describe('Assistant diff editor flow', () => {
     await expect(working).toContainText('Balanced');
     await expect(working).toContainText('up to 2 min');
     await working.getByRole('button', { name: 'Cancel AI edit' }).click();
-    releasePatch?.();
+    (releasePatch as (() => void) | null)?.();
 
     await expect(working).toHaveCount(0, { timeout: 5_000 });
     await expect(page.getByTestId('checkpoint-compare-modal')).toHaveCount(0);
@@ -607,7 +608,7 @@ test.describe('Assistant diff editor flow', () => {
     await expect(page.getByTestId('ai-diff-feedback-working')).toBeVisible({ timeout: 5_000 });
     await expect(page.getByTestId('ai-diff-feedback-working')).toContainText('Thorough');
     await expect(page.getByTestId('ai-diff-feedback-working')).toContainText('up to 5 min');
-    releaseFeedback?.();
+    (releaseFeedback as (() => void) | null)?.();
     await expect.poll(() => feedbackCalls, { timeout: 20_000 }).toBe(1);
     expect(lastFeedbackPayload?.blocks?.[0]?.status).toBe('comment');
     expect(lastFeedbackPayload?.blocks?.[0]?.comment).toContain('use A');
@@ -651,7 +652,7 @@ test.describe('Assistant diff editor flow', () => {
     const working = page.getByTestId('ai-diff-feedback-working');
     await expect(working).toBeVisible({ timeout: 5_000 });
     await working.getByRole('button', { name: 'Cancel AI edit' }).click();
-    releaseFeedback?.();
+    (releaseFeedback as (() => void) | null)?.();
 
     await expect(working).toHaveCount(0, { timeout: 5_000 });
     await waitForDiffReviewReady(page);
@@ -1006,8 +1007,10 @@ test.describe('Assistant diff editor flow', () => {
     await page.getByRole('button', { name: /Send Feedback/ }).first().click();
     await expect.poll(() => feedbackRequest, { timeout: 20_000 }).not.toBeNull();
 
-    const generationBase = String(deepRequest?.content || '');
-    const feedbackBase = String(feedbackRequest?.content || '');
+    const capturedDeepRequest = deepRequest as Record<string, unknown> | null;
+    const capturedFeedbackRequest = feedbackRequest as Record<string, unknown> | null;
+    const generationBase = String(capturedDeepRequest?.content || '');
+    const feedbackBase = String(capturedFeedbackRequest?.content || '');
     expect(feedbackBase).toBe(generationBase);
     expect(computeMusicXmlIdentityHashServer(feedbackBase)).toBe(
       computeMusicXmlIdentityHashServer(generationBase),

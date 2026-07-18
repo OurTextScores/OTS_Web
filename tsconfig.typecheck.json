@@ -1,11 +1,13 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "allowJs": false,
-    "checkJs": false
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
+    "tsBuildInfoFile": "./.cache/typescript/scoreops.tsbuildinfo"
   },
   "include": [
-    "next-env.d.ts",
     "app/api/music/scoreops/**/*.ts",
     "lib/music-services/scoreops-service.ts",
     "lib/music-services/scoreops-session-store.ts",

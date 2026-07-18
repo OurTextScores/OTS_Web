@@ -89,15 +89,15 @@ export const TransposeDialog: React.FC<TransposeDialogProps> = ({
     const [chromaticSub, setChromaticSub] = useState<'toKey' | 'byInterval'>('byInterval');
 
     // Chromatic To Key state
-    const [toKeyDirection, setToKeyDirection] = useState(TransposeDirection.CLOSEST);
+    const [toKeyDirection, setToKeyDirection] = useState<0 | 1 | 2>(TransposeDirection.CLOSEST);
     const [targetKey, setTargetKey] = useState(0);
 
     // Chromatic By Interval state
-    const [intervalDirection, setIntervalDirection] = useState(TransposeDirection.UP);
+    const [intervalDirection, setIntervalDirection] = useState<0 | 1>(TransposeDirection.UP);
     const [chromaticInterval, setChromaticInterval] = useState(4); // Major Second
 
     // Diatonic state
-    const [diatonicDirection, setDiatonicDirection] = useState(TransposeDirection.UP);
+    const [diatonicDirection, setDiatonicDirection] = useState<0 | 1>(TransposeDirection.UP);
     const [diatonicDegree, setDiatonicDegree] = useState(1); // Second
     const [keepDegreeAlterations, setKeepDegreeAlterations] = useState(true);
 

@@ -74,7 +74,7 @@ test('title and subtitle persist after save and reload', async ({ page }) => {
   await page.getByTestId('open-score-input').setInputFiles({
     name: 'reloaded.mscz',
     mimeType: 'application/vnd.musescore.mscz',
-    buffer: Buffer.from(exportedMscz),
+    buffer: Buffer.from(exportedMscz as number[]),
   });
 
   await page.waitForSelector('svg .Clef', { timeout: 60_000 });
