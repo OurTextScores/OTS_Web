@@ -6346,6 +6346,38 @@ ${partsBodyXml}
         verifyAiProposalCurrent,
     ]);
 
+    // Recovery path for the stale-base Apply gate: re-anchor the proposal onto the live
+    // score. The live serialization becomes the compare view's left side and the gate's
+    // expectation, so the refreshed diff shows any drift and Apply/Apply All work again.
+    // Nothing is written to the score here — Apply remains the only commit path.
+    const rebaseAiProposalOntoLive = useCallback(async () => {
+        if (!compareView || compareView.title !== 'Assistant Proposal' || !score || compareSwapBusy) {
+            return;
+        }
+        setCompareSwapBusy(true);
+        try {
+            const liveXml = await getScoreMusicXmlText(scoreRef.current ?? score, null);
+            if (!liveXml?.trim()) {
+                setAiProposalApplyError('Unable to read the current score to rebase the proposal.');
+                return;
+            }
+            captureAiProposal(null, liveXml);
+            setAiBaseXml(liveXml);
+            setCompareView((prev) => (prev ? { ...prev, currentXml: liveXml } : prev));
+            setAiError(null);
+            setCompareAlignmentRevision((value) => value + 1);
+        } finally {
+            setCompareSwapBusy(false);
+        }
+    }, [
+        compareView,
+        compareSwapBusy,
+        score,
+        getScoreMusicXmlText,
+        captureAiProposal,
+        setAiProposalApplyError,
+    ]);
+
     const setAiDiffBlockStatus = useCallback((block: AiDiffBlockRef, status: BlockReviewStatus) => {
         setAiDiffReviews((prev) => {
             const existing = prev.find((review) => review.blockKey === block.blockKey);
@@ -15663,6 +15695,8 @@ ${partsBodyXml}
                                     iteration={aiDiffIteration}
                                     feedbackError={aiDiffFeedbackError}
                                     onGlobalCommentChange={setAiDiffGlobalComment}
+                                    onRebase={() => void rebaseAiProposalOntoLive()}
+                                    rebaseBusy={compareSwapBusy}
                                 />
                             )}
                             <div className="flex min-h-0 min-w-0 flex-1 overflow-x-hidden">

@@ -64,6 +64,8 @@ export function AiCompareWorkspace({
     iteration,
     feedbackError,
     onGlobalCommentChange,
+    onRebase,
+    rebaseBusy = false,
 }: {
     proposalController: AiProposalController;
     embedded: boolean;
@@ -72,6 +74,8 @@ export function AiCompareWorkspace({
     iteration: number;
     feedbackError: string | null;
     onGlobalCommentChange: (value: string) => void;
+    onRebase?: (() => void) | null;
+    rebaseBusy?: boolean;
 }) {
     const { applyError, audit } = proposalController;
     const auditVerification = asRecord(audit?.verification);
@@ -119,7 +123,22 @@ export function AiCompareWorkspace({
                     role="alert"
                     className="rounded border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700"
                 >
-                    {applyError}
+                    <span>{applyError}</span>
+                    {onRebase && (
+                        <span className="mt-1 block">
+                            Rebasing refreshes the left side to the current score so you can review
+                            the updated differences and apply this proposal.
+                            <button
+                                type="button"
+                                data-testid="btn-rebase-proposal"
+                                onClick={onRebase}
+                                disabled={rebaseBusy}
+                                className="ml-2 rounded border border-rose-400 bg-white px-2 py-0.5 text-xs text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                            >
+                                {rebaseBusy ? 'Rebasing...' : 'Rebase onto current score'}
+                            </button>
+                        </span>
+                    )}
                 </div>
             )}
             {audit && (

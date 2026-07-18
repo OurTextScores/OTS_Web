@@ -511,7 +511,7 @@ test.describe('Assistant diff editor flow', () => {
     });
   };
 
-  test('stale expected hash blocks Apply All', async ({ page }) => {
+  test('stale expected hash blocks Apply All until the proposal is rebased', async ({ page }) => {
     await page.route('**/api/music/patch', fulfillPatchWithStaleHashes);
 
     await openAssistantProposalCompare(page);
@@ -521,6 +521,25 @@ test.describe('Assistant diff editor flow', () => {
       'The score changed after this proposal was generated. Regenerate or rebase the proposal before applying it.',
     );
     await expect.poll(() => countHighlights(page), { timeout: 15_000 }).toBeGreaterThan(0);
+
+    // The user still wants the proposal: rebase re-anchors it onto the live score,
+    // clears the alert, and Apply All then commits the proposed change.
+    await page.getByTestId('btn-rebase-proposal').click();
+    await expect(page.getByTestId('checkpoint-compare-modal').getByRole('alert')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Apply All AI Changes' }).click();
+    await expect.poll(() => countHighlights(page), { timeout: 20_000 }).toBe(0);
+    const savedXml = await page.evaluate(async () => {
+      const score = (window as typeof window & { __webmscore?: { saveXml?: () => Promise<unknown> } }).__webmscore;
+      const data = await score?.saveXml?.();
+      if (typeof data === 'string') {
+        return data;
+      }
+      if (data instanceof Uint8Array) {
+        return new TextDecoder().decode(data);
+      }
+      return '';
+    });
+    expect(savedXml).toContain('<step>G</step>');
   });
 
   test('stale expected hash blocks a partial Apply', async ({ page }) => {
