@@ -9054,6 +9054,8 @@ ${partsBodyXml}
         setMusicAgentResult(null);
         setMusicAgentPatch(null);
         setMusicAgentPatchError(null);
+        aiProposalSessionRef.current = null;
+        setAiProposalAudit(null);
         const requestStartedAt = Date.now();
         let requestIssued = false;
         let outcome: 'success' | 'failure' = 'failure';
