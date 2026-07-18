@@ -286,7 +286,22 @@ export async function executeSandboxTool(
       if (!capability.isValidSourceId(sourceId)) {
         return invalidIdError(sourceId);
       }
-      const parsed = parseMusicXmlPatch(JSON.stringify(args.patch ?? null));
+      // Strict tool schemas express optional op fields as nullable; strip nulls so the
+      // shared patch parser sees the canonical shape.
+      const patchInput = asRecord(args.patch);
+      const normalizedPatch = patchInput && Array.isArray(patchInput.ops)
+        ? {
+          ...patchInput,
+          ops: patchInput.ops.map((op) => {
+            const record = asRecord(op);
+            if (!record) {
+              return op;
+            }
+            return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== null));
+          }),
+        }
+        : args.patch ?? null;
+      const parsed = parseMusicXmlPatch(JSON.stringify(normalizedPatch));
       if (parsed.error || !parsed.patch) {
         return { ok: false, error: boundError(parsed.error || 'Invalid musicxml-patch@1 payload.') };
       }
@@ -325,9 +340,20 @@ export async function executeSandboxTool(
       if (baseXml === null) {
         return invalidIdError(sourceId);
       }
+      let ops: unknown = args.ops;
+      if (!Array.isArray(ops) && typeof args.opsJson === 'string') {
+        try {
+          ops = JSON.parse(args.opsJson);
+        } catch {
+          return { ok: false, error: 'opsJson is not valid JSON.' };
+        }
+      }
+      if (!Array.isArray(ops) || ops.length === 0) {
+        return { ok: false, error: 'Provide a non-empty JSON array of ScoreOps operations.' };
+      }
       const result = await runMusicScoreOpsPreviewService({
         content: baseXml,
-        ops: args.ops,
+        ops,
       });
       const proposal = asRecord(result.body.proposal);
       const proposedXml = typeof proposal?.proposedXml === 'string' ? proposal.proposedXml : '';
@@ -436,6 +462,54 @@ export async function executeSandboxTool(
   }
 }
 
+// Tool parameter schemas. The agents SDK only supports zod tools in OpenAI strict mode,
+// which forbids free-form objects (no z.record/z.unknown: every object needs enumerated,
+// required properties and additionalProperties: false) and requires optionals to be
+// expressed as required-but-nullable. ScoreOps ops are a large discriminated union, so
+// they travel as a JSON-encoded string and are validated server-side.
+const CANDIDATE_ID_SCHEMA = z.string().min(1).max(32);
+
+const STRICT_PATCH_SCHEMA = z.object({
+  format: z.literal('musicxml-patch@1'),
+  ops: z.array(z.object({
+    op: z.enum(['replace', 'setText', 'setAttr', 'insertBefore', 'insertAfter', 'delete']),
+    path: z.string(),
+    value: z.string().nullable(),
+    name: z.string().nullable(),
+  })),
+});
+
+export const DEEP_EDIT_TOOL_PARAMETERS: Record<string, z.ZodTypeAny> = {
+  sandbox_apply_patch: z.object({
+    baseCandidateId: CANDIDATE_ID_SCHEMA,
+    patch: STRICT_PATCH_SCHEMA,
+  }),
+  sandbox_scoreops: z.object({
+    baseCandidateId: CANDIDATE_ID_SCHEMA,
+    opsJson: z.string().min(2).describe('JSON-encoded array of ScoreOps operation objects'),
+  }),
+  sandbox_engine_check: z.object({ candidateId: CANDIDATE_ID_SCHEMA }),
+  sandbox_render: z.object({ candidateId: CANDIDATE_ID_SCHEMA }),
+  sandbox_measure_diff: z.object({
+    candidateId: CANDIDATE_ID_SCHEMA,
+    againstId: CANDIDATE_ID_SCHEMA.nullable().describe('Compare against this candidate, or null for base'),
+  }),
+  sandbox_analyze: z.object({
+    candidateId: CANDIDATE_ID_SCHEMA,
+    kind: z.enum(['harmony', 'functional_harmony']),
+  }),
+  sandbox_record_score: z.object({
+    candidateId: CANDIDATE_ID_SCHEMA,
+    kind: z.string().min(1).max(64),
+    value: z.union([z.string().max(200), z.number()]),
+    detail: z.string().max(500).nullable(),
+  }),
+  finalize: z.object({
+    candidateId: CANDIDATE_ID_SCHEMA,
+    rationale: z.string().min(1).max(MAX_RATIONALE_CHARS),
+  }),
+};
+
 class DeepEditLlmBudgetError extends Error {
   constructor(readonly reason: string) {
     super(`Deep edit LLM budget exhausted (${reason}).`);
@@ -474,7 +548,7 @@ const SANDBOX_INSTRUCTIONS = [
   '',
   'Tools:',
   '- sandbox_apply_patch(baseCandidateId, patch): apply a musicxml-patch@1 JSON object to a candidate. Ops: replace, setText, setAttr, insertBefore, insertAfter, delete. Each XPath must match exactly one node. On failure you get the exact apply error; fix the patch and retry.',
-  '- sandbox_scoreops(baseCandidateId, ops): structured score operations (transpose, set_key, set_time, etc.).',
+  '- sandbox_scoreops(baseCandidateId, opsJson): structured score operations (transpose, set_key_signature, set_time_signature, etc.). opsJson is a JSON-encoded array of operation objects.',
   '- sandbox_engine_check(candidateId): load the candidate in the notation engine. Do this for every candidate you might finalize.',
   '- sandbox_render(candidateId): full render verification (strongest check; limited budget).',
   '- sandbox_measure_diff(candidateId, againstId?): compact per-measure diff versus base or another candidate.',
@@ -486,21 +560,24 @@ const SANDBOX_INSTRUCTIONS = [
   'The user commits changes with Apply in their editor; you only propose. Never claim an edit was applied.',
 ].join('\n');
 
-const defaultDriver: (provider: 'openai' | 'anthropic', apiKey: string, modelName: string) => DeepEditDriver = (
+const defaultDriver: (
+  provider: 'openai' | 'anthropic',
+  apiKey: string,
+  modelName: string,
+  modelOverride?: Model,
+) => DeepEditDriver = (
   provider,
   apiKey,
   modelName,
+  modelOverride,
 ) => async ({ capability, executeTool, instructions, prompt }) => {
-  const candidateIdSchema = z.string().min(1).max(32);
-
   const jsonTool = (
     name: string,
     description: string,
-    parameters: z.ZodTypeAny,
   ) => tool({
     name,
     description,
-    parameters,
+    parameters: DEEP_EDIT_TOOL_PARAMETERS[name],
     execute: async (input: unknown) => JSON.stringify(
       await executeTool(name, asRecord(input) ?? {}),
     ),
@@ -509,41 +586,17 @@ const defaultDriver: (provider: 'openai' | 'anthropic', apiKey: string, modelNam
   const agent = new Agent({
     name: 'DeepEdit',
     instructions,
-    model: withLlmBudget(modelForRequest(provider, apiKey, modelName), capability),
+    model: withLlmBudget(modelOverride ?? modelForRequest(provider, apiKey, modelName), capability),
     modelSettings: { toolChoice: 'required' },
     tools: [
-      jsonTool('sandbox_apply_patch', 'Apply a musicxml-patch@1 to a candidate, minting a new candidate.', z.object({
-        baseCandidateId: candidateIdSchema,
-        patch: z.record(z.string(), z.unknown()),
-      })),
-      jsonTool('sandbox_scoreops', 'Run structured score operations against a candidate, minting a new candidate.', z.object({
-        baseCandidateId: candidateIdSchema,
-        ops: z.array(z.record(z.string(), z.unknown())).min(1),
-      })),
-      jsonTool('sandbox_engine_check', 'Load a candidate in the notation engine to verify it.', z.object({
-        candidateId: candidateIdSchema,
-      })),
-      jsonTool('sandbox_render', 'Render a candidate as the strongest verification level.', z.object({
-        candidateId: candidateIdSchema,
-      })),
-      jsonTool('sandbox_measure_diff', 'Summarize per-measure differences between candidates.', z.object({
-        candidateId: candidateIdSchema,
-        againstId: candidateIdSchema.nullable().optional(),
-      })),
-      jsonTool('sandbox_analyze', 'Run a harmony or functional-harmony analysis on a candidate.', z.object({
-        candidateId: candidateIdSchema,
-        kind: z.enum(['harmony', 'functional_harmony']),
-      })),
-      jsonTool('sandbox_record_score', 'Record an assessment score for a candidate.', z.object({
-        candidateId: candidateIdSchema,
-        kind: z.string().min(1).max(64),
-        value: z.union([z.string().max(200), z.number()]),
-        detail: z.string().max(500).nullable().optional(),
-      })),
-      jsonTool('finalize', 'Finish the deep edit by naming the candidate to propose, with a short rationale. Fails (and lets you retry) if the id is not a candidate you created.', z.object({
-        candidateId: candidateIdSchema,
-        rationale: z.string().min(1).max(MAX_RATIONALE_CHARS),
-      })),
+      jsonTool('sandbox_apply_patch', 'Apply a musicxml-patch@1 to a candidate, minting a new candidate. Use null for op fields you do not need.'),
+      jsonTool('sandbox_scoreops', 'Run structured score operations against a candidate, minting a new candidate. opsJson is a JSON-encoded array of operation objects.'),
+      jsonTool('sandbox_engine_check', 'Load a candidate in the notation engine to verify it.'),
+      jsonTool('sandbox_render', 'Render a candidate as the strongest verification level.'),
+      jsonTool('sandbox_measure_diff', 'Summarize per-measure differences between candidates. Pass null as againstId to compare with base.'),
+      jsonTool('sandbox_analyze', 'Run a harmony or functional-harmony analysis on a candidate.'),
+      jsonTool('sandbox_record_score', 'Record an assessment score for a candidate.'),
+      jsonTool('finalize', 'Finish the deep edit by naming the candidate to propose, with a short rationale. Fails (and lets you retry) if the id is not a candidate you created.'),
     ],
     // The loop ends only when finalize actually succeeded; a finalize with an unknown
     // candidate id returns a tool error the model can recover from.
@@ -596,6 +649,8 @@ export async function runDeepEditService(
     signal?: AbortSignal;
     driveAgent?: DeepEditDriver;
     budgets?: DeepEditBudgets;
+    /** Test seam: run the real agents-SDK loop against a scripted model. */
+    modelOverride?: Model;
   },
 ): Promise<DeepEditServiceResult> {
   const startedAt = Date.now();
@@ -684,7 +739,7 @@ export async function runDeepEditService(
   });
 
   try {
-    const driver = options?.driveAgent ?? defaultDriver(provider, apiKey, requestedModel);
+    const driver = options?.driveAgent ?? defaultDriver(provider, apiKey, requestedModel, options?.modelOverride);
     let finalized: { candidateId: string; rationale: string } | null = null;
     try {
       finalized = await driver({
@@ -695,10 +750,13 @@ export async function runDeepEditService(
       });
     } catch (error) {
       const timedOut = capability.expired();
+      // Bounded diagnostic only: enough to distinguish schema/tool-wiring failures from
+      // provider outages, without echoing response bodies wholesale.
       console.error('[deep-edit] Agent loop failed.', {
         provider,
         model: requestedModel,
         error: error instanceof Error ? error.name : 'unknown_error',
+        detail: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300),
       });
       return errorResult(
         timedOut ? 504 : 502,
