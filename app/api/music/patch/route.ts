@@ -61,6 +61,7 @@ export async function POST(request: Request) {
     });
     status = result.status;
     const verification = asRecord(result.body.verification);
+    const budget = asRecord(verification?.budget);
     const authorizedModelDescriptor = asRecord(result.body.modelDescriptor);
     const failures = Array.isArray(result.body.failures) ? result.body.failures : [];
     const lastFailure = asRecord(failures.at(-1));
@@ -70,6 +71,8 @@ export async function POST(request: Request) {
       attempts: typeof verification?.attempts === 'number' ? verification.attempts : null,
       llmCalls: typeof verification?.llmCalls === 'number' ? verification.llmCalls : null,
       verificationElapsedMs: typeof verification?.elapsedMs === 'number' ? verification.elapsedMs : null,
+      editEffort: typeof verification?.effort === 'string' ? verification.effort : null,
+      requestBudgetMs: typeof budget?.budgetMs === 'number' ? budget.budgetMs : null,
       serverModelDescriptorSource: typeof authorizedModelDescriptor?.source === 'string'
         ? authorizedModelDescriptor.source
         : null,

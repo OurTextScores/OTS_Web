@@ -18,6 +18,8 @@ export const MUSIC_PATCH_TOOL_CONTRACT: MusicToolContract = {
       model: { type: 'string' },
       maxTokens: { type: 'number', minimum: 1 },
       max_tokens: { type: 'number', minimum: 1 },
+      temperature: { type: 'number' },
+      editEffort: { type: 'string', enum: ['efficient', 'balanced', 'thorough'] },
       dryRun: { type: 'boolean' },
       dry_run: { type: 'boolean' },
     },
@@ -55,4 +57,3 @@ export const MUSIC_PATCH_TOOL_CONTRACT: MusicToolContract = {
     ],
   },
 };
-

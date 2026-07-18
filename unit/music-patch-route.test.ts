@@ -21,6 +21,7 @@ describe('POST /api/music/patch', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     if (priorAllowProxy === undefined) {
       delete process.env.ALLOW_UNAUTHENTICATED_LLM_PROXY;
     } else {
@@ -71,6 +72,7 @@ describe('POST /api/music/patch', () => {
 
   it('forwards authenticated requests, cancellation, and verification metadata', async () => {
     process.env.OTS_API_AUTH_TOKEN = 'app-token';
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     mocked.runMusicPatchService.mockResolvedValue({
       status: 200,
       body: {
@@ -82,6 +84,8 @@ describe('POST /api/music/patch', () => {
           attempts: 1,
           llmCalls: 1,
           elapsedMs: 12,
+          effort: 'balanced',
+          budget: { maxAttempts: 3, budgetMs: 120_000, requestTimeoutMs: 60_000 },
         },
       },
     });
@@ -114,6 +118,9 @@ describe('POST /api/music/patch', () => {
         traceContext: expect.objectContaining({ requestId: 'req-patch-1' }),
       }),
     );
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('"editEffort":"balanced"'));
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('"requestBudgetMs":120000'));
+    infoSpy.mockRestore();
     const serviceOptions = mocked.runMusicPatchService.mock.calls[0][1];
     expect(serviceOptions.signal.aborted).toBe(false);
   });

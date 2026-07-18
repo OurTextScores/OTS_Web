@@ -265,6 +265,8 @@ export async function runDiffFeedbackService(
     ? data.apiKey
     : (typeof data?.api_key === 'string' ? data.api_key : '');
   const maxTokens = Number(data?.maxTokens ?? data?.max_tokens);
+  const temperatureValue = Number(data?.temperature);
+  const temperature = data?.temperature != null && Number.isFinite(temperatureValue) ? temperatureValue : undefined;
   const iteration = Number.isFinite(Number(data?.iteration)) ? Math.max(0, Math.floor(Number(data?.iteration))) : 0;
   const chatHistory = parseChatHistory(data?.chatHistory);
 
@@ -321,6 +323,8 @@ export async function runDiffFeedbackService(
     model,
     apiKey,
     maxTokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : undefined,
+    ...(temperature !== undefined ? { temperature } : {}),
+    editEffort: data?.editEffort ?? data?.effort,
     content: resolution.xml,
     prompt: feedbackPrompt,
   }, options);

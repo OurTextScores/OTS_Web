@@ -17,6 +17,8 @@ export const MUSIC_DIFF_FEEDBACK_TOOL_CONTRACT: MusicToolContract = {
       api_key: { type: 'string' },
       maxTokens: { type: 'number', minimum: 1 },
       max_tokens: { type: 'number', minimum: 1 },
+      temperature: { type: 'number' },
+      editEffort: { type: 'string', enum: ['efficient', 'balanced', 'thorough'] },
       iteration: { type: 'number', minimum: 0 },
       globalComment: { type: 'string' },
       chatHistory: {

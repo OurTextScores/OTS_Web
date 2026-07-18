@@ -85,6 +85,41 @@ const engineLoadOk = () => {
   });
 };
 
+describe('resolveDeepEditBudgets', () => {
+  it('resolves effort profiles and applies deployment caps', () => {
+    expect(resolveDeepEditBudgets('efficient')).toMatchObject({
+      maxLlmCalls: 4,
+      maxToolCalls: 10,
+      maxCandidates: 2,
+      maxRenders: 1,
+      budgetMs: 120_000,
+    });
+    expect(resolveDeepEditBudgets('thorough')).toMatchObject({
+      maxLlmCalls: 20,
+      maxToolCalls: 40,
+      maxCandidates: 6,
+      maxRenders: 5,
+      budgetMs: 600_000,
+    });
+
+    const previousLlmCalls = process.env.MUSIC_DEEP_EDIT_MAX_LLM_CALLS;
+    const previousBudget = process.env.MUSIC_DEEP_EDIT_BUDGET_MS;
+    try {
+      process.env.MUSIC_DEEP_EDIT_MAX_LLM_CALLS = '8';
+      process.env.MUSIC_DEEP_EDIT_BUDGET_MS = '240000';
+      expect(resolveDeepEditBudgets('thorough')).toMatchObject({
+        maxLlmCalls: 8,
+        budgetMs: 240_000,
+      });
+    } finally {
+      if (previousLlmCalls === undefined) delete process.env.MUSIC_DEEP_EDIT_MAX_LLM_CALLS;
+      else process.env.MUSIC_DEEP_EDIT_MAX_LLM_CALLS = previousLlmCalls;
+      if (previousBudget === undefined) delete process.env.MUSIC_DEEP_EDIT_BUDGET_MS;
+      else process.env.MUSIC_DEEP_EDIT_BUDGET_MS = previousBudget;
+    }
+  });
+});
+
 describe('runDeepEditService', () => {
   beforeEach(() => {
     vi.clearAllMocks();

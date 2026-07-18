@@ -55,6 +55,7 @@ export async function POST(request: Request) {
     status = result.status;
     const deepEdit = asRecord(result.body.deepEdit);
     const counters = asRecord(deepEdit?.counters);
+    const budgets = asRecord(deepEdit?.budgets);
     const proposal = asRecord(result.body.proposal);
     const verification = asRecord(proposal?.verification);
     summaryExtra = {
@@ -67,6 +68,8 @@ export async function POST(request: Request) {
       toolCalls: typeof counters?.toolCalls === 'number' ? counters.toolCalls : null,
       renders: typeof counters?.renders === 'number' ? counters.renders : null,
       deepElapsedMs: typeof deepEdit?.elapsedMs === 'number' ? deepEdit.elapsedMs : null,
+      editEffort: typeof deepEdit?.effort === 'string' ? deepEdit.effort : null,
+      requestBudgetMs: typeof budgets?.budgetMs === 'number' ? budgets.budgetMs : null,
     };
     const response = NextResponse.json(result.body, { status });
     applyTraceHeaders(response.headers, trace);

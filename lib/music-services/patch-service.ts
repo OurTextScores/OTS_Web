@@ -24,6 +24,12 @@ import { type TraceContext } from '../trace-http';
 import { asRecord, looksLikeMusicXml, resolvedScoreSnapshot, resolveScoreContent } from './common';
 import { buildAiEditProposal } from './ai-edit-proposal';
 import { createProposalContinuityToken } from './proposal-session-context';
+import {
+  AI_EDIT_EFFORT_PROFILES,
+  DEFAULT_AI_EDIT_EFFORT,
+  parseAiEditEffort,
+  type AiEditEffort,
+} from '../ai-edit-effort';
 
 type PatchServiceResult = {
   status: number;
@@ -45,10 +51,7 @@ export type MusicXmlPatch = {
 const AI_PATCH_SYSTEM_PROMPT = 'You are a MusicXML editor. Return only a single JSON object (musicxml-patch@1) — the patch and an optional "annotations" array. No markdown or prose outside the JSON.';
 const AI_PATCH_REQUEST_RETRY_DELAY_MS = 600;
 
-const DEFAULT_PATCH_MAX_ATTEMPTS = 3;
 const DEFAULT_PATCH_TRANSPORT_RETRIES = 1;
-const DEFAULT_PATCH_BUDGET_MS = 120_000;
-const DEFAULT_AI_REQUEST_TIMEOUT_MS = 60_000;
 const DEFAULT_PATCH_MAX_CONTENT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_PATCH_MAX_PROMPT_CHARS = 12 * 1024 * 1024;
 const DEFAULT_PATCH_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -503,6 +506,14 @@ export type PatchApplyVerification = {
   attempts: number;
   llmCalls: number;
   elapsedMs: number;
+  effort: AiEditEffort;
+  budget: PatchGenerationBudget;
+};
+
+export type PatchGenerationBudget = {
+  maxAttempts: number;
+  budgetMs: number;
+  requestTimeoutMs: number;
 };
 
 export type PatchAttemptFailure = {
@@ -523,6 +534,7 @@ export type GenerateApplyVerifiedPatchArgs = {
   image?: TextImageAttachment | null;
   pdf?: TextPdfAttachment | null;
   signal?: AbortSignal;
+  effort?: AiEditEffort;
   requestText?: (args: RequestAiTextDirectArgs) => Promise<string>;
 };
 
@@ -548,6 +560,51 @@ const readClampedEnvInteger = (name: string, fallback: number, minimum: number, 
     return fallback;
   }
   return Math.min(maximum, Math.max(minimum, Math.floor(value)));
+};
+
+const resolveProfileLimit = (args: {
+  effort: AiEditEffort;
+  profileValue: number;
+  envName: string;
+  minimum: number;
+  maximum: number;
+}) => {
+  const configuredValue = Number(process.env[args.envName]);
+  if (!Number.isFinite(configuredValue)) {
+    return Math.min(args.maximum, Math.max(args.minimum, Math.floor(args.profileValue)));
+  }
+  const configured = Math.min(args.maximum, Math.max(args.minimum, Math.floor(configuredValue)));
+  return args.effort === DEFAULT_AI_EDIT_EFFORT
+    ? configured
+    : Math.min(args.profileValue, configured);
+};
+
+export const resolvePatchGenerationBudget = (effortInput?: unknown): PatchGenerationBudget => {
+  const effort = parseAiEditEffort(effortInput);
+  const profile = AI_EDIT_EFFORT_PROFILES[effort].patch;
+  return {
+    maxAttempts: resolveProfileLimit({
+      effort,
+      profileValue: profile.maxAttempts,
+      envName: 'MUSIC_PATCH_MAX_ATTEMPTS',
+      minimum: 1,
+      maximum: MAX_PATCH_ATTEMPTS,
+    }),
+    budgetMs: resolveProfileLimit({
+      effort,
+      profileValue: profile.budgetMs,
+      envName: 'MUSIC_PATCH_BUDGET_MS',
+      minimum: 1,
+      maximum: MAX_PATCH_BUDGET_MS,
+    }),
+    requestTimeoutMs: resolveProfileLimit({
+      effort,
+      profileValue: profile.requestTimeoutMs,
+      envName: 'MUSIC_AI_REQUEST_TIMEOUT_MS',
+      minimum: 1,
+      maximum: MAX_PATCH_BUDGET_MS,
+    }),
+  };
 };
 
 type ModelDescriptorRefreshEntry = {
@@ -729,31 +786,36 @@ const providerFailureMessage = (error: unknown) => {
   return detail ? `AI provider request failed${status}: ${detail}` : `AI provider request failed${status}.`;
 };
 
-const verificationFor = (startedAt: number, attempts: number, llmCalls: number): PatchApplyVerification => ({
+const verificationFor = (
+  startedAt: number,
+  attempts: number,
+  llmCalls: number,
+  effort: AiEditEffort,
+  budget: PatchGenerationBudget,
+): PatchApplyVerification => ({
   level: 'patch_apply',
   attempts,
   llmCalls,
   elapsedMs: Math.max(0, Date.now() - startedAt),
+  effort,
+  budget,
 });
 
 export async function generateApplyVerifiedPatch(
   args: GenerateApplyVerifiedPatchArgs,
 ): Promise<GenerateApplyVerifiedPatchResult> {
   const startedAt = Date.now();
-  const maximumAttempts = readClampedEnvInteger('MUSIC_PATCH_MAX_ATTEMPTS', DEFAULT_PATCH_MAX_ATTEMPTS, 1, MAX_PATCH_ATTEMPTS);
+  const effort = parseAiEditEffort(args.effort);
+  const budget = resolvePatchGenerationBudget(effort);
+  const maximumAttempts = budget.maxAttempts;
   const transportRetries = readClampedEnvInteger(
     'MUSIC_PATCH_TRANSPORT_RETRIES',
     DEFAULT_PATCH_TRANSPORT_RETRIES,
     0,
     MAX_PATCH_TRANSPORT_RETRIES,
   );
-  const budgetMs = readClampedEnvInteger('MUSIC_PATCH_BUDGET_MS', DEFAULT_PATCH_BUDGET_MS, 1, MAX_PATCH_BUDGET_MS);
-  const requestTimeoutMs = readClampedEnvInteger(
-    'MUSIC_AI_REQUEST_TIMEOUT_MS',
-    DEFAULT_AI_REQUEST_TIMEOUT_MS,
-    1,
-    MAX_PATCH_BUDGET_MS,
-  );
+  const budgetMs = budget.budgetMs;
+  const requestTimeoutMs = budget.requestTimeoutMs;
   const transportRetryDelayMs = readClampedEnvInteger(
     'MUSIC_PATCH_TRANSPORT_RETRY_DELAY_MS',
     AI_PATCH_REQUEST_RETRY_DELAY_MS,
@@ -856,7 +918,7 @@ export async function generateApplyVerifiedPatch(
         error: response.error,
         providerStatus: response.providerStatus,
         failures,
-        verification: verificationFor(startedAt, attempts, llmCalls),
+        verification: verificationFor(startedAt, attempts, llmCalls, effort, budget),
       };
     }
 
@@ -891,7 +953,7 @@ export async function generateApplyVerifiedPatch(
       annotations: parsed.annotations ?? [],
       proposedXml: applied.xml,
       failures,
-      verification: verificationFor(startedAt, attempts, llmCalls),
+      verification: verificationFor(startedAt, attempts, llmCalls, effort, budget),
     };
   }
 
@@ -900,7 +962,7 @@ export async function generateApplyVerifiedPatch(
     status: 422,
     error: previousError || 'No apply-verified MusicXML patch was produced.',
     failures,
-    verification: verificationFor(startedAt, attempts, llmCalls),
+    verification: verificationFor(startedAt, attempts, llmCalls, effort, budget),
   };
 }
 
@@ -919,6 +981,7 @@ export async function runMusicPatchService(
   const maxTokens = Number.isFinite(maxTokensValue) && maxTokensValue > 0 ? maxTokensValue : null;
   const temperatureValue = Number(data?.temperature);
   const temperature = data?.temperature != null && Number.isFinite(temperatureValue) ? temperatureValue : null;
+  const effort = parseAiEditEffort(data?.editEffort ?? data?.effort);
   const dryRun = Boolean(data?.dryRun || data?.dry_run);
   const apiKeyInput = (typeof data?.apiKey === 'string' ? data.apiKey : (typeof data?.api_key === 'string' ? data.api_key : '')).trim();
 
@@ -940,6 +1003,7 @@ export async function runMusicPatchService(
           model,
           hasPrompt: Boolean(prompt || promptText),
           maxTokens,
+          effort,
         },
       },
     };
@@ -1115,12 +1179,14 @@ export async function runMusicPatchService(
       image: parsedImage.attachment,
       pdf: parsedPdf.attachment,
       signal: options?.signal,
+      effort,
     });
     if (!generated.ok) {
       return {
         status: generated.status,
         body: {
           error: generated.error,
+          effort,
           ...(generated.providerStatus !== undefined ? { providerStatus: generated.providerStatus } : {}),
           verification: generated.verification,
           failures: generated.failures,
@@ -1153,6 +1219,7 @@ export async function runMusicPatchService(
           : `${provider}-direct`,
         provider,
         model,
+        effort,
         modelDescriptor: serverDescriptor,
         scoreSessionId: session?.scoreSessionId ?? null,
         revision: session?.revision ?? null,
@@ -1173,6 +1240,7 @@ export async function runMusicPatchService(
     console.error('[patch-service] Request failed.', {
       provider,
       model,
+      effort,
       error: error instanceof Error ? error.name : 'unknown_error',
     });
     return {

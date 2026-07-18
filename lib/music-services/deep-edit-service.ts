@@ -29,6 +29,12 @@ import { runMusicScoreOpsPreviewService } from './scoreops-service';
 import { randomUUID } from 'node:crypto';
 import { type TraceContext } from '../trace-http';
 import { findIntroducedMusicXmlStructuralIssues } from '../musicxml-structural-validation';
+import {
+  AI_EDIT_EFFORT_PROFILES,
+  DEFAULT_AI_EDIT_EFFORT,
+  parseAiEditEffort,
+  type AiEditEffort,
+} from '../ai-edit-effort';
 
 // Phase 3 deep-edit loop (design §7): a bounded agent tries alternative edits against
 // capability-owned in-memory candidates, and the server-side finalize gate decides
@@ -43,6 +49,8 @@ export type DeepEditErrorCategory =
   | 'request';
 
 export type DeepEditAudit = {
+  effort: AiEditEffort;
+  budgets: DeepEditBudgets;
   finalizedCandidateId: string | null;
   rationale: string;
   candidates: Array<ReturnType<DeepEditCapability['auditCandidates']>[number] & {
@@ -67,11 +75,6 @@ export type DeepEditDriver = (args: {
   prompt: string;
 }) => Promise<{ candidateId: string; rationale: string } | null>;
 
-const DEFAULT_MAX_LLM_CALLS = 12;
-const DEFAULT_MAX_TOOL_CALLS = 24;
-const DEFAULT_MAX_CANDIDATES = 4;
-const DEFAULT_MAX_RENDERS = 3;
-const DEFAULT_BUDGET_MS = 300_000;
 const MAX_BUDGET_MS = 600_000;
 const DEFAULT_MAX_CANDIDATE_BYTES = 15 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL_BYTES = 60 * 1024 * 1024;
@@ -87,15 +90,36 @@ const readClampedEnvInteger = (name: string, fallback: number, minimum: number, 
   return Math.min(maximum, Math.max(minimum, Math.floor(value)));
 };
 
-export const resolveDeepEditBudgets = (): DeepEditBudgets => ({
-  maxLlmCalls: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_LLM_CALLS', DEFAULT_MAX_LLM_CALLS, 1, 32),
-  maxToolCalls: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_TOOL_CALLS', DEFAULT_MAX_TOOL_CALLS, 1, 64),
-  maxCandidates: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_CANDIDATES', DEFAULT_MAX_CANDIDATES, 1, 8),
-  maxRenders: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_RENDERS', DEFAULT_MAX_RENDERS, 0, 8),
-  budgetMs: readClampedEnvInteger('MUSIC_DEEP_EDIT_BUDGET_MS', DEFAULT_BUDGET_MS, 10_000, MAX_BUDGET_MS),
-  maxCandidateBytes: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_CANDIDATE_BYTES', DEFAULT_MAX_CANDIDATE_BYTES, 10_000, 50 * 1024 * 1024),
-  maxTotalBytes: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_TOTAL_BYTES', DEFAULT_MAX_TOTAL_BYTES, 10_000, 200 * 1024 * 1024),
-});
+const resolveDeepProfileLimit = (args: {
+  effort: AiEditEffort;
+  profileValue: number;
+  envName: string;
+  minimum: number;
+  maximum: number;
+}) => {
+  const configuredValue = Number(process.env[args.envName]);
+  if (!Number.isFinite(configuredValue)) {
+    return Math.min(args.maximum, Math.max(args.minimum, Math.floor(args.profileValue)));
+  }
+  const configured = Math.min(args.maximum, Math.max(args.minimum, Math.floor(configuredValue)));
+  return args.effort === DEFAULT_AI_EDIT_EFFORT
+    ? configured
+    : Math.min(args.profileValue, configured);
+};
+
+export const resolveDeepEditBudgets = (effortInput?: unknown): DeepEditBudgets => {
+  const effort = parseAiEditEffort(effortInput);
+  const profile = AI_EDIT_EFFORT_PROFILES[effort].deep;
+  return {
+    maxLlmCalls: resolveDeepProfileLimit({ effort, profileValue: profile.maxLlmCalls, envName: 'MUSIC_DEEP_EDIT_MAX_LLM_CALLS', minimum: 1, maximum: 32 }),
+    maxToolCalls: resolveDeepProfileLimit({ effort, profileValue: profile.maxToolCalls, envName: 'MUSIC_DEEP_EDIT_MAX_TOOL_CALLS', minimum: 1, maximum: 64 }),
+    maxCandidates: resolveDeepProfileLimit({ effort, profileValue: profile.maxCandidates, envName: 'MUSIC_DEEP_EDIT_MAX_CANDIDATES', minimum: 1, maximum: 8 }),
+    maxRenders: resolveDeepProfileLimit({ effort, profileValue: profile.maxRenders, envName: 'MUSIC_DEEP_EDIT_MAX_RENDERS', minimum: 0, maximum: 8 }),
+    budgetMs: resolveDeepProfileLimit({ effort, profileValue: profile.budgetMs, envName: 'MUSIC_DEEP_EDIT_BUDGET_MS', minimum: 10_000, maximum: MAX_BUDGET_MS }),
+    maxCandidateBytes: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_CANDIDATE_BYTES', DEFAULT_MAX_CANDIDATE_BYTES, 10_000, 50 * 1024 * 1024),
+    maxTotalBytes: readClampedEnvInteger('MUSIC_DEEP_EDIT_MAX_TOTAL_BYTES', DEFAULT_MAX_TOTAL_BYTES, 10_000, 200 * 1024 * 1024),
+  };
+};
 
 const boundError = (message: string) => message.slice(0, MAX_TOOL_ERROR_CHARS);
 
@@ -742,6 +766,7 @@ export async function runDeepEditService(
   }
   const provider = resolveProvider(rawProvider);
   const requestedModel = typeof data?.model === 'string' ? data.model.trim() : '';
+  const effort = parseAiEditEffort(data?.editEffort ?? data?.effort);
 
   if (!prompt && !promptText) {
     return errorResult(400, 'request', 'An edit instruction is required.');
@@ -770,7 +795,7 @@ export async function runDeepEditService(
     return errorResult(400, 'request', 'Base content must be MusicXML.');
   }
 
-  const budgets = options?.budgets ?? resolveDeepEditBudgets();
+  const budgets = options?.budgets ?? resolveDeepEditBudgets(effort);
   // Phase 1's content/prompt caps apply here too (same env vars, same defaults), on top
   // of the sandbox candidate byte cap.
   const maximumContentBytes = readClampedEnvInteger(
@@ -803,6 +828,8 @@ export async function runDeepEditService(
     parentSignal: options?.signal,
   });
   const auditFor = (finalizedCandidateId: string | null, rationale: string): DeepEditAudit => ({
+    effort,
+    budgets: { ...budgets },
     finalizedCandidateId,
     rationale,
     candidates: capability.auditCandidates().map((candidate) => ({
@@ -835,6 +862,7 @@ export async function runDeepEditService(
       console.error('[deep-edit] Agent loop failed.', {
         provider,
         model: requestedModel,
+        effort,
         error: error instanceof Error ? error.name : 'unknown_error',
         detail: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300),
       });
@@ -924,6 +952,7 @@ export async function runDeepEditService(
       body: {
         provider,
         model: requestedModel,
+        effort,
         proposal,
         // A candidate chained off another candidate has a patch relative to its parent,
         // not the user's score; publishing it would poison patch display and Phase 2
@@ -940,6 +969,8 @@ export async function runDeepEditService(
           level: winner.verification,
           llmCalls: capability.counters.llmCalls,
           elapsedMs: Math.max(0, Date.now() - startedAt),
+          effort,
+          budget: { ...budgets },
         },
         deepEdit: auditFor(winner.id, finalized.rationale),
       },

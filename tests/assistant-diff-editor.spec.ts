@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { expect, test, type Route } from '@playwright/test';
+import { AI_EDIT_EFFORT_PROFILES, type AiEditEffort } from '../lib/ai-edit-effort';
 import { computeMusicXmlIdentityHashServer } from '../lib/musicxml-identity-server';
 import { applyMusicXmlPatch, type MusicXmlPatch } from '../lib/music-services/patch-service';
 
@@ -19,6 +20,8 @@ const PATCH_RESPONSE: {
     attempts: number;
     llmCalls: number;
     elapsedMs: number;
+    effort: AiEditEffort;
+    budget: typeof AI_EDIT_EFFORT_PROFILES.balanced.patch;
   };
 } = {
   patch: {
@@ -37,6 +40,8 @@ const PATCH_RESPONSE: {
     attempts: 1,
     llmCalls: 1,
     elapsedMs: 5,
+    effort: 'balanced',
+    budget: { ...AI_EDIT_EFFORT_PROFILES.balanced.patch },
   },
 };
 
@@ -130,7 +135,11 @@ const buildDiffFeedbackResponse = (
   step: string,
   iteration: number,
   baseXml: string,
-  options: { proposalSessionId?: string; previousCycleDropped?: boolean } = {},
+  options: {
+    proposalSessionId?: string;
+    previousCycleDropped?: boolean;
+    effort?: AiEditEffort;
+  } = {},
 ) => {
   const patch: MusicXmlPatch = {
     format: 'musicxml-patch@1',
@@ -150,6 +159,8 @@ const buildDiffFeedbackResponse = (
     attempts: 1,
     llmCalls: 1,
     elapsedMs: 5,
+    effort: options.effort ?? 'balanced',
+    budget: { ...AI_EDIT_EFFORT_PROFILES[options.effort ?? 'balanced'].patch },
   } as const;
   return {
     scoreSessionId: SCORE_SESSION_ID,
@@ -199,7 +210,10 @@ const waitForDiffReviewReady = async (page: Parameters<typeof test>[0]['page']) 
   await expect(page.getByText('Aligning measures...')).toHaveCount(0, { timeout: 20_000 });
 };
 
-const openAssistantProposalCompare = async (page: Parameters<typeof test>[0]['page']) => {
+const openAssistantProposalCompare = async (
+  page: Parameters<typeof test>[0]['page'],
+  options: { effort?: 'efficient' | 'balanced' | 'thorough' } = {},
+) => {
   await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
   await page.waitForSelector('svg .Note', { timeout: 60_000 });
 
@@ -207,6 +221,9 @@ const openAssistantProposalCompare = async (page: Parameters<typeof test>[0]['pa
   await page.getByTestId('tab-ai').click();
   await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
   await page.getByPlaceholder('Paste your key').fill('test-key');
+  if (options.effort) {
+    await page.getByTestId('ai-edit-effort').selectOption(options.effort);
+  }
   await page.getByPlaceholder('Describe the change you want in the MusicXML.').fill('Change the first note to G.');
   await page.getByRole('button', { name: 'Generate Patch' }).click();
 
@@ -275,6 +292,7 @@ test.describe('Assistant diff editor flow', () => {
       provider: 'openai',
       model: 'gpt-test-model',
       apiKey: 'test-key',
+      editEffort: 'balanced',
     });
     expect(String(patchRequest?.content)).toContain('<score-partwise');
     expect(String(patchRequest?.promptText)).toContain('Change the first note to G.');
@@ -303,6 +321,42 @@ test.describe('Assistant diff editor flow', () => {
     });
     expect(savedXml).toContain('<step>G</step>');
     expect(pageErrors).toEqual([]);
+  });
+
+  test('patch generation shows its budget and can be cancelled', async ({ page }) => {
+    let releasePatch: (() => void) | null = null;
+    const patchPaused = new Promise<void>((resolve) => {
+      releasePatch = resolve;
+    });
+
+    await page.route('**/api/music/patch', async (route) => {
+      await patchPaused;
+      try {
+        await fulfillPatchFromRequestBase(route);
+      } catch {
+        // The browser is expected to close the request after the user cancels it.
+      }
+    });
+
+    await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
+    await page.waitForSelector('svg .Note', { timeout: 60_000 });
+    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('tab-ai').click();
+    await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
+    await page.getByPlaceholder('Paste your key').fill('test-key');
+    await page.getByPlaceholder('Describe the change you want in the MusicXML.').fill('Change the first note to G.');
+    await page.getByRole('button', { name: 'Generate Patch' }).click();
+
+    const working = page.getByTestId('ai-edit-working');
+    await expect(working).toBeVisible({ timeout: 5_000 });
+    await expect(working).toContainText('Balanced');
+    await expect(working).toContainText('up to 2 min');
+    await working.getByRole('button', { name: 'Cancel AI edit' }).click();
+    releasePatch?.();
+
+    await expect(working).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.getByTestId('checkpoint-compare-modal')).toHaveCount(0);
+    await expect(page.getByText('Request cancelled.')).toHaveCount(0);
   });
 
   test('invalid patch response shows error and does not open compare modal', async ({ page }) => {
@@ -463,8 +517,58 @@ test.describe('Assistant diff editor flow', () => {
       await feedbackPaused;
       await route.fulfill({
         status: 200,
-        body: JSON.stringify(buildDiffFeedbackResponse('A', 1, String(lastFeedbackPayload?.content || ''))),
+        body: JSON.stringify(buildDiffFeedbackResponse(
+          'A',
+          1,
+          String(lastFeedbackPayload?.content || ''),
+          { effort: 'thorough' },
+        )),
       });
+    });
+
+    await openAssistantProposalCompare(page, { effort: 'thorough' });
+    await page.getByRole('button', { name: 'Comment' }).first().click();
+    await page.getByPlaceholder('Describe the revision needed...').first().fill('Please use A instead.');
+    await page.getByRole('button', { name: 'Enter' }).first().click();
+    await page.getByRole('button', { name: /Send Feedback/ }).first().click();
+
+    await expect(page.getByTestId('checkpoint-compare-modal')).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.getByTestId('ai-diff-feedback-working')).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByTestId('ai-diff-feedback-working')).toContainText('Thorough');
+    await expect(page.getByTestId('ai-diff-feedback-working')).toContainText('up to 5 min');
+    releaseFeedback?.();
+    await expect.poll(() => feedbackCalls, { timeout: 20_000 }).toBe(1);
+    expect(lastFeedbackPayload?.blocks?.[0]?.status).toBe('comment');
+    expect(lastFeedbackPayload?.blocks?.[0]?.comment).toContain('use A');
+    expect(lastFeedbackPayload?.editEffort).toBe('thorough');
+    await waitForDiffReviewReady(page);
+    await expect(page.getByTestId('ai-diff-feedback-working')).toHaveCount(0);
+    await expect(page.getByText('Iteration 2 review')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('ai-proposal-audit')).toContainText('Thorough effort');
+    await expect(page.getByTestId('ai-proposal-audit')).toContainText('5 min budget');
+    await expect(page.getByPlaceholder('Describe the revision needed...')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Apply All AI Changes' }).click();
+    await expect.poll(() => countHighlights(page), { timeout: 20_000 }).toBe(0);
+  });
+
+  test('feedback can be cancelled without losing the current proposal', async ({ page }) => {
+    let releaseFeedback: (() => void) | null = null;
+    const feedbackPaused = new Promise<void>((resolve) => {
+      releaseFeedback = resolve;
+    });
+
+    await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
+    await page.route('**/api/music/diff/feedback', async (route) => {
+      const payload = route.request().postDataJSON();
+      await feedbackPaused;
+      try {
+        await route.fulfill({
+          status: 200,
+          body: JSON.stringify(buildDiffFeedbackResponse('A', 1, String(payload?.content || ''))),
+        });
+      } catch {
+        // The browser is expected to close the request after the user cancels it.
+      }
     });
 
     await openAssistantProposalCompare(page);
@@ -473,18 +577,17 @@ test.describe('Assistant diff editor flow', () => {
     await page.getByRole('button', { name: 'Enter' }).first().click();
     await page.getByRole('button', { name: /Send Feedback/ }).first().click();
 
-    await expect(page.getByTestId('checkpoint-compare-modal')).toHaveCount(0, { timeout: 5_000 });
-    await expect(page.getByTestId('ai-diff-feedback-working')).toBeVisible({ timeout: 5_000 });
+    const working = page.getByTestId('ai-diff-feedback-working');
+    await expect(working).toBeVisible({ timeout: 5_000 });
+    await working.getByRole('button', { name: 'Cancel AI edit' }).click();
     releaseFeedback?.();
-    await expect.poll(() => feedbackCalls, { timeout: 20_000 }).toBe(1);
-    expect(lastFeedbackPayload?.blocks?.[0]?.status).toBe('comment');
-    expect(lastFeedbackPayload?.blocks?.[0]?.comment).toContain('use A');
+
+    await expect(working).toHaveCount(0, { timeout: 5_000 });
     await waitForDiffReviewReady(page);
-    await expect(page.getByTestId('ai-diff-feedback-working')).toHaveCount(0);
-    await expect(page.getByText('Iteration 2 review')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByPlaceholder('Describe the revision needed...')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Apply All AI Changes' }).click();
-    await expect.poll(() => countHighlights(page), { timeout: 20_000 }).toBe(0);
+    await expect(page.getByText(/Assistant Proposal vs Current|Current vs Assistant Proposal/)).toBeVisible();
+    await expect(page.getByText('Iteration 1 review')).toBeVisible();
+    await expect(page.getByText('Iteration 2 review')).toHaveCount(0);
+    await expect(page.getByText(/Diff feedback failed:/)).toHaveCount(0);
   });
 
   test('global comment is sent in diff feedback request', async ({ page }) => {

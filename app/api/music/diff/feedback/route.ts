@@ -61,6 +61,7 @@ export async function POST(request: Request) {
     const feedbackCounts = asRecord(audit?.feedbackCounts);
     const contextFlags = asRecord(audit?.proposalContext);
     const verification = asRecord(result.body.verification);
+    const budget = asRecord(verification?.budget);
     summaryExtra = {
       proposalSessionId: typeof result.body.proposalSessionId === 'string' ? result.body.proposalSessionId : null,
       cycle: typeof audit?.cycle === 'number' ? audit.cycle : null,
@@ -72,6 +73,8 @@ export async function POST(request: Request) {
       verificationLevel: typeof verification?.level === 'string' ? verification.level : null,
       attempts: typeof verification?.attempts === 'number' ? verification.attempts : null,
       llmCalls: typeof verification?.llmCalls === 'number' ? verification.llmCalls : null,
+      editEffort: typeof verification?.effort === 'string' ? verification.effort : null,
+      requestBudgetMs: typeof budget?.budgetMs === 'number' ? budget.budgetMs : null,
       providerStatus: typeof result.body.providerStatus === 'number' ? result.body.providerStatus : null,
       errorCategory: status < 400 ? null : status === 400 ? 'request' : status === 422 ? 'verification' : status === 504 ? 'timeout' : 'provider',
     };

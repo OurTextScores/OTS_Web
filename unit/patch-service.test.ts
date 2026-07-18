@@ -18,6 +18,7 @@ import {
   applyMusicXmlPatch,
   generateApplyVerifiedPatch,
   parseMusicXmlPatch,
+  resolvePatchGenerationBudget,
   runMusicPatchService,
 } from '../lib/music-services/patch-service';
 
@@ -392,6 +393,57 @@ describe('runMusicPatchService', () => {
 describe('generateApplyVerifiedPatch', () => {
   afterEach(() => {
     PATCH_ENV_KEYS.forEach((key) => delete process.env[key]);
+  });
+
+  it('resolves effort profiles without weakening deployment caps', () => {
+    expect(resolvePatchGenerationBudget('efficient')).toEqual({
+      maxAttempts: 1,
+      budgetMs: 60_000,
+      requestTimeoutMs: 45_000,
+    });
+    expect(resolvePatchGenerationBudget('thorough')).toEqual({
+      maxAttempts: 5,
+      budgetMs: 300_000,
+      requestTimeoutMs: 120_000,
+    });
+
+    process.env.MUSIC_PATCH_MAX_ATTEMPTS = '2';
+    process.env.MUSIC_PATCH_BUDGET_MS = '90000';
+    process.env.MUSIC_AI_REQUEST_TIMEOUT_MS = '50000';
+    expect(resolvePatchGenerationBudget('thorough')).toEqual({
+      maxAttempts: 2,
+      budgetMs: 90_000,
+      requestTimeoutMs: 50_000,
+    });
+  });
+
+  it('uses one candidate attempt for the efficient profile', async () => {
+    const requestText = vi.fn(async (args: Parameters<NonNullable<Parameters<typeof generateApplyVerifiedPatch>[0]['requestText']>>[0]) => {
+      args.onRequest?.();
+      return 'not json';
+    });
+    const result = await generateApplyVerifiedPatch({
+      provider: 'openai',
+      apiKey: 'sk-test',
+      model: 'gpt-4.1',
+      baseXml: BASE_XML,
+      promptText: 'Fix the duration.',
+      maxTokens: null,
+      effort: 'efficient',
+      requestText,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 422,
+      verification: {
+        effort: 'efficient',
+        attempts: 1,
+        llmCalls: 1,
+        budget: { maxAttempts: 1, budgetMs: 60_000, requestTimeoutMs: 45_000 },
+      },
+    });
+    expect(requestText).toHaveBeenCalledTimes(1);
   });
 
   it('includes the failed candidate and exact XPath error when repairing', async () => {

@@ -132,6 +132,9 @@ describe('diff-feedback-service', () => {
       provider: 'openai',
       model: 'gpt-5.5',
       apiKey: 'sk-test',
+      editEffort: 'thorough',
+      maxTokens: 8192,
+      temperature: 0.4,
       blocks: [
         { partIndex: 0, measureRange: '3-4', status: 'accepted' },
         { partIndex: 0, measureRange: '5-6', status: 'pending' },
@@ -144,6 +147,9 @@ describe('diff-feedback-service', () => {
       provider: 'openai',
       model: 'gpt-5.5',
       apiKey: 'sk-test',
+      editEffort: 'thorough',
+      maxTokens: 8192,
+      temperature: 0.4,
       content: '<score-partwise version="4.0"></score-partwise>',
     });
     expect(String(mocked.runMusicPatchService.mock.calls[0][0].prompt)).toContain('ACCEPTED');

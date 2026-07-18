@@ -21,6 +21,7 @@ describe('POST /api/music/patch/deep', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     if (priorAllowProxy === undefined) {
       delete process.env.ALLOW_UNAUTHENTICATED_LLM_PROXY;
     } else {
@@ -65,6 +66,7 @@ describe('POST /api/music/patch/deep', () => {
 
   it('forwards authenticated requests with cancellation and returns the deep-edit body', async () => {
     process.env.OTS_API_AUTH_TOKEN = 'app-token';
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     mocked.runDeepEditService.mockResolvedValue({
       status: 200,
       body: {
@@ -75,6 +77,8 @@ describe('POST /api/music/patch/deep', () => {
         proposalSessionId: 'sess-deep-1',
         cycle: 1,
         deepEdit: {
+          effort: 'thorough',
+          budgets: { budgetMs: 600_000 },
           finalizedCandidateId: 'cand-2',
           rationale: 'Best of two.',
           candidates: [{ id: 'cand-1' }, { id: 'cand-2' }],
@@ -107,6 +111,9 @@ describe('POST /api/music/patch/deep', () => {
         traceContext: expect.objectContaining({ requestId: 'req-deep-1' }),
       }),
     );
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('"editEffort":"thorough"'));
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('"requestBudgetMs":600000'));
+    infoSpy.mockRestore();
   });
 
   it('propagates typed service errors with their category', async () => {

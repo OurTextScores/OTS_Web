@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
+import { LoaderCircle, Square } from 'lucide-react';
 import { loadWebMscore, loadWebMscoreInProcess, Score, InputFileFormat, Positions, type LayoutProgressState } from '../lib/webmscore-loader';
 import {
     deleteCheckpoint,
@@ -89,6 +90,13 @@ import {
     createClientProposalSession,
     type ClientProposalSession,
 } from '../lib/proposal-session-client';
+import {
+    AI_EDIT_EFFORT_PROFILES,
+    AI_EDIT_EFFORTS,
+    DEFAULT_AI_EDIT_EFFORT,
+    formatAiEditBudgetDuration,
+    type AiEditEffort,
+} from '../lib/ai-edit-effort';
 
 type SelectionBox = {
     index: number | null;
@@ -113,6 +121,13 @@ type CompareViewState = {
     checkpointXml: string;
     currentLabel?: string;
     checkpointLabel?: string;
+};
+
+type AiEditWorkKind = 'patch' | 'deep' | 'feedback';
+
+type AiEditWorkState = {
+    kind: AiEditWorkKind;
+    startedAt: number;
 };
 
 type AiEditProposal = {
@@ -1368,6 +1383,10 @@ export default function ScoreEditor() {
     const [aiIncludeSelection, setAiIncludeSelection] = useState(false);
     const [aiIncludeChat, setAiIncludeChat] = useState(false);
     const [aiDeepEdit, setAiDeepEdit] = useState(false);
+    const [aiEditEffort, setAiEditEffort] = useState<AiEditEffort>(DEFAULT_AI_EDIT_EFFORT);
+    const [aiEditWork, setAiEditWork] = useState<AiEditWorkState | null>(null);
+    const [aiEditElapsedMs, setAiEditElapsedMs] = useState(0);
+    const aiEditAbortControllerRef = useRef<AbortController | null>(null);
     const [aiIncludeRenderedImage, setAiIncludeRenderedImage] = useState(false);
     const [aiMaxTokensMode, setAiMaxTokensMode] = useState<'auto' | 'custom'>('auto');
     const [aiMaxTokens, setAiMaxTokens] = useState(4096);
@@ -1493,6 +1512,36 @@ export default function ScoreEditor() {
         if (interactionPrimeTimerRef.current) {
             clearTimeout(interactionPrimeTimerRef.current);
             interactionPrimeTimerRef.current = null;
+        }
+    }, []);
+
+    const activeAiEditBudgetMs = aiEditWork
+        ? (aiEditWork.kind === 'deep'
+            ? AI_EDIT_EFFORT_PROFILES[aiEditEffort].deep.budgetMs
+            : AI_EDIT_EFFORT_PROFILES[aiEditEffort].patch.budgetMs)
+        : 0;
+    const cancelAiEditRequest = useCallback(() => {
+        const controller = aiEditAbortControllerRef.current;
+        if (controller && !controller.signal.aborted) {
+            controller.abort(new DOMException('Request cancelled by user.', 'AbortError'));
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!aiEditWork) {
+            setAiEditElapsedMs(0);
+            return;
+        }
+        const updateElapsed = () => setAiEditElapsedMs(Math.max(0, Date.now() - aiEditWork.startedAt));
+        updateElapsed();
+        const interval = window.setInterval(updateElapsed, 500);
+        return () => window.clearInterval(interval);
+    }, [aiEditWork]);
+
+    useEffect(() => () => {
+        const controller = aiEditAbortControllerRef.current;
+        if (controller && !controller.signal.aborted) {
+            controller.abort(new DOMException('Editor closed.', 'AbortError'));
         }
     }, []);
 
@@ -2988,14 +3037,15 @@ export default function ScoreEditor() {
     const aiDiffCommentTotal = aiDiffCommentCount + aiMeasureNoteCount;
     const hasGlobalNote = aiDiffGlobalComment.trim().length > 0;
     const canSendDiffFeedback = useMemo(
-        () => !aiDiffFeedbackBusy
+        () => !aiBusy
+            && !aiDiffFeedbackBusy
             && !compareSwapBusy
             && (
                 (aiDiffRejectedCount + aiDiffCommentTotal > 0)
                 || hasGlobalNote
                 || (aiDiffPendingCount > 0 && aiDiffAcceptedCount > 0)
             ),
-        [aiDiffFeedbackBusy, compareSwapBusy, aiDiffRejectedCount, aiDiffCommentTotal, hasGlobalNote, aiDiffPendingCount, aiDiffAcceptedCount],
+        [aiBusy, aiDiffFeedbackBusy, compareSwapBusy, aiDiffRejectedCount, aiDiffCommentTotal, hasGlobalNote, aiDiffPendingCount, aiDiffAcceptedCount],
     );
     const diffFeedbackButtonLabel = useMemo(() => {
         const parts: string[] = [];
@@ -6627,7 +6677,7 @@ ${partsBodyXml}
     }, []);
 
     const handleSendDiffFeedback = useCallback(async () => {
-        if (!compareView || !isAiCompareMode || aiDiffFeedbackBusy) {
+        if (!compareView || !isAiCompareMode || aiBusy || aiDiffFeedbackBusy) {
             return;
         }
         if (!aiApiKey.trim()) {
@@ -6710,6 +6760,12 @@ ${partsBodyXml}
             return;
         }
         const previousCheckpointXml = compareView.checkpointXml;
+        const previousExpectedContentHash = aiProposalExpectedCurrentHashRef.current;
+        const previousExpectedIdentityHash = aiProposalExpectedCurrentIdentityHashRef.current;
+        const previousBaseXml = aiProposalBaseXmlRef.current;
+        const requestController = new AbortController();
+        aiEditAbortControllerRef.current = requestController;
+        setAiEditWork({ kind: 'feedback', startedAt: Date.now() });
         setAiDiffFeedbackBusy(true);
         setAiError(null);
         setAiPatchError(null);
@@ -6743,6 +6799,7 @@ ${partsBodyXml}
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                signal: requestController.signal,
                 body: JSON.stringify({
                     content: currentXml,
                     blocks: allFeedbackBlocks,
@@ -6751,6 +6808,9 @@ ${partsBodyXml}
                     provider: aiProvider,
                     model: aiModel.trim(),
                     apiKey: aiApiKey.trim(),
+                    editEffort: aiEditEffort,
+                    maxTokens: aiMaxTokensMode === 'custom' ? aiMaxTokens : null,
+                    temperature: aiTemperatureMode === 'custom' ? aiTemperature : null,
                     ...(proposalSession.includeChat ? { chatHistory: aiChatMessages } : {}),
                     proposalSession: buildProposalSessionRequestPayload(proposalSession, {
                         contentHash: aiProposalExpectedCurrentHashRef.current,
@@ -6820,20 +6880,29 @@ ${partsBodyXml}
                 sentBlocks: allFeedbackBlocks,
                 sentGlobalComment: aiDiffGlobalComment,
             });
-            setAiProposalAudit(asRecord(result.audit) ?? {
-                cycle: typeof result.cycle === 'number' ? result.cycle : aiDiffIteration + 2,
+            const feedbackAudit = asRecord(result.audit);
+            setAiProposalAudit({
+                ...(feedbackAudit ?? {}),
+                cycle: typeof feedbackAudit?.cycle === 'number'
+                    ? feedbackAudit.cycle
+                    : typeof result.cycle === 'number'
+                        ? result.cycle
+                        : aiDiffIteration + 2,
                 verification: result.verification,
             });
             // Surface the assistant's annotations for this revision as measure-thread notes.
             mergeAiAnnotations(revisionAnnotations);
             setCompareAlignmentRevision((value) => value + 1);
         } catch (err) {
+            const wasCancelled = requestController.signal.aborted
+                && requestController.signal.reason instanceof DOMException
+                && requestController.signal.reason.name === 'AbortError';
             const rawMessage = errorMessage(err) || 'Failed to request revised proposal.';
             const surfacedMessage = formatAiDiffFeedbackError(rawMessage);
-            setAiError(surfacedMessage);
-            setAiDiffFeedbackError(surfacedMessage);
-            setCompareRightError(surfacedMessage);
-            if (commentBlockKeys.length > 0) {
+            setAiError(wasCancelled ? null : surfacedMessage);
+            setAiDiffFeedbackError(wasCancelled ? null : surfacedMessage);
+            setCompareRightError(wasCancelled ? null : surfacedMessage);
+            if (!wasCancelled && commentBlockKeys.length > 0) {
                 setAiDiffBlockErrors((prev) => {
                     const next = { ...prev };
                     commentBlockKeys.forEach((blockKey) => {
@@ -6849,12 +6918,16 @@ ${partsBodyXml}
                 currentLabel: 'Current',
                 checkpointLabel: 'Assistant Proposal',
             });
-            aiProposalExpectedCurrentHashRef.current = null;
-            aiProposalExpectedCurrentIdentityHashRef.current = null;
-            aiProposalBaseXmlRef.current = currentXml;
+            aiProposalExpectedCurrentHashRef.current = previousExpectedContentHash;
+            aiProposalExpectedCurrentIdentityHashRef.current = previousExpectedIdentityHash;
+            aiProposalBaseXmlRef.current = previousBaseXml || currentXml;
             aiProposalApplyErrorRef.current = null;
             setAiProposalApplyError(null);
         } finally {
+            if (aiEditAbortControllerRef.current === requestController) {
+                aiEditAbortControllerRef.current = null;
+                setAiEditWork(null);
+            }
             setAiDiffFeedbackBusy(false);
             setCompareRightLoading(false);
         }
@@ -6875,6 +6948,12 @@ ${partsBodyXml}
         aiDiffIteration,
         aiChatMessages,
         aiIncludeChat,
+        aiBusy,
+        aiEditEffort,
+        aiMaxTokensMode,
+        aiMaxTokens,
+        aiTemperatureMode,
+        aiTemperature,
         aiPrompt,
         captureApiTraceContext,
         parseMusicXmlPatch,
@@ -8662,6 +8741,9 @@ ${partsBodyXml}
             alert('AI features are disabled.');
             return;
         }
+        if (aiBusy || aiDiffFeedbackBusy) {
+            return;
+        }
         if (!aiApiKey.trim()) {
             alert(`Enter your ${AI_PROVIDER_LABELS[aiProvider]} API key.`);
             return;
@@ -8678,6 +8760,10 @@ ${partsBodyXml}
             alert('Enter a max output token limit.');
             return;
         }
+        const requestController = new AbortController();
+        let clientTimeoutId: ReturnType<typeof setTimeout> | null = null;
+        aiEditAbortControllerRef.current = requestController;
+        setAiEditWork({ kind: aiDeepEdit ? 'deep' : 'patch', startedAt: Date.now() });
         setAiBusy(true);
         setAiError(null);
         setAiOutput('');
@@ -8688,7 +8774,7 @@ ${partsBodyXml}
         setAiProposalAudit(null);
         const requestStartedAt = Date.now();
         let requestIssued = false;
-        let outcome: 'success' | 'failure' = 'failure';
+        let outcome: 'success' | 'failure' | 'cancelled' = 'failure';
         let failureReason = '';
         try {
             const promptSections: AiPromptSection[] = [];
@@ -8763,25 +8849,31 @@ ${partsBodyXml}
             setAiBaseXml(baseXml);
             const maxTokens = aiMaxTokensMode === 'custom' ? aiMaxTokens : null;
             const promptText = buildAiPrompt(aiPrompt, promptSections);
+            if (requestController.signal.aborted) {
+                throw requestController.signal.reason;
+            }
             requestIssued = true;
             telemetryCountersRef.current.aiRequests += 1;
             // Deep Edit is a separate, more expensive endpoint; it does not take
             // image/PDF context in v1.
             const patchEndpoint = aiDeepEdit ? '/api/music/patch/deep' : '/api/music/patch';
+            const requestBudgetMs = aiDeepEdit
+                ? AI_EDIT_EFFORT_PROFILES[aiEditEffort].deep.budgetMs
+                : AI_EDIT_EFFORT_PROFILES[aiEditEffort].patch.budgetMs;
+            clientTimeoutId = setTimeout(() => {
+                requestController.abort(new DOMException('AI edit request timed out.', 'TimeoutError'));
+            }, requestBudgetMs + 30_000);
             const response = await fetch(resolveScoreEditorApiPath(patchEndpoint), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                // Deep Edit runs a long server loop; time out just above the server's
-                // maximum request budget (10 minutes) instead of hanging forever.
-                ...(aiDeepEdit && typeof AbortSignal.timeout === 'function'
-                    ? { signal: AbortSignal.timeout(630_000) }
-                    : {}),
+                signal: requestController.signal,
                 body: JSON.stringify({
                     content: baseXml,
                     promptText,
                     provider: aiProvider,
                     apiKey: aiApiKey.trim(),
                     model: aiModel.trim(),
+                    editEffort: aiEditEffort,
                     ...(aiDeepEdit ? {} : {
                         image: imageAttachment,
                         pdf: pdfAttachment,
@@ -8867,10 +8959,27 @@ ${partsBodyXml}
             outcome = 'success';
         } catch (err) {
             console.error('AI request failed', err);
-            const message = errorMessage(err);
+            const abortReason = requestController.signal.aborted ? requestController.signal.reason : null;
+            const wasCancelled = abortReason instanceof DOMException && abortReason.name === 'AbortError';
+            const timedOut = abortReason instanceof DOMException && abortReason.name === 'TimeoutError';
+            if (wasCancelled) {
+                outcome = 'cancelled';
+            }
+            const message = wasCancelled
+                ? 'Request cancelled.'
+                : timedOut
+                    ? 'AI edit request exceeded its client timeout.'
+                    : errorMessage(err);
             failureReason = message || 'AI request failed. See console for details.';
-            setAiError(message || 'AI request failed. See console for details.');
+            setAiError(wasCancelled ? null : message || 'AI request failed. See console for details.');
         } finally {
+            if (clientTimeoutId) {
+                clearTimeout(clientTimeoutId);
+            }
+            if (aiEditAbortControllerRef.current === requestController) {
+                aiEditAbortControllerRef.current = null;
+                setAiEditWork(null);
+            }
             setAiBusy(false);
             if (requestIssued) {
                 if (outcome === 'failure') {
@@ -8880,6 +8989,7 @@ ${partsBodyXml}
                     channel: 'assistant_patch',
                     provider: aiProvider,
                     model: aiModel,
+                    edit_effort: aiEditEffort,
                     outcome,
                     duration_ms: Math.max(0, Date.now() - requestStartedAt),
                     error: outcome === 'failure' ? failureReason || undefined : undefined,
@@ -14083,12 +14193,42 @@ ${partsBodyXml}
                         )}
                         {xmlSidebarTab === 'assistant' && aiEnabled && (
                             <div className="mt-3 flex min-h-full flex-col gap-3 text-sm text-gray-700">
-                                {aiDiffFeedbackBusy && (
+                                {aiEditWork && (
                                     <div
-                                        data-testid="ai-diff-feedback-working"
-                                        className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-900"
+                                        data-testid={aiEditWork.kind === 'feedback'
+                                            ? 'ai-diff-feedback-working'
+                                            : 'ai-edit-working'}
+                                        role="status"
+                                        aria-live="polite"
+                                        className="flex items-center gap-2 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-blue-900"
                                     >
-                                        Working... Generating the next AI proposal from your feedback.
+                                        <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+                                        <div className="min-w-0 flex-1">
+                                            <div className="text-xs font-medium">
+                                                {aiEditWork.kind === 'feedback'
+                                                    ? 'Generating the next proposal'
+                                                    : aiEditWork.kind === 'deep'
+                                                        ? 'Exploring and verifying alternatives'
+                                                        : 'Generating and validating a patch'}
+                                            </div>
+                                            <div className="mt-0.5 text-[11px] text-blue-700">
+                                                {AI_EDIT_EFFORT_PROFILES[aiEditEffort].label}
+                                                {' · '}
+                                                {formatAiEditBudgetDuration(aiEditElapsedMs)} elapsed
+                                                {' · up to '}
+                                                {formatAiEditBudgetDuration(activeAiEditBudgetMs)}
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={cancelAiEditRequest}
+                                            title="Cancel AI edit"
+                                            aria-label="Cancel AI edit"
+                                            className="flex shrink-0 items-center gap-1 rounded border border-blue-300 bg-white px-2 py-1 text-xs font-medium text-blue-800 hover:bg-blue-100"
+                                        >
+                                            <Square className="h-3 w-3 fill-current" aria-hidden="true" />
+                                            <span>Cancel</span>
+                                        </button>
                                     </div>
                                 )}
                                 {aiDiffFeedbackError && (
@@ -14218,6 +14358,21 @@ ${partsBodyXml}
                                             Chat
                                         </button>
                                         <div className="ml-auto flex flex-wrap items-center justify-end gap-2 text-xs text-gray-600">
+                                            <span>Effort</span>
+                                            <select
+                                                data-testid="ai-edit-effort"
+                                                value={aiEditEffort}
+                                                onChange={(event) => setAiEditEffort(event.target.value as AiEditEffort)}
+                                                disabled={aiBusy || aiDiffFeedbackBusy}
+                                                className="rounded border border-gray-300 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                                                title={AI_EDIT_EFFORT_PROFILES[aiEditEffort].description}
+                                            >
+                                                {AI_EDIT_EFFORTS.map((effort) => (
+                                                    <option key={effort} value={effort}>
+                                                        {AI_EDIT_EFFORT_PROFILES[effort].label}
+                                                    </option>
+                                                ))}
+                                            </select>
                                             <span>Max output</span>
                                             <select
                                                 value={aiMaxTokensMode}
@@ -14270,7 +14425,7 @@ ${partsBodyXml}
                                             <div className="flex flex-col items-start gap-y-2">
                                                 <label className="flex items-center gap-2">
                                                     <input
-                                                        type="checkbox"
+                                                type="checkbox"
                                                         checked={aiIncludeSelection}
                                                         onChange={(event) => setAiIncludeSelection(event.target.checked)}
                                                     />
@@ -14361,14 +14516,14 @@ ${partsBodyXml}
                                                     data-testid="ai-deep-edit-toggle"
                                                     checked={aiDeepEdit}
                                                     onChange={(event) => setAiDeepEdit(event.target.checked)}
-                                                    disabled={aiBusy}
+                                                    disabled={aiBusy || aiDiffFeedbackBusy}
                                                 />
                                                 Deep Edit (slower, tries and verifies alternatives; ignores image/PDF context)
                                             </label>
                                             <button
                                                 type="button"
                                                 onClick={handleAiRequest}
-                                                disabled={aiBusy}
+                                                disabled={aiBusy || aiDiffFeedbackBusy}
                                                 className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
                                                 {aiBusy ? 'Working...' : aiDeepEdit ? 'Deep Edit' : 'Generate Patch'}
@@ -16017,6 +16172,7 @@ ${partsBodyXml}
                             )}
                             {isAiCompareMode && aiProposalAudit && (() => {
                                 const auditVerification = asRecord(aiProposalAudit.verification);
+                                const auditBudget = asRecord(auditVerification?.budget);
                                 const contextFlags = asRecord(aiProposalAudit.proposalContext);
                                 const truncatedFields = Array.isArray(contextFlags?.truncated)
                                     ? contextFlags.truncated.filter((entry): entry is string => typeof entry === 'string')
@@ -16024,10 +16180,18 @@ ${partsBodyXml}
                                 const deepAudit = asRecord(aiProposalAudit.deepEdit);
                                 const deepCandidates = Array.isArray(deepAudit?.candidates) ? deepAudit.candidates.length : 0;
                                 const deepRationale = typeof deepAudit?.rationale === 'string' ? deepAudit.rationale.trim() : '';
+                                const auditEffort = typeof auditVerification?.effort === 'string'
+                                    && AI_EDIT_EFFORTS.includes(auditVerification.effort as AiEditEffort)
+                                    ? auditVerification.effort as AiEditEffort
+                                    : null;
                                 const statusParts = [
                                     typeof aiProposalAudit.cycle === 'number' ? `Cycle ${aiProposalAudit.cycle}` : '',
                                     typeof auditVerification?.level === 'string'
                                         ? AI_PROPOSAL_VERIFICATION_LABELS[auditVerification.level] ?? ''
+                                        : '',
+                                    auditEffort ? `${AI_EDIT_EFFORT_PROFILES[auditEffort].label} effort` : '',
+                                    typeof auditBudget?.budgetMs === 'number'
+                                        ? `${formatAiEditBudgetDuration(auditBudget.budgetMs)} budget`
                                         : '',
                                     typeof auditVerification?.attempts === 'number'
                                         ? `${auditVerification.attempts} attempt${auditVerification.attempts === 1 ? '' : 's'}`

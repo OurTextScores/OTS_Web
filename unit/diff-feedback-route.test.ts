@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const mocked = vi.hoisted(() => ({
   runDiffFeedbackService: vi.fn(),
@@ -11,13 +11,25 @@ vi.mock('../lib/music-services/diff-feedback-service', () => ({
 import { POST } from '../app/api/music/diff/feedback/route';
 
 describe('POST /api/music/diff/feedback', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('returns service response body and status', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     mocked.runDiffFeedbackService.mockResolvedValue({
       status: 200,
       body: {
         iteration: 3,
         patch: { format: 'musicxml-patch@1', ops: [] },
         proposedXml: '<score-partwise/>',
+        verification: {
+          level: 'patch_apply',
+          attempts: 2,
+          llmCalls: 2,
+          effort: 'efficient',
+          budget: { maxAttempts: 1, budgetMs: 60_000, requestTimeoutMs: 45_000 },
+        },
       },
     });
 
@@ -31,6 +43,9 @@ describe('POST /api/music/diff/feedback', () => {
       iteration: 3,
       patch: { format: 'musicxml-patch@1', ops: [] },
     });
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('"editEffort":"efficient"'));
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('"requestBudgetMs":60000'));
+    infoSpy.mockRestore();
   });
 
   it('propagates service errors', async () => {
