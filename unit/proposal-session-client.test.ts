@@ -83,20 +83,56 @@ describe('accumulateProposalConstraints', () => {
     expect(cycle2.at(-1)).toEqual(rejected(1, '8-8', 2));
   });
 
-  it('reverses an earlier rejection when a later cycle re-reviews the same block', () => {
+  it('replaces an earlier rejection when a later cycle explicitly re-reviews the same block', () => {
     const existing = [rejected(0, '3-4'), rejected(1, '8-8')];
     const next = accumulateProposalConstraints(existing, 2, [
       { partIndex: 0, measureRange: '3-4', status: 'comment', comment: 'Actually revise this one.' },
     ], '');
-    expect(next).toEqual([rejected(1, '8-8')]);
+    expect(next).toEqual([
+      rejected(1, '8-8'),
+      { cycle: 2, kind: 'note', partIndex: 0, measureRange: '3-4', text: 'Actually revise this one.' },
+    ]);
   });
 
-  it('does not duplicate identical rejections or notes', () => {
+  it('accumulates block revision comments as located notes', () => {
+    const next = accumulateProposalConstraints([], 1, [
+      { partIndex: 0, measureRange: '5-6', status: 'comment', comment: 'Make this legato.' },
+    ], '');
+    expect(next).toEqual([
+      { cycle: 1, kind: 'note', partIndex: 0, measureRange: '5-6', text: 'Make this legato.' },
+    ]);
+  });
+
+  it('never reverses a constraint for a pending (undecided) block', () => {
+    const existing = [
+      rejected(0, '3-4'),
+      { cycle: 1, kind: 'note' as const, partIndex: 0, measureRange: '5-6', text: 'Make this legato.' },
+    ];
+    const next = accumulateProposalConstraints(existing, 2, [
+      { partIndex: 0, measureRange: '3-4', status: 'pending' },
+      { partIndex: 0, measureRange: '5-6', status: 'pending' },
+    ], '');
+    expect(next).toEqual(existing);
+  });
+
+  it('clears located constraints when the user accepts that block', () => {
+    const existing = [
+      rejected(0, '3-4'),
+      { cycle: 1, kind: 'note' as const, partIndex: 0, measureRange: '5-6', text: 'Make this legato.' },
+    ];
+    const next = accumulateProposalConstraints(existing, 2, [
+      { partIndex: 0, measureRange: '3-4', status: 'accepted' },
+      { partIndex: 0, measureRange: '5-6', status: 'accepted' },
+    ], '');
+    expect(next).toEqual([]);
+  });
+
+  it('refreshes rather than duplicates a repeated rejection, and dedupes global notes', () => {
     const existing = [rejected(0, '3-4')];
     const next = accumulateProposalConstraints(existing, 2, [
       { partIndex: 0, measureRange: '3-4', status: 'rejected' },
     ], '');
-    expect(next).toEqual([rejected(0, '3-4')]);
+    expect(next).toEqual([rejected(0, '3-4', 2)]);
     const withNote = accumulateProposalConstraints(
       [{ cycle: 1, kind: 'note', partIndex: null, measureRange: null, text: 'No slurs.' }],
       2,

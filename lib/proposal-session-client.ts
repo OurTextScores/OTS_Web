@@ -104,9 +104,12 @@ export type SentFeedbackBlock = {
 };
 
 /**
- * Fold one cycle of user feedback into the cumulative constraint list. Rejections become
- * standing constraints; a later decision on the same block (any non-rejected status)
- * reverses the earlier rejection. Global notes accumulate as 'note' constraints.
+ * Fold one cycle of user feedback into the cumulative constraint list.
+ * - Rejections and per-block revision comments become standing constraints tied to their
+ *   part/measure location; global notes accumulate unlocated.
+ * - Only an explicit later decision reverses an earlier constraint: 'accepted' clears the
+ *   location, and a new 'comment'/'rejected' on the same location replaces what was there.
+ *   'pending' means the user has not decided and never reverses anything.
  */
 export function accumulateProposalConstraints(
   existing: ProposalConstraint[],
@@ -117,38 +120,43 @@ export function accumulateProposalConstraints(
   const blockKey = (partIndex: number | null, measureRange: string | null) => (
     `${partIndex ?? 'x'}:${measureRange ?? ''}`
   );
-  const reversedKeys = new Set(
+  const decidedKeys = new Set(
     sentBlocks
-      .filter((block) => block.status !== 'rejected')
+      .filter((block) => block.status === 'accepted' || block.status === 'rejected' || block.status === 'comment')
       .map((block) => blockKey(block.partIndex, block.measureRange)),
   );
+  // Any explicit decision this cycle supersedes older located constraints at the same spot.
   const next = existing.filter((constraint) => (
-    constraint.kind !== 'rejected' || !reversedKeys.has(blockKey(constraint.partIndex, constraint.measureRange))
+    constraint.measureRange === null || !decidedKeys.has(blockKey(constraint.partIndex, constraint.measureRange))
   ));
-  const knownRejectedKeys = new Set(
-    next
-      .filter((constraint) => constraint.kind === 'rejected')
-      .map((constraint) => blockKey(constraint.partIndex, constraint.measureRange)),
-  );
+  const seenKeys = new Set<string>();
   for (const block of sentBlocks) {
-    if (block.status !== 'rejected') {
-      continue;
-    }
     const key = blockKey(block.partIndex, block.measureRange);
-    if (knownRejectedKeys.has(key)) {
+    if (seenKeys.has(key)) {
       continue;
     }
-    knownRejectedKeys.add(key);
-    next.push({
-      cycle: revisedCycle,
-      kind: 'rejected',
-      partIndex: block.partIndex,
-      measureRange: block.measureRange,
-      text: '',
-    });
+    if (block.status === 'rejected') {
+      seenKeys.add(key);
+      next.push({
+        cycle: revisedCycle,
+        kind: 'rejected',
+        partIndex: block.partIndex,
+        measureRange: block.measureRange,
+        text: '',
+      });
+    } else if (block.status === 'comment' && (block.comment || '').trim()) {
+      seenKeys.add(key);
+      next.push({
+        cycle: revisedCycle,
+        kind: 'note',
+        partIndex: block.partIndex,
+        measureRange: block.measureRange,
+        text: (block.comment || '').trim(),
+      });
+    }
   }
   const note = globalComment.trim();
-  if (note && !next.some((constraint) => constraint.kind === 'note' && constraint.text === note)) {
+  if (note && !next.some((constraint) => constraint.kind === 'note' && constraint.measureRange === null && constraint.text === note)) {
     next.push({
       cycle: revisedCycle,
       kind: 'note',
