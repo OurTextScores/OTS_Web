@@ -600,6 +600,9 @@ type BlockReview = {
     blockIndex: number;
     blockKey: string;
     measureRange: string;
+    // Ties the review to the measure content it was made against, so a regenerated
+    // proposal with a different change in the same measures cannot inherit the decision.
+    contentSignature?: string;
     status: BlockReviewStatus;
     comment: string;
     commentCommitted: boolean;
@@ -625,7 +628,26 @@ type AiMeasureThread = AiMeasureAnchor & {
     comments: AiThreadComment[];
 };
 
-type AiDiffBlockRef = Pick<BlockReview, 'partIndex' | 'blockIndex' | 'blockKey' | 'measureRange'>;
+type AiDiffBlockRef = Pick<BlockReview, 'partIndex' | 'blockIndex' | 'blockKey' | 'measureRange' | 'contentSignature'>;
+
+const aiDiffBlockContentSignature = (
+    signatures: { left: string[][]; right: string[][] } | null,
+    partIndex: number,
+    leftIndices: number[],
+    rightIndices: number[],
+): string => {
+    if (!signatures) {
+        return '';
+    }
+    const leftSigs = leftIndices.map((index) => signatures.left[partIndex]?.[index] ?? `?${index}`);
+    const rightSigs = rightIndices.map((index) => signatures.right[partIndex]?.[index] ?? `?${index}`);
+    const text = `${leftSigs.join('\u0001')}\u0002${rightSigs.join('\u0001')}`;
+    let hash = 5381;
+    for (let i = 0; i < text.length; i += 1) {
+        hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+    }
+    return `blocksig-v1:${(hash >>> 0).toString(16)}:${text.length}`;
+};
 
 type EditorTraceContext = {
     requestId?: string;
@@ -2880,9 +2902,9 @@ export default function ScoreEditor() {
     const isAiCompareMode = compareView?.title === 'Assistant Proposal';
     const aiDiffCurrentBlocks = useMemo(() => {
         if (!isAiCompareMode) {
-            return [] as Array<{ partIndex: number; blockIndex: number; blockKey: string; measureRange: string }>;
+            return [] as Array<{ partIndex: number; blockIndex: number; blockKey: string; measureRange: string; contentSignature: string }>;
         }
-        const blocks: Array<{ partIndex: number; blockIndex: number; blockKey: string; measureRange: string }> = [];
+        const blocks: Array<{ partIndex: number; blockIndex: number; blockKey: string; measureRange: string; contentSignature: string }> = [];
         Array.from({ length: comparePartCount }).forEach((_, partIndex) => {
             const alignment = compareAlignmentByPart.get(partIndex);
             const rows = alignment?.rows ?? [];
@@ -2913,11 +2935,12 @@ export default function ScoreEditor() {
                     blockIndex,
                     blockKey,
                     measureRange,
+                    contentSignature: aiDiffBlockContentSignature(compareSignatures, partIndex, leftIndices, rightIndices),
                 });
             });
         });
         return blocks;
-    }, [isAiCompareMode, comparePartCount, compareAlignmentByPart, buildMismatchBlocks]);
+    }, [isAiCompareMode, comparePartCount, compareAlignmentByPart, buildMismatchBlocks, compareSignatures]);
     const aiDiffReviewByKey = useMemo(() => {
         const map = new Map<string, BlockReview>();
         aiDiffReviews.forEach((review) => {
@@ -2941,21 +2964,25 @@ export default function ScoreEditor() {
         }
         return review.comment.trim() ? 'comment' : 'pending';
     }, []);
-    const aiDiffRejectedCount = useMemo(() => aiDiffCurrentBlocks.filter((block) => {
+    const resolveAiDiffReview = useCallback((block: AiDiffBlockRef): BlockReview | undefined => {
         const review = aiDiffReviewByKey.get(block.blockKey)
             ?? aiDiffReviewByRange.get(`${block.partIndex}:${block.measureRange}`);
-        return getReviewStatusForFeedback(review) === 'rejected';
-    }).length, [aiDiffCurrentBlocks, aiDiffReviewByKey, aiDiffReviewByRange, getReviewStatusForFeedback]);
-    const aiDiffCommentCount = useMemo(() => aiDiffCurrentBlocks.filter((block) => {
-        const review = aiDiffReviewByKey.get(block.blockKey)
-            ?? aiDiffReviewByRange.get(`${block.partIndex}:${block.measureRange}`);
-        return getReviewStatusForFeedback(review) === 'comment';
-    }).length, [aiDiffCurrentBlocks, aiDiffReviewByKey, aiDiffReviewByRange, getReviewStatusForFeedback]);
-    const aiDiffPendingCount = useMemo(() => aiDiffCurrentBlocks.filter((block) => {
-        const review = aiDiffReviewByKey.get(block.blockKey)
-            ?? aiDiffReviewByRange.get(`${block.partIndex}:${block.measureRange}`);
-        return getReviewStatusForFeedback(review) === 'pending';
-    }).length, [aiDiffCurrentBlocks, aiDiffReviewByKey, aiDiffReviewByRange, getReviewStatusForFeedback]);
+        // A review from an earlier proposal cycle only applies to a block whose content it
+        // was made against; a different change in the same measures starts unreviewed.
+        if (review?.contentSignature && block.contentSignature && review.contentSignature !== block.contentSignature) {
+            return undefined;
+        }
+        return review;
+    }, [aiDiffReviewByKey, aiDiffReviewByRange]);
+    const aiDiffRejectedCount = useMemo(() => aiDiffCurrentBlocks.filter((block) => (
+        getReviewStatusForFeedback(resolveAiDiffReview(block)) === 'rejected'
+    )).length, [aiDiffCurrentBlocks, resolveAiDiffReview, getReviewStatusForFeedback]);
+    const aiDiffCommentCount = useMemo(() => aiDiffCurrentBlocks.filter((block) => (
+        getReviewStatusForFeedback(resolveAiDiffReview(block)) === 'comment'
+    )).length, [aiDiffCurrentBlocks, resolveAiDiffReview, getReviewStatusForFeedback]);
+    const aiDiffPendingCount = useMemo(() => aiDiffCurrentBlocks.filter((block) => (
+        getReviewStatusForFeedback(resolveAiDiffReview(block)) === 'pending'
+    )).length, [aiDiffCurrentBlocks, resolveAiDiffReview, getReviewStatusForFeedback]);
     const aiDiffAcceptedCount = useMemo(
         () => aiDiffReviews.filter((review) => getReviewStatusForFeedback(review) === 'accepted').length,
         [aiDiffReviews, getReviewStatusForFeedback],
@@ -6341,6 +6368,7 @@ ${partsBodyXml}
                         ? {
                             ...review,
                             status,
+                            contentSignature: block.contentSignature || review.contentSignature,
                             comment: status === 'comment' ? review.comment : '',
                             commentCommitted: false,
                         }
@@ -6354,6 +6382,7 @@ ${partsBodyXml}
                     blockIndex: block.blockIndex,
                     blockKey: block.blockKey,
                     measureRange: block.measureRange,
+                    contentSignature: block.contentSignature,
                     status,
                     comment: '',
                     commentCommitted: false,
@@ -6382,8 +6411,7 @@ ${partsBodyXml}
     }, []);
 
     const commitAiDiffBlockComment = useCallback((block: AiDiffBlockRef) => {
-        const existing = aiDiffReviewByKey.get(block.blockKey)
-            ?? aiDiffReviewByRange.get(`${block.partIndex}:${block.measureRange}`);
+        const existing = resolveAiDiffReview(block);
         const nextComment = getAiDiffBlockCommentValue(block, existing?.comment ?? '');
         const trimmed = nextComment.trim();
         if (!trimmed) {
@@ -6406,7 +6434,7 @@ ${partsBodyXml}
             delete next[block.blockKey];
             return next;
         });
-    }, [aiDiffReviewByKey, aiDiffReviewByRange, getAiDiffBlockCommentValue]);
+    }, [resolveAiDiffReview, getAiDiffBlockCommentValue]);
 
     const editAiDiffBlockComment = useCallback((block: AiDiffBlockRef) => {
         setAiDiffReviews((prev) => prev.map((review) => (
@@ -6636,8 +6664,7 @@ ${partsBodyXml}
             });
         });
         aiDiffCurrentBlocks.forEach((block) => {
-            const review = aiDiffReviewByKey.get(block.blockKey)
-                ?? aiDiffReviewByRange.get(`${block.partIndex}:${block.measureRange}`);
+            const review = resolveAiDiffReview(block);
             const status = getReviewStatusForFeedback(review);
             blockMap.set(block.blockKey, {
                 partIndex: block.partIndex,
@@ -6851,8 +6878,7 @@ ${partsBodyXml}
         aiMeasureThreads,
         mergeAiAnnotations,
         aiDiffCurrentBlocks,
-        aiDiffReviewByKey,
-        aiDiffReviewByRange,
+        resolveAiDiffReview,
         getReviewStatusForFeedback,
         aiDiffGlobalComment,
         aiDiffIteration,
@@ -17115,9 +17141,9 @@ ${partsBodyXml}
                                                                     blockIndex,
                                                                     blockKey,
                                                                     measureRange,
+                                                                    contentSignature: aiDiffBlockContentSignature(compareSignatures, index, leftIndices, rightIndices),
                                                                 };
-                                                                const review = aiDiffReviewByKey.get(blockKey)
-                                                                    ?? aiDiffReviewByRange.get(`${index}:${measureRange}`);
+                                                                const review = resolveAiDiffReview(aiBlock);
                                                                 const reviewStatus = review?.status ?? 'pending';
                                                                 const reviewComment = review?.comment ?? '';
                                                                 const commentCommitted = Boolean(review?.commentCommitted);
