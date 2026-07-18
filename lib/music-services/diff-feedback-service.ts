@@ -42,9 +42,23 @@ const sanitizeText = (value: string, maxChars: number) => (
     .slice(0, maxChars)
 );
 
+const DEFAULT_FEEDBACK_MAX_BLOCKS = 200;
+
+const maxFeedbackBlocks = () => {
+  const value = Number(process.env.MUSIC_FEEDBACK_MAX_BLOCKS);
+  if (!Number.isFinite(value)) {
+    return DEFAULT_FEEDBACK_MAX_BLOCKS;
+  }
+  return Math.min(1_000, Math.max(1, Math.floor(value)));
+};
+
 const parseBlocks = (value: unknown) => {
   if (!Array.isArray(value)) {
     return { blocks: [] as DiffFeedbackBlock[], error: 'blocks must be an array.' };
+  }
+  const blockLimit = maxFeedbackBlocks();
+  if (value.length > blockLimit) {
+    return { blocks: [] as DiffFeedbackBlock[], error: `blocks exceeds the ${blockLimit} entry limit.` };
   }
   const blocks: DiffFeedbackBlock[] = [];
   for (let i = 0; i < value.length; i += 1) {

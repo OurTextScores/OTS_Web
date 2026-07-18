@@ -132,6 +132,63 @@ describe('parseProposalSessionContext', () => {
     expect(result.flags.truncated).toContain('constraints');
   });
 
+  it('enforces the aggregate context budget with deterministic drop order', () => {
+    const previous = process.env.MUSIC_FEEDBACK_CONTEXT_MAX_CHARS;
+    process.env.MUSIC_FEEDBACK_CONTEXT_MAX_CHARS = '10000';
+    try {
+      const bigPatch = {
+        format: 'musicxml-patch@1',
+        ops: [{ op: 'setText', path: '/score-partwise/part/measure/note/duration', value: 'x'.repeat(6_000) }],
+      };
+      const manyConstraints = Array.from({ length: 40 }, (_, i) => ({
+        cycle: 1,
+        kind: 'note',
+        partIndex: null,
+        measureRange: null,
+        text: `${i}-`.padEnd(200, 'c'),
+      }));
+      const overBudget = parseProposalSessionContext(
+        validInput({
+          previousCycle: validPreviousCycle({ patch: bigPatch }),
+          constraints: manyConstraints,
+        }),
+        { iteration: 0 },
+      );
+      if (!('context' in overBudget) || !overBudget.context) {
+        throw new Error('expected context');
+      }
+      expect(overBudget.flags.truncated).toContain('constraints');
+      expect(overBudget.context.constraints.length).toBeLessThan(40);
+      expect(overBudget.context.constraints.at(-1)?.text.startsWith('39-')).toBe(true);
+      expect(overBudget.context.previousCycle?.patchJson).toContain('musicxml-patch@1');
+
+      const patchOverBudget = parseProposalSessionContext(
+        validInput({
+          originalInstruction: 'x'.repeat(3_900),
+          previousCycle: validPreviousCycle({
+            patch: {
+              format: 'musicxml-patch@1',
+              ops: [{ op: 'setText', path: '/x', value: 'y'.repeat(9_000) }],
+            },
+          }),
+          constraints: [],
+        }),
+        { iteration: 0 },
+      );
+      if (!('context' in patchOverBudget) || !patchOverBudget.context) {
+        throw new Error('expected context');
+      }
+      expect(patchOverBudget.context.previousCycle?.patchJson).toBe('');
+      expect(patchOverBudget.flags.truncated).toContain('previousPatch');
+    } finally {
+      if (previous === undefined) {
+        delete process.env.MUSIC_FEEDBACK_CONTEXT_MAX_CHARS;
+      } else {
+        process.env.MUSIC_FEEDBACK_CONTEXT_MAX_CHARS = previous;
+      }
+    }
+  });
+
   it('sanitizes control characters and drops empty constraints', () => {
     const result = parseProposalSessionContext(
       validInput({

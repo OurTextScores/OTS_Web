@@ -331,6 +331,22 @@ describe('diff-feedback-service', () => {
     expect(audit.proposalContext).toMatchObject({ provided: false, lineage: 'none' });
   });
 
+  it('returns 400 when the block list exceeds the aggregate limit', async () => {
+    const blocks = Array.from({ length: 201 }, (_, i) => ({
+      partIndex: 0,
+      measureRange: `${i + 1}-${i + 1}`,
+      status: 'pending',
+    }));
+    const result = await runDiffFeedbackService({
+      content: SESSION_BASE_XML,
+      blocks,
+    });
+
+    expect(result.status).toBe(400);
+    expect(String(result.body.error)).toContain('entry limit');
+    expect(mocked.runMusicPatchService).not.toHaveBeenCalled();
+  });
+
   it('returns 400 for malformed block payloads', async () => {
     const result = await runDiffFeedbackService({
       content: '<score-partwise version="4.0"></score-partwise>',

@@ -60,6 +60,7 @@ const DEFAULT_ANNOTATION_COMMENT_MAX_CHARS = 500;
 const DEFAULT_CONSTRAINTS_MAX = 120;
 const DEFAULT_CONSTRAINT_TEXT_MAX_CHARS = 300;
 const HARD_CONSTRAINTS_INPUT_MAX = 500;
+const DEFAULT_CONTEXT_TOTAL_MAX_CHARS = 120_000;
 
 const readClampedEnvInteger = (name: string, fallback: number, minimum: number, maximum: number) => {
   const value = Number(process.env[name]);
@@ -312,6 +313,35 @@ export function parseProposalSessionContext(
       constraints = constraints.slice(constraints.length - constraintsMax);
       truncated.add('constraints');
     }
+  }
+
+  // Aggregate budget across every context section, independent of the per-field caps, so
+  // the rendered proposal context has a hard ceiling before prompt construction. Drop
+  // order is deterministic: oldest constraints first, then trailing annotations, then the
+  // previous patch.
+  const totalBudgetChars = readClampedEnvInteger(
+    'MUSIC_FEEDBACK_CONTEXT_MAX_CHARS',
+    DEFAULT_CONTEXT_TOTAL_MAX_CHARS,
+    10_000,
+    5_000_000,
+  );
+  const contextSize = () => (
+    originalInstruction.length
+    + (previousCycle ? previousCycle.patchJson.length : 0)
+    + (previousCycle ? previousCycle.annotations.reduce((sum, annotation) => sum + annotation.comment.length + 24, 0) : 0)
+    + constraints.reduce((sum, constraint) => sum + constraint.text.length + (constraint.measureRange?.length ?? 0) + 24, 0)
+  );
+  while (contextSize() > totalBudgetChars && constraints.length) {
+    constraints.shift();
+    truncated.add('constraints');
+  }
+  while (contextSize() > totalBudgetChars && previousCycle && previousCycle.annotations.length) {
+    previousCycle.annotations.pop();
+    truncated.add('previousAnnotations');
+  }
+  if (contextSize() > totalBudgetChars && previousCycle && previousCycle.patchJson) {
+    previousCycle.patchJson = '';
+    truncated.add('previousPatch');
   }
 
   flags.truncated = [...truncated].sort();
