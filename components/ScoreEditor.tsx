@@ -83,6 +83,12 @@ import {
     computeClientProposalHashes,
     verifyAiProposalCurrentContent,
 } from '../lib/ai-edit-proposal-client';
+import {
+    advanceClientProposalSession,
+    buildProposalSessionRequestPayload,
+    createClientProposalSession,
+    type ClientProposalSession,
+} from '../lib/proposal-session-client';
 
 type SelectionBox = {
     index: number | null;
@@ -119,6 +125,8 @@ type AiEditProposal = {
     expectedCurrentContentHash: string;
     baseIdentityHash?: string;
     expectedCurrentIdentityHash?: string;
+    proposedContentHash?: string;
+    proposedIdentityHash?: string;
     verification: {
         level: 'patch_apply' | 'tool_execution';
     };
@@ -1150,6 +1158,8 @@ export default function ScoreEditor() {
     const aiProposalBaseXmlRef = useRef('');
     const aiProposalApplyErrorRef = useRef<string | null>(null);
     const [aiProposalApplyError, setAiProposalApplyError] = useState<string | null>(null);
+    const aiProposalSessionRef = useRef<ClientProposalSession | null>(null);
+    const [aiProposalAudit, setAiProposalAudit] = useState<Record<string, unknown> | null>(null);
     const [compareLeftCheckpointLabel, setCompareLeftCheckpointLabel] = useState('');
     const [compareRightCheckpointLabel, setCompareRightCheckpointLabel] = useState('');
     const [compareRightScore, setCompareRightScore] = useState<Score | null>(null);
@@ -6692,6 +6702,22 @@ ${partsBodyXml}
         setCompareRightLoading(false);
         setCompareRightError(null);
         try {
+            // The session snapshot (not the live sidebar toggle) decides chat inclusion; a
+            // lazily created session adopts the current iteration so the server's
+            // cycle-consistency check holds for pre-session compare views.
+            const existingSession = aiProposalSessionRef.current;
+            const proposalSession: ClientProposalSession = existingSession
+                ? (existingSession.cycle === aiDiffIteration + 1
+                    ? existingSession
+                    : { ...existingSession, cycle: aiDiffIteration + 1 })
+                : {
+                    ...createClientProposalSession({
+                        originalInstruction: aiPrompt.trim(),
+                        includeChat: aiIncludeChat,
+                    }),
+                    cycle: aiDiffIteration + 1,
+                };
+            aiProposalSessionRef.current = proposalSession;
             const response = await fetch(resolveScoreEditorApiPath('/api/music/diff/feedback'), {
                 method: 'POST',
                 headers: {
@@ -6705,7 +6731,11 @@ ${partsBodyXml}
                     provider: aiProvider,
                     model: aiModel.trim(),
                     apiKey: aiApiKey.trim(),
-                    chatHistory: aiChatMessages,
+                    ...(proposalSession.includeChat ? { chatHistory: aiChatMessages } : {}),
+                    proposalSession: buildProposalSessionRequestPayload(proposalSession, {
+                        contentHash: aiProposalExpectedCurrentHashRef.current,
+                        identityHash: aiProposalExpectedCurrentIdentityHashRef.current,
+                    }),
                 }),
             });
             captureApiTraceContext(response.headers);
@@ -6759,8 +6789,22 @@ ${partsBodyXml}
             setAiDiffGlobalComment('');
             setAiDiffFeedbackError(null);
             setAiDiffBlockErrors({});
+            const revisionAnnotations = extractPatchAnnotations({ annotations: (result as Record<string, unknown>).annotations });
+            aiProposalSessionRef.current = advanceClientProposalSession(proposalSession, {
+                responseId: result.proposalSessionId,
+                newCycle: result.cycle,
+                proposal: editProposal,
+                patch: parsedPatch.patch,
+                annotations: revisionAnnotations,
+                sentBlocks: allFeedbackBlocks,
+                sentGlobalComment: aiDiffGlobalComment,
+            });
+            setAiProposalAudit(asRecord(result.audit) ?? {
+                cycle: typeof result.cycle === 'number' ? result.cycle : aiDiffIteration + 2,
+                verification: result.verification,
+            });
             // Surface the assistant's annotations for this revision as measure-thread notes.
-            mergeAiAnnotations(extractPatchAnnotations({ annotations: (result as Record<string, unknown>).annotations }));
+            mergeAiAnnotations(revisionAnnotations);
             setCompareAlignmentRevision((value) => value + 1);
         } catch (err) {
             const rawMessage = errorMessage(err) || 'Failed to request revised proposal.';
@@ -6810,6 +6854,8 @@ ${partsBodyXml}
         aiDiffGlobalComment,
         aiDiffIteration,
         aiChatMessages,
+        aiIncludeChat,
+        aiPrompt,
         captureApiTraceContext,
         parseMusicXmlPatch,
         getScoreMusicXmlText,
@@ -7698,6 +7744,8 @@ ${partsBodyXml}
                 setAiDiffGlobalComment('');
                 setAiDiffFeedbackError(null);
                 setAiDiffBlockErrors({});
+                aiProposalSessionRef.current = null;
+                setAiProposalAudit(null);
                 setAiDiffGutterWidth(AI_DIFF_GUTTER_DEFAULT_WIDTH);
             }
             return;
@@ -8616,6 +8664,8 @@ ${partsBodyXml}
         setAiPatch(null);
         setAiPatchError(null);
         setAiPatchedXml('');
+        aiProposalSessionRef.current = null;
+        setAiProposalAudit(null);
         const requestStartedAt = Date.now();
         let requestIssued = false;
         let outcome: 'success' | 'failure' = 'failure';
@@ -8750,6 +8800,15 @@ ${partsBodyXml}
             }
             // openAiProposalCompare resets threads, so seed the assistant annotations after it.
             mergeAiAnnotations(annotations);
+            aiProposalSessionRef.current = createClientProposalSession({
+                id: typeof result.proposalSessionId === 'string' ? result.proposalSessionId : null,
+                originalInstruction: aiPrompt.trim(),
+                includeChat: aiIncludeChat,
+                proposal: serviceProposal,
+                patch: parsedPatch.patch,
+                annotations,
+            });
+            setAiProposalAudit({ cycle: 1, verification: result.verification });
             outcome = 'success';
         } catch (err) {
             console.error('AI request failed', err);
@@ -9135,6 +9194,15 @@ ${partsBodyXml}
                 }
                 setXmlSidebarTab('assistant');
                 setXmlSidebarMode((prev) => (prev === 'closed' ? 'open' : prev));
+                aiProposalSessionRef.current = createClientProposalSession({
+                    id: typeof resultBody?.proposalSessionId === 'string' ? resultBody.proposalSessionId : null,
+                    originalInstruction: prompt,
+                    includeChat: aiIncludeChat,
+                    proposal,
+                    patch: asRecord(resultBody?.patch),
+                    annotations: extractPatchAnnotations({ annotations: resultBody?.annotations }),
+                });
+                setAiProposalAudit({ cycle: 1, verification: proposal.verification });
                 return true;
             };
 
@@ -9165,7 +9233,14 @@ ${partsBodyXml}
                         reportSpecificPatchError(parsedPatch.error || 'Diff feedback returned an invalid patch payload.');
                     }
                 }
-                if (proposedXml.trim()) {
+                if (editProposal) {
+                    openAgentEditProposal(editProposal);
+                    // Surface the agent's diff-feedback annotations as measure-thread notes.
+                    mergeAiAnnotations(extractPatchAnnotations({ annotations: bodyPayload?.annotations }));
+                    if (typeof bodyPayload?.iteration === 'number') {
+                        setAiDiffIteration(bodyPayload.iteration);
+                    }
+                } else if (proposedXml.trim()) {
                     const baseXml = await resolveXmlContext();
                     void openAiProposalCompare(baseXml, proposedXml);
                     // Surface the agent's diff-feedback annotations as measure-thread notes.
@@ -16412,6 +16487,41 @@ ${partsBodyXml}
                                     {aiProposalApplyError}
                                 </div>
                             )}
+                            {isAiCompareMode && aiProposalAudit && (() => {
+                                const auditVerification = asRecord(aiProposalAudit.verification);
+                                const contextFlags = asRecord(aiProposalAudit.proposalContext);
+                                const truncatedFields = Array.isArray(contextFlags?.truncated)
+                                    ? contextFlags.truncated.filter((entry): entry is string => typeof entry === 'string')
+                                    : [];
+                                const statusParts = [
+                                    typeof aiProposalAudit.cycle === 'number' ? `Cycle ${aiProposalAudit.cycle}` : '',
+                                    auditVerification?.level === 'patch_apply'
+                                        ? 'apply-verified'
+                                        : auditVerification?.level === 'tool_execution' ? 'tool-executed' : '',
+                                    typeof auditVerification?.attempts === 'number'
+                                        ? `${auditVerification.attempts} attempt${auditVerification.attempts === 1 ? '' : 's'}`
+                                        : '',
+                                    typeof auditVerification?.llmCalls === 'number'
+                                        ? `${auditVerification.llmCalls} LLM call${auditVerification.llmCalls === 1 ? '' : 's'}`
+                                        : '',
+                                ].filter(Boolean);
+                                const contextWarning = contextFlags?.previousCycleDropped === true
+                                    ? 'The score changed outside this proposal, so the previous cycle was not shown to the model.'
+                                    : truncatedFields.length
+                                        ? `Some session context was shortened to fit limits (${truncatedFields.join(', ')}).`
+                                        : '';
+                                return (
+                                    <div
+                                        data-testid="ai-proposal-audit"
+                                        className="rounded border border-gray-200 bg-gray-50 px-3 py-1.5 text-[11px] text-gray-600"
+                                    >
+                                        <span>{statusParts.join(' · ')}</span>
+                                        {contextWarning && (
+                                            <span className="ml-2 text-amber-700">{contextWarning}</span>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                             {!isEmbedMode && isAiCompareMode && (
                                 <div className="rounded border border-gray-300 bg-gray-100 p-3">
                                     <div className="text-xs font-semibold uppercase tracking-wide text-gray-900">
