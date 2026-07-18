@@ -6,6 +6,8 @@ const mocked = vi.hoisted(() => ({
   updateScoreOpsSession: vi.fn(),
   createScoreOpsSession: vi.fn(),
   createScoreArtifact: vi.fn(),
+  runHarmonyAnalyzeService: vi.fn(),
+  runFunctionalHarmonyAnalyzeService: vi.fn(),
 }));
 
 vi.mock('../lib/webmscore-loader', () => ({
@@ -26,6 +28,14 @@ vi.mock('../lib/music-services/scoreops-session-store', async (importOriginal) =
   ...(await importOriginal<Record<string, unknown>>()),
   updateScoreOpsSession: mocked.updateScoreOpsSession,
   createScoreOpsSession: mocked.createScoreOpsSession,
+}));
+
+vi.mock('../lib/music-services/harmony-service', () => ({
+  runHarmonyAnalyzeService: mocked.runHarmonyAnalyzeService,
+}));
+
+vi.mock('../lib/music-services/functional-harmony-service', () => ({
+  runFunctionalHarmonyAnalyzeService: mocked.runFunctionalHarmonyAnalyzeService,
 }));
 
 import {
@@ -251,6 +261,190 @@ describe('runDeepEditService', () => {
     expect((result.body.proposal as Record<string, any>).verification.level).toBe('render');
     const audit = result.body.deepEdit as Record<string, any>;
     expect(audit.counters.renders).toBe(1);
+  });
+
+  it('keeps sandbox analysis memory-only and strips artifact metadata', async () => {
+    engineLoadOk();
+    mocked.runFunctionalHarmonyAnalyzeService.mockResolvedValue({
+      status: 200,
+      body: {
+        ok: true,
+        segments: [{ measureIndex: 1, roman: 'I' }],
+        annotatedXml: '<score-partwise><direction/></score-partwise>',
+        jsonArtifact: { id: 'should-not-leak-json' },
+        rntxtArtifact: { id: 'should-not-leak-rntxt' },
+      },
+    });
+    mocked.runHarmonyAnalyzeService.mockResolvedValue({
+      status: 200,
+      body: { ok: true, segments: [{ measure: 1, chord: 'C' }] },
+    });
+    const driver: DeepEditDriver = async ({ executeTool }) => {
+      const applied = await executeTool('sandbox_apply_patch', { baseCandidateId: 'base', patch: VALID_PATCH });
+      const functional = await executeTool('sandbox_analyze', { candidateId: String(applied.candidateId), kind: 'functional_harmony' });
+      expect(functional.ok).toBe(true);
+      expect(String(functional.analysis)).not.toContain('should-not-leak');
+      expect(String(functional.analysis)).not.toContain('<score-partwise');
+      const harmony = await executeTool('sandbox_analyze', { candidateId: String(applied.candidateId), kind: 'harmony' });
+      expect(harmony.ok).toBe(true);
+      await executeTool('sandbox_engine_check', { candidateId: applied.candidateId });
+      return { candidateId: String(applied.candidateId), rationale: 'Analyzed and verified.' };
+    };
+
+    const result = await runDeepEditService(request(), { driveAgent: driver });
+
+    expect(result.status).toBe(200);
+    expect(mocked.runFunctionalHarmonyAnalyzeService).toHaveBeenCalledWith(
+      expect.objectContaining({ persistArtifacts: false }),
+    );
+    expect(mocked.runHarmonyAnalyzeService).toHaveBeenCalledWith(
+      expect.objectContaining({ persistArtifacts: false }),
+    );
+    expect(mocked.createScoreArtifact).not.toHaveBeenCalled();
+  });
+
+  it('omits the patch from the response when the winner is not base-relative', async () => {
+    engineLoadOk();
+    const driver: DeepEditDriver = async ({ executeTool }) => {
+      const first = await executeTool('sandbox_apply_patch', { baseCandidateId: 'base', patch: VALID_PATCH });
+      const chainedPatch = {
+        format: 'musicxml-patch@1',
+        ops: [{
+          op: 'setText',
+          path: '/score-partwise/part[@id="P1"]/measure[@number="1"]/note[1]/duration',
+          value: '2',
+        }],
+      };
+      const second = await executeTool('sandbox_apply_patch', { baseCandidateId: String(first.candidateId), patch: chainedPatch });
+      expect(second.ok).toBe(true);
+      await executeTool('sandbox_engine_check', { candidateId: second.candidateId });
+      return { candidateId: String(second.candidateId), rationale: 'Chained refinement.' };
+    };
+
+    const result = await runDeepEditService(request(), { driveAgent: driver });
+
+    expect(result.status).toBe(200);
+    expect(result.body.patch).toBeUndefined();
+    // The proposal remains complete: full proposed XML carries both edits.
+    const proposedXml = String((result.body.proposal as Record<string, unknown>).proposedXml);
+    expect(proposedXml).toContain('<step>G</step>');
+    expect(proposedXml).toContain('<duration>2</duration>');
+  });
+
+  it('lets the agent recover from a finalize with an unknown or base candidate id', async () => {
+    engineLoadOk();
+    const driver: DeepEditDriver = async ({ capability, executeTool }) => {
+      const badId = await executeTool('finalize', { candidateId: 'cand-99', rationale: 'x' });
+      expect(badId.ok).toBe(false);
+      expect(String(badId.error)).toContain('not a live candidate id');
+      const baseId = await executeTool('finalize', { candidateId: 'base', rationale: 'x' });
+      expect(baseId.ok).toBe(false);
+      expect(capability.finalized()).toBeNull();
+
+      const applied = await executeTool('sandbox_apply_patch', { baseCandidateId: 'base', patch: VALID_PATCH });
+      await executeTool('sandbox_engine_check', { candidateId: applied.candidateId });
+      const good = await executeTool('finalize', { candidateId: String(applied.candidateId), rationale: 'Recovered.' });
+      expect(good.ok).toBe(true);
+      return capability.finalized();
+    };
+
+    const result = await runDeepEditService(request(), { driveAgent: driver });
+
+    expect(result.status).toBe(200);
+    const audit = result.body.deepEdit as Record<string, any>;
+    expect(audit.finalizedCandidateId).toBe('cand-1');
+    // finalize charges no tool budget: two tool calls (patch + engine check) only.
+    expect(audit.counters.toolCalls).toBe(2);
+  });
+
+  it('does not charge the render budget for a render rejected on tool-call exhaustion', async () => {
+    const driver: DeepEditDriver = async ({ capability, executeTool }) => {
+      await executeTool('sandbox_apply_patch', { baseCandidateId: 'base', patch: VALID_PATCH });
+      const rejected = await executeTool('sandbox_render', { candidateId: 'cand-1' });
+      expect(rejected).toMatchObject({ ok: false, budget: 'tool_calls' });
+      expect(capability.counters.renders).toBe(0);
+      return null;
+    };
+
+    const result = await runDeepEditService(request(), {
+      driveAgent: driver,
+      budgets: budgets({ maxToolCalls: 1 }),
+    });
+
+    expect(result.status).toBe(422);
+    expect(result.body.errorCategory).toBe('budget_exhausted');
+    const audit = result.body.deepEdit as Record<string, any>;
+    expect(audit.counters.renders).toBe(0);
+  });
+
+  it('classifies candidate-limit exhaustion as budget_exhausted, not no_finalize', async () => {
+    const driver: DeepEditDriver = async ({ executeTool }) => {
+      await executeTool('sandbox_apply_patch', { baseCandidateId: 'base', patch: VALID_PATCH });
+      const denied = await executeTool('sandbox_apply_patch', { baseCandidateId: 'base', patch: VALID_PATCH });
+      expect(denied).toMatchObject({ ok: false, budget: 'candidate_limit' });
+      return null;
+    };
+
+    const result = await runDeepEditService(request(), {
+      driveAgent: driver,
+      budgets: budgets({ maxCandidates: 1 }),
+    });
+
+    expect(result.status).toBe(422);
+    expect(result.body.errorCategory).toBe('budget_exhausted');
+    expect(String(result.body.error)).toContain('candidate_limit');
+  });
+
+  it('aborts an in-flight engine check when the request is cancelled', async () => {
+    mocked.loadWebMscoreInProcess.mockResolvedValue({
+      load: vi.fn().mockImplementation(() => new Promise(() => undefined)),
+    });
+    const parent = new AbortController();
+    const driver: DeepEditDriver = async ({ executeTool }) => {
+      const applied = await executeTool('sandbox_apply_patch', { baseCandidateId: 'base', patch: VALID_PATCH });
+      const pendingCheck = executeTool('sandbox_engine_check', { candidateId: applied.candidateId });
+      setTimeout(() => parent.abort(new Error('client went away')), 20);
+      const checked = await pendingCheck;
+      expect(checked.ok).toBe(false);
+      expect(String(checked.error)).toContain('cancelled');
+      return null;
+    };
+
+    const result = await runDeepEditService(request(), {
+      driveAgent: driver,
+      signal: parent.signal,
+    });
+
+    expect(result.status).toBe(422);
+  });
+
+  it('rejects a misspelled provider instead of coercing it to OpenAI', async () => {
+    const driver = vi.fn();
+    const result = await runDeepEditService(request({ provider: 'anthorpic' }), { driveAgent: driver });
+    expect(result.status).toBe(400);
+    expect(String(result.body.error)).toContain('OpenAI and Anthropic');
+    expect(driver).not.toHaveBeenCalled();
+  });
+
+  it('enforces the Phase 1 prompt-size cap on client prompt text', async () => {
+    const priorCap = process.env.MUSIC_PATCH_MAX_PROMPT_CHARS;
+    process.env.MUSIC_PATCH_MAX_PROMPT_CHARS = '10000';
+    try {
+      const driver = vi.fn();
+      const result = await runDeepEditService(
+        request({ promptText: 'x'.repeat(10_001) }),
+        { driveAgent: driver },
+      );
+      expect(result.status).toBe(413);
+      expect(String(result.body.error)).toContain('character limit');
+      expect(driver).not.toHaveBeenCalled();
+    } finally {
+      if (priorCap === undefined) {
+        delete process.env.MUSIC_PATCH_MAX_PROMPT_CHARS;
+      } else {
+        process.env.MUSIC_PATCH_MAX_PROMPT_CHARS = priorCap;
+      }
+    }
   });
 
   it('returns typed request errors before any loop work', async () => {

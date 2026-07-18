@@ -607,6 +607,88 @@ test.describe('Assistant diff editor flow', () => {
     await expect(page.getByTestId('ai-proposal-audit')).toContainText('rendered cleanly');
   });
 
+  test('feedback on a deep-edit proposal preserves Phase 2 continuity', async ({ page }) => {
+    const deepSessionId = 'sess-deep-continuity-1';
+    const deepToken = `pct-v1:${'ab'.repeat(32)}`;
+    let feedbackPayload: Record<string, unknown> | null = null;
+
+    await page.route('**/api/music/patch/deep', async (route) => {
+      const requestBody = route.request().postDataJSON();
+      const baseXml = String(requestBody?.content || '');
+      const proposedXml = baseXml.replace(/<step>\s*C\s*<\/step>/, '<step>G</step>');
+      const baseContentHash = scoreHash(baseXml);
+      const baseIdentityHash = computeMusicXmlIdentityHashServer(baseXml);
+      await route.fulfill({
+        status: 200,
+        body: JSON.stringify({
+          proposal: {
+            sourceTool: 'music.deep_edit',
+            baseXml,
+            proposedXml,
+            baseScoreSessionId: null,
+            baseRevision: null,
+            baseContentHash,
+            expectedCurrentContentHash: baseContentHash,
+            baseIdentityHash,
+            expectedCurrentIdentityHash: baseIdentityHash,
+            proposedContentHash: scoreHash(proposedXml),
+            proposedIdentityHash: computeMusicXmlIdentityHashServer(proposedXml),
+            verification: { level: 'engine_load', llmCalls: 4 },
+          },
+          patch: PATCH_RESPONSE.patch,
+          proposedXml,
+          annotations: [],
+          proposalSessionId: deepSessionId,
+          cycle: 1,
+          continuityToken: deepToken,
+          verification: { level: 'engine_load', llmCalls: 4, elapsedMs: 30 },
+          deepEdit: {
+            finalizedCandidateId: 'cand-1',
+            rationale: 'Single verified candidate.',
+            candidates: [{ id: 'cand-1', parentId: 'base', createdByTool: 'apply_patch', verification: 'engine_load', scores: [] }],
+            counters: { llmCalls: 4, toolCalls: 3, renders: 0 },
+            elapsedMs: 30,
+          },
+        }),
+      });
+    });
+    await page.route('**/api/music/diff/feedback', async (route) => {
+      feedbackPayload = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        body: JSON.stringify(buildDiffFeedbackResponse('A', 1, String(feedbackPayload?.content || ''), {
+          proposalSessionId: deepSessionId,
+        })),
+      });
+    });
+
+    await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
+    await page.waitForSelector('svg .Note', { timeout: 60_000 });
+    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('tab-ai').click();
+    await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
+    await page.getByPlaceholder('Paste your key').fill('test-key');
+    await page.getByPlaceholder('Describe the change you want in the MusicXML.').fill('Change the first note to G.');
+    await page.getByTestId('ai-deep-edit-toggle').check();
+    await page.getByRole('button', { name: 'Deep Edit' }).click();
+    await waitForDiffReviewReady(page);
+
+    await page.getByRole('button', { name: 'Comment' }).first().click();
+    await page.getByPlaceholder('Describe the revision needed...').first().fill('Use A instead.');
+    await page.getByRole('button', { name: 'Enter' }).first().click();
+    await page.getByRole('button', { name: /Send Feedback/ }).first().click();
+
+    await waitForDiffReviewReady(page);
+    await expect(page.getByText('Iteration 2 review')).toBeVisible({ timeout: 20_000 });
+    const session = (feedbackPayload as Record<string, any> | null)?.proposalSession;
+    expect(session?.id).toBe(deepSessionId);
+    expect(session?.cycle).toBe(1);
+    expect(session?.originalInstruction).toBe('Change the first note to G.');
+    expect(session?.previousCycle?.continuityToken).toBe(deepToken);
+    expect(session?.previousCycle?.patch?.format).toBe('musicxml-patch@1');
+    await expect(page.getByTestId('ai-proposal-audit')).toContainText('Cycle 2');
+  });
+
   test('deep edit failure shows the typed error and does not open compare', async ({ page }) => {
     await page.route('**/api/music/patch/deep', async (route) => {
       await route.fulfill({

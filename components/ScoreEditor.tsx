@@ -8788,6 +8788,11 @@ ${partsBodyXml}
             const response = await fetch(resolveScoreEditorApiPath(patchEndpoint), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                // Deep Edit runs a long server loop; time out just above the server's
+                // maximum request budget (10 minutes) instead of hanging forever.
+                ...(aiDeepEdit && typeof AbortSignal.timeout === 'function'
+                    ? { signal: AbortSignal.timeout(630_000) }
+                    : {}),
                 body: JSON.stringify({
                     content: baseXml,
                     promptText,

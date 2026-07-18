@@ -160,6 +160,44 @@ export const summarizeMeasureDifferences = (leftXml: string, rightXml: string) =
   };
 };
 
+/**
+ * Bound in-flight tool work by the capability signal and remaining budget. webmscore
+ * loads and the analysis services expose no abort API, so a raced timeout returns
+ * control (and a truthful error) even though the underlying work may run to completion
+ * in the background.
+ */
+const withSandboxDeadline = async <T>(
+  capability: DeepEditCapability,
+  work: Promise<T>,
+  label: string,
+  maxMs = 60_000,
+): Promise<T> => {
+  const remaining = Math.max(1, Math.min(maxMs, capability.remainingMs()));
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let abortListener: (() => void) | null = null;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out.`)), remaining);
+        abortListener = () => reject(new Error(`${label} was cancelled.`));
+        if (capability.signal.aborted) {
+          abortListener();
+        } else {
+          capability.signal.addEventListener('abort', abortListener, { once: true });
+        }
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+    if (abortListener) {
+      capability.signal.removeEventListener('abort', abortListener);
+    }
+  }
+};
+
 const verifyCandidateEngine = async (
   capability: DeepEditCapability,
   candidateId: string,
@@ -171,8 +209,10 @@ const verifyCandidateEngine = async (
   capability.noteAttemptedLevel('engine_load');
   let score: Score | null = null;
   try {
-    const webMscore = await loadWebMscoreInProcess();
-    score = await webMscore.load('musicxml', new TextEncoder().encode(xml));
+    score = await withSandboxDeadline(capability, (async () => {
+      const webMscore = await loadWebMscoreInProcess();
+      return webMscore.load('musicxml', new TextEncoder().encode(xml));
+    })(), 'Engine check');
     capability.recordVerification(candidateId, 'engine_load');
     return { ok: true, candidateId, verification: 'engine_load' };
   } catch (error) {
@@ -198,11 +238,11 @@ const verifyCandidateRender = async (
   }
   capability.noteAttemptedLevel('render');
   try {
-    const { buffer, mimeType } = await renderMusicSnapshot({
+    const { buffer, mimeType } = await withSandboxDeadline(capability, renderMusicSnapshot({
       content: xml,
       format: 'png',
       timeoutMs: Math.min(60_000, Math.max(1_000, capability.remainingMs())),
-    });
+    }), 'Render');
     capability.recordVerification(candidateId, 'render');
     return { ok: true, candidateId, verification: 'render', mimeType, renderedBytes: buffer.byteLength };
   } catch (error) {
@@ -220,15 +260,24 @@ export async function executeSandboxTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<DeepEditToolResult> {
+  // Finalize charges nothing: an exhausted run must still be able to end.
+  if (name === 'finalize') {
+    const candidateId = String(args.candidateId ?? '');
+    const rationale = String(args.rationale ?? '').slice(0, MAX_RATIONALE_CHARS);
+    const finalized = capability.tryFinalize(candidateId, rationale);
+    return finalized.ok
+      ? { ok: true, candidateId }
+      : { ok: false, error: finalized.error };
+  }
+  const charged = capability.chargeToolCall();
+  if (!charged.ok) {
+    return budgetToolError(charged.reason);
+  }
   if (name === 'sandbox_render') {
     const rendered = capability.chargeRender();
     if (!rendered.ok) {
       return budgetToolError(rendered.reason);
     }
-  }
-  const charged = capability.chargeToolCall();
-  if (!charged.ok) {
-    return budgetToolError(charged.reason);
   }
 
   switch (name) {
@@ -334,14 +383,26 @@ export async function executeSandboxTool(
       if (xml === null || !capability.isValidSourceId(candidateId)) {
         return invalidIdError(candidateId);
       }
-      const result = kind === 'functional_harmony'
-        ? await runFunctionalHarmonyAnalyzeService({ content: xml })
-        : await runHarmonyAnalyzeService({ content: xml });
+      // persistArtifacts must be explicitly off: the functional-harmony service defaults
+      // it on, and sandbox analysis may never leave artifacts behind.
+      const result = await withSandboxDeadline(
+        capability,
+        kind === 'functional_harmony'
+          ? runFunctionalHarmonyAnalyzeService({ content: xml, persistArtifacts: false })
+          : runHarmonyAnalyzeService({ content: xml, persistArtifacts: false }),
+        'Analysis',
+      );
       if (result.status >= 400) {
         const message = typeof result.body.error === 'string' ? result.body.error : 'Analysis failed.';
         return { ok: false, error: boundError(message) };
       }
-      const { content: _content, annotatedXml: _annotatedXml, ...rest } = result.body;
+      const omittedKeys = new Set([
+        'content', 'annotatedXml', 'artifacts',
+        'jsonArtifact', 'rntxtArtifact', 'annotatedArtifact', 'sourceArtifactId',
+      ]);
+      const rest = Object.fromEntries(
+        Object.entries(result.body).filter(([key]) => !omittedKeys.has(key)),
+      );
       return {
         ok: true,
         candidateId,
@@ -431,7 +492,6 @@ const defaultDriver: (provider: 'openai' | 'anthropic', apiKey: string, modelNam
   modelName,
 ) => async ({ capability, executeTool, instructions, prompt }) => {
   const candidateIdSchema = z.string().min(1).max(32);
-  let finalized: { candidateId: string; rationale: string } | null = null;
 
   const jsonTool = (
     name: string,
@@ -480,24 +540,18 @@ const defaultDriver: (provider: 'openai' | 'anthropic', apiKey: string, modelNam
         value: z.union([z.string().max(200), z.number()]),
         detail: z.string().max(500).nullable().optional(),
       })),
-      tool({
-        name: 'finalize',
-        description: 'Finish the deep edit by naming the candidate to propose, with a short rationale.',
-        parameters: z.object({
-          candidateId: candidateIdSchema,
-          rationale: z.string().min(1).max(MAX_RATIONALE_CHARS),
-        }),
-        execute: async (input: unknown) => {
-          const record = asRecord(input) ?? {};
-          finalized = {
-            candidateId: String(record.candidateId ?? ''),
-            rationale: String(record.rationale ?? '').slice(0, MAX_RATIONALE_CHARS),
-          };
-          return JSON.stringify({ ok: true });
-        },
-      }),
+      jsonTool('finalize', 'Finish the deep edit by naming the candidate to propose, with a short rationale. Fails (and lets you retry) if the id is not a candidate you created.', z.object({
+        candidateId: candidateIdSchema,
+        rationale: z.string().min(1).max(MAX_RATIONALE_CHARS),
+      })),
     ],
-    toolUseBehavior: { stopAtToolNames: ['finalize'] },
+    // The loop ends only when finalize actually succeeded; a finalize with an unknown
+    // candidate id returns a tool error the model can recover from.
+    toolUseBehavior: () => (
+      capability.finalized()
+        ? { isFinalOutput: true, finalOutput: JSON.stringify({ ok: true }) }
+        : { isFinalOutput: false }
+    ),
   });
 
   try {
@@ -507,11 +561,11 @@ const defaultDriver: (provider: 'openai' | 'anthropic', apiKey: string, modelNam
     });
   } catch (error) {
     if (error instanceof DeepEditLlmBudgetError || capability.signal.aborted) {
-      return finalized;
+      return capability.finalized();
     }
     throw error;
   }
-  return finalized;
+  return capability.finalized();
 };
 
 const buildDeepEditPrompt = (instruction: string, baseXml: string) => [
@@ -548,7 +602,14 @@ export async function runDeepEditService(
   const data = asRecord(body);
   const prompt = typeof data?.prompt === 'string' ? data.prompt.trim() : '';
   const promptText = typeof data?.promptText === 'string' ? data.promptText.trim() : '';
-  const provider = resolveProvider(data?.provider);
+  // Strict provider parse: resolveProvider coerces unknown values to 'openai', which
+  // could route a non-OpenAI credential to the wrong upstream. Deep Edit rejects
+  // anything it does not support, byte for byte, before touching keys.
+  const rawProvider = typeof data?.provider === 'string' ? data.provider.trim().toLowerCase() : '';
+  if (rawProvider !== 'openai' && rawProvider !== 'anthropic') {
+    return errorResult(400, 'request', 'Deep Edit supports OpenAI and Anthropic models.');
+  }
+  const provider = resolveProvider(rawProvider);
   const requestedModel = typeof data?.model === 'string' ? data.model.trim() : '';
 
   if (!prompt && !promptText) {
@@ -579,8 +640,30 @@ export async function runDeepEditService(
   }
 
   const budgets = options?.budgets ?? resolveDeepEditBudgets();
-  if (Buffer.byteLength(baseXml, 'utf8') > budgets.maxCandidateBytes) {
+  // Phase 1's content/prompt caps apply here too (same env vars, same defaults), on top
+  // of the sandbox candidate byte cap.
+  const maximumContentBytes = readClampedEnvInteger(
+    'MUSIC_PATCH_MAX_CONTENT_BYTES',
+    10 * 1024 * 1024,
+    1_000,
+    50 * 1024 * 1024,
+  );
+  const maximumPromptChars = readClampedEnvInteger(
+    'MUSIC_PATCH_MAX_PROMPT_CHARS',
+    12 * 1024 * 1024,
+    1_000,
+    50 * 1024 * 1024,
+  );
+  const contentBytes = Buffer.byteLength(baseXml, 'utf8');
+  if (contentBytes > maximumContentBytes) {
+    return errorResult(413, 'request', `Base MusicXML exceeds the ${maximumContentBytes} byte limit.`);
+  }
+  if (contentBytes > budgets.maxCandidateBytes) {
     return errorResult(413, 'request', `Base MusicXML exceeds the ${budgets.maxCandidateBytes} byte Deep Edit limit.`);
+  }
+  const loopPrompt = promptText || buildDeepEditPrompt(prompt, baseXml);
+  if (loopPrompt.length > maximumPromptChars) {
+    return errorResult(413, 'request', `Deep Edit prompt exceeds the ${maximumPromptChars} character limit.`);
   }
 
   const capability = new DeepEditCapability({
@@ -608,7 +691,7 @@ export async function runDeepEditService(
         capability,
         executeTool: (name, toolArgs) => executeSandboxTool(capability, name, toolArgs),
         instructions: SANDBOX_INSTRUCTIONS,
-        prompt: promptText || buildDeepEditPrompt(prompt, baseXml),
+        prompt: loopPrompt,
       });
     } catch (error) {
       const timedOut = capability.expired();
@@ -626,14 +709,14 @@ export async function runDeepEditService(
     }
 
     if (!finalized) {
-      const exhausted = capability.expired()
-        || capability.counters.llmCalls >= budgets.maxLlmCalls
-        || capability.counters.toolCalls >= budgets.maxToolCalls;
+      // Every budget class counts: a run stopped by candidate, byte, or render limits is
+      // exhaustion, not the model's failure to finalize.
+      const exhausted = capability.expired() || capability.hadBudgetDenial();
       return errorResult(
         422,
         exhausted ? 'budget_exhausted' : 'no_finalize',
         exhausted
-          ? 'Deep edit ran out of budget before finalizing a candidate.'
+          ? `Deep edit ran out of budget before finalizing a candidate (${capability.budgetDenialReasons().join(', ') || 'deadline'}).`
           : 'Deep edit ended without finalizing a candidate.',
         auditFor(null, ''),
       );
@@ -697,7 +780,10 @@ export async function runDeepEditService(
         provider,
         model: requestedModel,
         proposal,
-        ...(winner.patch ? { patch: winner.patch } : {}),
+        // A candidate chained off another candidate has a patch relative to its parent,
+        // not the user's score; publishing it would poison patch display and Phase 2
+        // feedback context. Only base-relative patches ship.
+        ...(winner.patch && winner.parentId === DEEP_EDIT_BASE_ID ? { patch: winner.patch } : {}),
         annotations: [],
         proposedXml: winner.xml,
         scoreSessionId: resolution.session?.scoreSessionId ?? null,

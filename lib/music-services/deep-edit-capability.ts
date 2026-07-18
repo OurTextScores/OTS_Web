@@ -77,6 +77,8 @@ export class DeepEditCapability {
   private readonly parentSignal: AbortSignal | null;
   private nextCandidateNumber = 1;
   private strongestAttempted: DeepEditVerificationLevel = 'tool_execution';
+  private budgetDenials = new Set<string>();
+  private finalizedState: { candidateId: string; rationale: string } | null = null;
 
   constructor(args: { baseXml: string; budgets: DeepEditBudgets; parentSignal?: AbortSignal }) {
     this.requestId = randomUUID();
@@ -113,10 +115,10 @@ export class DeepEditCapability {
 
   chargeLlmCall(): DeepEditChargeResult {
     if (this.expired()) {
-      return { ok: false, reason: 'deadline' };
+      return this.denied('deadline');
     }
     if (this.counters.llmCalls >= this.budgets.maxLlmCalls) {
-      return { ok: false, reason: 'llm_calls' };
+      return this.denied('llm_calls');
     }
     this.counters.llmCalls += 1;
     return { ok: true };
@@ -124,10 +126,10 @@ export class DeepEditCapability {
 
   chargeToolCall(): DeepEditChargeResult {
     if (this.expired()) {
-      return { ok: false, reason: 'deadline' };
+      return this.denied('deadline');
     }
     if (this.counters.toolCalls >= this.budgets.maxToolCalls) {
-      return { ok: false, reason: 'tool_calls' };
+      return this.denied('tool_calls');
     }
     this.counters.toolCalls += 1;
     return { ok: true };
@@ -135,13 +137,42 @@ export class DeepEditCapability {
 
   chargeRender(): DeepEditChargeResult {
     if (this.expired()) {
-      return { ok: false, reason: 'deadline' };
+      return this.denied('deadline');
     }
     if (this.counters.renders >= this.budgets.maxRenders) {
-      return { ok: false, reason: 'renders' };
+      return this.denied('renders');
     }
     this.counters.renders += 1;
     return { ok: true };
+  }
+
+  /** True once any charge or mint was refused for a budget reason. */
+  hadBudgetDenial(): boolean {
+    return this.budgetDenials.size > 0;
+  }
+
+  budgetDenialReasons(): string[] {
+    return [...this.budgetDenials].sort();
+  }
+
+  /**
+   * Record the finalize decision. Only a live, capability-minted candidate is accepted;
+   * "base" and unknown ids fail so the agent loop can recover instead of terminating.
+   * Finalize deliberately charges no budget — an exhausted run must still be able to end.
+   */
+  tryFinalize(candidateId: string, rationale: string): { ok: true } | { ok: false; error: string } {
+    if (candidateId === DEEP_EDIT_BASE_ID || !this.candidates.has(candidateId)) {
+      return {
+        ok: false,
+        error: `"${candidateId.slice(0, 64)}" is not a live candidate id; finalize requires a candidate you created.`,
+      };
+    }
+    this.finalizedState = { candidateId, rationale };
+    return { ok: true };
+  }
+
+  finalized(): { candidateId: string; rationale: string } | null {
+    return this.finalizedState;
   }
 
   /** Valid ids for tool arguments: the base snapshot or a capability-minted candidate. */
@@ -168,13 +199,16 @@ export class DeepEditCapability {
     verification: Extract<DeepEditVerificationLevel, 'patch_apply' | 'tool_execution'>;
   }): DeepEditMintResult {
     if (this.candidates.size >= this.budgets.maxCandidates) {
+      this.budgetDenials.add('candidate_limit');
       return { ok: false, reason: 'candidate_limit' };
     }
     const bytes = byteLength(args.xml);
     if (bytes > this.budgets.maxCandidateBytes) {
+      this.budgetDenials.add('candidate_bytes');
       return { ok: false, reason: 'candidate_bytes' };
     }
     if (this.counters.candidateBytes + bytes > this.budgets.maxTotalBytes) {
+      this.budgetDenials.add('total_bytes');
       return { ok: false, reason: 'total_bytes' };
     }
     const candidate: DeepEditCandidate = {
@@ -275,5 +309,10 @@ export class DeepEditCapability {
     if (DEEP_EDIT_LEVEL_RANK[level] > DEEP_EDIT_LEVEL_RANK[this.strongestAttempted]) {
       this.strongestAttempted = level;
     }
+  }
+
+  private denied(reason: 'llm_calls' | 'tool_calls' | 'renders' | 'deadline'): DeepEditChargeResult {
+    this.budgetDenials.add(reason);
+    return { ok: false, reason };
   }
 }
