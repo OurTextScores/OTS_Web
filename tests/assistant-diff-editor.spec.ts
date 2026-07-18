@@ -91,6 +91,8 @@ const buildThreeNotesXml = (firstStep: string) => `<?xml version="1.0" encoding=
   </part>
 </score-partwise>`;
 
+const E2E_PROPOSAL_SESSION_ID = 'sess-e2e-continuity-1';
+
 const fulfillPatchFromRequestBase = async (route: Route) => {
   const request = route.request().postDataJSON();
   const baseXml = String(request?.content || '');
@@ -104,6 +106,8 @@ const fulfillPatchFromRequestBase = async (route: Route) => {
     body: JSON.stringify({
       ...PATCH_RESPONSE,
       proposedXml: applied.xml,
+      proposalSessionId: E2E_PROPOSAL_SESSION_ID,
+      cycle: 1,
       proposal: {
         sourceTool: 'music.patch',
         baseXml,
@@ -114,13 +118,20 @@ const fulfillPatchFromRequestBase = async (route: Route) => {
         expectedCurrentContentHash: baseContentHash,
         baseIdentityHash,
         expectedCurrentIdentityHash: baseIdentityHash,
+        proposedContentHash: scoreHash(applied.xml),
+        proposedIdentityHash: computeMusicXmlIdentityHashServer(applied.xml),
         verification: PATCH_RESPONSE.verification,
       },
     }),
   });
 };
 
-const buildDiffFeedbackResponse = (step: string, iteration: number, baseXml: string) => {
+const buildDiffFeedbackResponse = (
+  step: string,
+  iteration: number,
+  baseXml: string,
+  options: { proposalSessionId?: string; previousCycleDropped?: boolean } = {},
+) => {
   const patch: MusicXmlPatch = {
     format: 'musicxml-patch@1',
     ops: [
@@ -156,7 +167,22 @@ const buildDiffFeedbackResponse = (step: string, iteration: number, baseXml: str
       expectedCurrentContentHash: baseContentHash,
       baseIdentityHash,
       expectedCurrentIdentityHash: baseIdentityHash,
+      proposedContentHash: scoreHash(proposedXml),
+      proposedIdentityHash: computeMusicXmlIdentityHashServer(proposedXml),
       verification,
+    },
+    proposalSessionId: options.proposalSessionId ?? E2E_PROPOSAL_SESSION_ID,
+    cycle: iteration + 1,
+    audit: {
+      proposalSessionId: options.proposalSessionId ?? E2E_PROPOSAL_SESSION_ID,
+      cycle: iteration + 1,
+      feedbackCounts: { accepted: 0, rejected: 0, revise: 1, pending: 0 },
+      proposalContext: {
+        provided: true,
+        lineage: options.previousCycleDropped ? 'mismatch' : 'verified',
+        previousCycleDropped: Boolean(options.previousCycleDropped),
+        truncated: [],
+      },
     },
     verification,
     feedbackPrompt: `PATCH REVISION FEEDBACK (iteration ${Math.max(0, iteration - 1)})`,
@@ -453,5 +479,87 @@ test.describe('Assistant diff editor flow', () => {
     await waitForDiffReviewReady(page);
     await expect(page.getByText('Iteration 2 review')).toBeVisible({ timeout: 20_000 });
     expect(requests[0]?.iteration).toBe(0);
+  });
+
+  test('proposal-session continuity flows through consecutive feedback cycles', async ({ page }) => {
+    let callCount = 0;
+    const requests: any[] = [];
+
+    await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
+    await page.route('**/api/music/diff/feedback', async (route) => {
+      callCount += 1;
+      const payload = route.request().postDataJSON();
+      requests.push(payload);
+      const step = callCount === 1 ? 'A' : 'B';
+      await route.fulfill({
+        status: 200,
+        body: JSON.stringify(buildDiffFeedbackResponse(step, callCount, String(payload.content || ''))),
+      });
+    });
+
+    await openAssistantProposalCompare(page);
+    await expect(page.getByTestId('ai-proposal-audit')).toContainText('Cycle 1', { timeout: 20_000 });
+    await expect(page.getByTestId('ai-proposal-audit')).toContainText('apply-verified');
+
+    // Cycle 1 feedback: reject the block and leave a global note.
+    await page.getByRole('button', { name: 'Reject' }).first().dispatchEvent('click');
+    await page.getByPlaceholder('Overall feedback for the next revision...').fill('No slurs anywhere.');
+    await page.getByRole('button', { name: /Send Feedback/ }).first().click();
+    await expect.poll(() => callCount, { timeout: 20_000 }).toBe(1);
+    await waitForDiffReviewReady(page);
+    await expect(page.getByText('Iteration 2 review')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('ai-proposal-audit')).toContainText('Cycle 2');
+
+    const firstSession = requests[0]?.proposalSession;
+    expect(firstSession?.id).toBe(E2E_PROPOSAL_SESSION_ID);
+    expect(firstSession?.cycle).toBe(1);
+    expect(firstSession?.originalInstruction).toBe('Change the first note to G.');
+    expect(firstSession?.previousCycle?.cycle).toBe(1);
+    expect(firstSession?.previousCycle?.patch?.format).toBe('musicxml-patch@1');
+    expect(String(firstSession?.previousCycle?.expectedCurrentContentHash || firstSession?.previousCycle?.baseContentHash)).toMatch(/^sha256:/);
+    expect(firstSession?.constraints).toEqual([]);
+    expect(requests[0]?.chatHistory).toBeUndefined();
+
+    // Cycle 2 feedback: a comment on the new proposal.
+    await page.getByRole('button', { name: 'Comment' }).first().click();
+    await page.getByPlaceholder('Describe the revision needed...').first().fill('Round 2: use B.');
+    await page.getByRole('button', { name: 'Enter' }).first().click();
+    await page.getByRole('button', { name: /Send Feedback/ }).first().click();
+    await expect.poll(() => callCount, { timeout: 20_000 }).toBe(2);
+    await waitForDiffReviewReady(page);
+
+    const secondSession = requests[1]?.proposalSession;
+    expect(secondSession?.id).toBe(E2E_PROPOSAL_SESSION_ID);
+    expect(secondSession?.cycle).toBe(2);
+    expect(secondSession?.originalInstruction).toBe('Change the first note to G.');
+    expect(secondSession?.previousCycle?.cycle).toBe(2);
+    const constraints = secondSession?.constraints ?? [];
+    expect(constraints.some((entry: any) => entry.kind === 'rejected')).toBe(true);
+    expect(constraints.some((entry: any) => entry.kind === 'note' && entry.text === 'No slurs anywhere.')).toBe(true);
+  });
+
+  test('dropped previous-cycle context surfaces a warning in the audit line', async ({ page }) => {
+    await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
+    await page.route('**/api/music/diff/feedback', async (route) => {
+      const payload = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        body: JSON.stringify(buildDiffFeedbackResponse('A', 1, String(payload.content || ''), {
+          previousCycleDropped: true,
+        })),
+      });
+    });
+
+    await openAssistantProposalCompare(page);
+    await page.getByRole('button', { name: 'Comment' }).first().click();
+    await page.getByPlaceholder('Describe the revision needed...').first().fill('Use A.');
+    await page.getByRole('button', { name: 'Enter' }).first().click();
+    await page.getByRole('button', { name: /Send Feedback/ }).first().click();
+
+    await waitForDiffReviewReady(page);
+    await expect(page.getByTestId('ai-proposal-audit')).toContainText(
+      'the previous cycle was not shown to the model',
+      { timeout: 20_000 },
+    );
   });
 });
