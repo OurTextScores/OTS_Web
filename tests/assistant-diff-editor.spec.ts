@@ -153,9 +153,17 @@ test.describe('Assistant diff editor flow', () => {
 
   test('patch generation opens compare modal and supports accept-all', async ({ page }) => {
     let patchRequest: Record<string, unknown> | null = null;
+    const pageErrors: Error[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error));
     await page.route('**/api/music/patch', async (route) => {
       patchRequest = route.request().postDataJSON();
-      await route.fulfill({ status: 200, body: JSON.stringify(PATCH_RESPONSE) });
+      const baseXml = String(patchRequest?.content || '');
+      const proposedXml = baseXml.replace(/<step>\s*C\s*<\/step>/, '<step>G</step>');
+      expect(proposedXml).not.toBe(baseXml);
+      await route.fulfill({
+        status: 200,
+        body: JSON.stringify({ ...PATCH_RESPONSE, proposedXml }),
+      });
     });
 
     await openAssistantProposalCompare(page);
@@ -179,6 +187,19 @@ test.describe('Assistant diff editor flow', () => {
       await page.getByTestId('compare-left-highlight').count()
       + await page.getByTestId('compare-right-highlight').count()
     ), { timeout: 20_000 }).toBe(0);
+    const savedXml = await page.evaluate(async () => {
+      const score = (window as typeof window & { __webmscore?: { saveXml?: () => Promise<unknown> } }).__webmscore;
+      const data = await score?.saveXml?.();
+      if (typeof data === 'string') {
+        return data;
+      }
+      if (data instanceof Uint8Array) {
+        return new TextDecoder().decode(data);
+      }
+      return '';
+    });
+    expect(savedXml).toContain('<step>G</step>');
+    expect(pageErrors).toEqual([]);
   });
 
   test('invalid patch response shows error and does not open compare modal', async ({ page }) => {

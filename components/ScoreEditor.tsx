@@ -6117,7 +6117,6 @@ ${partsBodyXml}
         }
 
         setCompareSwapBusy(true);
-        let committedXml: string | null = null;
         try {
             const isAiProposalCommit = compareView?.title === 'Assistant Proposal' && targetScore === score;
             let verifiedTargetXml: string | null = null;
@@ -6246,6 +6245,7 @@ ${partsBodyXml}
         }
 
         setCompareSwapBusy(true);
+        let committedXml: string | null = null;
         try {
             const liveXml = await getScoreMusicXmlText(scoreRef.current ?? score, null);
             if (!liveXml) {
