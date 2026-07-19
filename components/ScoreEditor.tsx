@@ -103,6 +103,7 @@ import {
     AiCompareWorkspaceActions,
 } from './score-editor/AiCompareWorkspace';
 import { AiDiffBlockReview } from './score-editor/AiDiffBlockReview';
+import { XmlDiffView } from './score-editor/XmlDiffView';
 import {
     useAiAssistantController,
 } from './score-editor/useAiAssistantController';
@@ -1414,7 +1415,6 @@ export default function ScoreEditor() {
     const [instrumentFallbackGroups, setInstrumentFallbackGroups] = useState<InstrumentTemplateGroup[]>([]);
     const [instrumentFallbackError, setInstrumentFallbackError] = useState<string | null>(null);
     const toolbarRef = useRef<HTMLDivElement>(null);
-    const [toolbarHeight, setToolbarHeight] = useState(0);
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [audioBusy, setAudioBusy] = useState(false);
@@ -2257,23 +2257,6 @@ export default function ScoreEditor() {
             setXmlSidebarTab('xml');
         }
     }, [aiEnabled, xmlSidebarTab]);
-
-    useEffect(() => {
-        if (!toolbarRef.current) {
-            return;
-        }
-        const updateHeight = () => {
-            const nextHeight = toolbarRef.current?.getBoundingClientRect().height ?? 0;
-            setToolbarHeight(Math.round(nextHeight));
-        };
-        updateHeight();
-        if (typeof ResizeObserver === 'undefined') {
-            return;
-        }
-        const observer = new ResizeObserver(() => updateHeight());
-        observer.observe(toolbarRef.current);
-        return () => observer.disconnect();
-    }, []);
 
     // Load external XML files in embed mode
     useEffect(() => {
@@ -3479,8 +3462,17 @@ export default function ScoreEditor() {
     }, [changeReviewDiff, changeReviewThreadsByAnchor, compareEffectiveZoom, comparePartCount, compareRightMeasurePositions, compareSwapped, isChangeReviewCompareMode]);
     const compareFocusedHighlights = useMemo((): { left: { left: number; top: number; width: number; height: number } | null; right: { left: number; top: number; width: number; height: number } | null } => {
         const nullResult = { left: null, right: null };
-        if (!isChangeReviewCompareMode || !changeReviewFocusedAnchorId || !compareClickedMeasures) return nullResult;
-        const pIdx = compareClickedMeasures.partIndex;
+        const focus = isChangeReviewCompareMode && changeReviewFocusedAnchorId && compareClickedMeasures
+            ? compareClickedMeasures
+            : isAiCompareMode && aiFocusedMeasureAnchor
+                ? {
+                    leftIndex: aiFocusedMeasureAnchor.leftIndex,
+                    rightIndex: aiFocusedMeasureAnchor.rightIndex,
+                    partIndex: aiFocusedMeasureAnchor.partIndex,
+                }
+                : null;
+        if (!focus) return nullResult;
+        const pIdx = focus.partIndex;
         const nParts = pIdx !== null && comparePartCount > 1 ? comparePartCount : 1;
         const getBox = (positions: Positions | null, measureIndex: number | null) => {
             if (measureIndex == null || !positions?.elements.length) return null;
@@ -3501,10 +3493,10 @@ export default function ScoreEditor() {
             };
         };
         return {
-            left: getBox(compareLeftMeasurePositions, compareClickedMeasures.leftIndex),
-            right: getBox(compareRightMeasurePositions, compareClickedMeasures.rightIndex),
+            left: getBox(compareLeftMeasurePositions, focus.leftIndex),
+            right: getBox(compareRightMeasurePositions, focus.rightIndex),
         };
-    }, [isChangeReviewCompareMode, changeReviewFocusedAnchorId, compareClickedMeasures, comparePartCount, compareLeftMeasurePositions, compareRightMeasurePositions, compareEffectiveZoom]);
+    }, [isChangeReviewCompareMode, changeReviewFocusedAnchorId, compareClickedMeasures, isAiCompareMode, aiFocusedMeasureAnchor, comparePartCount, compareLeftMeasurePositions, compareRightMeasurePositions, compareEffectiveZoom]);
     useEffect(() => {
         if (!isChangeReviewSingleScoreMode || !score) {
             setChangeReviewMeasurePositions(null);
@@ -3551,11 +3543,6 @@ export default function ScoreEditor() {
             .filter(({ bar }) => bar.anchorId === changeReviewFocusedAnchorId || changeReviewThreadsByAnchor.has(bar.anchorId))
             .sort((a, b) => a.top - b.top || a.bar.partIndex - b.bar.partIndex)
     ), [changeReviewBarBoxes, changeReviewFocusedAnchorId, changeReviewThreadsByAnchor]);
-    const compareOverlayStyle = toolbarHeight > 0 ? { top: `${toolbarHeight}px` } : undefined;
-    const compareModalMaxHeight = toolbarHeight > 0
-        ? `calc(100dvh - ${toolbarHeight + 48}px)`
-        : 'calc(100dvh - 3rem)';
-    const compareModalMaxWidth = 'calc(100dvw - 3rem)';
 
     const newScoreTimeOptions = [
         { label: '4/4', numerator: 4, denominator: 4 },
@@ -15642,17 +15629,14 @@ ${partsBodyXml}
 
             {compareView && (
                 <div
-                    className={isEmbedMode
-                        ? "fixed inset-0 z-50 flex items-start justify-center overflow-hidden bg-gray-50"
-                        : "fixed bottom-0 left-0 right-0 z-50 flex items-start justify-center overflow-hidden bg-black/40 p-6"}
-                    style={isEmbedMode ? {} : compareOverlayStyle}
+                    className="fixed inset-0 flex items-start justify-center overflow-hidden bg-gray-50"
+                    style={{ zIndex: 110 }}
                     data-testid="checkpoint-compare-modal"
                 >
                     <div
                         className={isEmbedMode
                             ? "flex min-h-0 w-full h-full flex-col gap-4 overflow-hidden bg-white"
-                            : "flex min-h-0 w-full flex-col gap-4 overflow-hidden rounded bg-white p-4 shadow-lg"}
-                        style={isEmbedMode ? {} : { maxHeight: compareModalMaxHeight, maxWidth: compareModalMaxWidth }}
+                            : "flex min-h-0 w-full h-full flex-col gap-4 overflow-hidden bg-white p-4"}
                     >
                         {!isEmbedMode && (
                         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -15699,7 +15683,7 @@ ${partsBodyXml}
                                     rebaseBusy={compareSwapBusy}
                                 />
                             )}
-                            <div className="flex min-h-0 min-w-0 flex-1 overflow-x-hidden">
+                            <div className="flex min-w-0 flex-none overflow-x-hidden" style={{ height: '100dvh' }}>
                                 <div className="flex min-h-0 min-w-0 flex-1 gap-4">
                                     <div className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col gap-3">
                                         <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -15826,27 +15810,6 @@ ${partsBodyXml}
                                                 </div>
                                             </div>
                                             </div>
-                                            <div className="grid gap-2 text-xs text-gray-500">
-                                                {Array.from({ length: comparePartCount }).map((_, index) => {
-                                                    const partName = compareLeftParts[index]?.name
-                                                        || compareLeftParts[index]?.instrumentName
-                                                        || `Part ${index + 1}`;
-                                                    const alignment = compareAlignmentByPart.get(index);
-                                                    const leftCount = alignment?.leftCount ?? 0;
-                                                    const rightCount = alignment?.rightCount ?? 0;
-                                                    return (
-                                                    <div
-                                                        key={`compare-left-part-${index}`}
-                                                        className="flex items-center justify-between rounded border border-dashed border-gray-200 bg-white px-2 py-2"
-                                                    >
-                                                        <span>{partName}</span>
-                                                        <span className="text-[10px] text-gray-400">
-                                                            {leftCount}/{rightCount} measures
-                                                        </span>
-                                                    </div>
-                                                    );
-                                                })}
-                                            </div>
                                         </div>
                                     </div>
                                     <div
@@ -15856,7 +15819,7 @@ ${partsBodyXml}
                                         {isAiCompareMode && (aiFocusedMeasureAnchor || Object.keys(aiMeasureThreads).length > 0) && (
                                             <div className="flex-none rounded border border-sky-200 bg-sky-50 p-2 text-[10px] text-gray-600">
                                                 <div className="mb-1 flex items-center justify-between">
-                                                    <span className="font-semibold text-sky-700">Measure notes</span>
+                                                    <span className="font-semibold text-sky-700">Measure comments</span>
                                                     {aiFocusedMeasureAnchor && (
                                                         <button
                                                             type="button"
@@ -15882,7 +15845,7 @@ ${partsBodyXml}
                                                                         type="button"
                                                                         className="text-gray-400 hover:text-rose-500"
                                                                         onClick={() => handleRemoveAiMeasureComment(aiFocusedMeasureAnchor.key, entry.id)}
-                                                                        aria-label="Remove note"
+                                                                        aria-label="Remove comment"
                                                                     >
                                                                         ×
                                                                     </button>
@@ -15899,7 +15862,7 @@ ${partsBodyXml}
                                                                     handleAddAiMeasureComment();
                                                                 }
                                                             }}
-                                                            placeholder="Add a note for this measure…"
+                                                            placeholder="Add a comment for this measure…"
                                                             className="w-full rounded border border-gray-200 px-2 py-1 text-[10px]"
                                                             rows={2}
                                                         />
@@ -15909,11 +15872,11 @@ ${partsBodyXml}
                                                             onClick={handleAddAiMeasureComment}
                                                             className="w-full rounded border border-sky-300 bg-white px-2 py-1 text-[10px] text-sky-700 hover:bg-sky-100 disabled:opacity-50"
                                                         >
-                                                            Add note
+                                                            Add comment
                                                         </button>
                                                     </div>
                                                 ) : (
-                                                    <div className="text-[10px] text-gray-500">Click a measure in either pane to add a note.</div>
+                                                    <div className="text-[10px] text-gray-500">Click a measure in either pane to add a comment.</div>
                                                 )}
                                                 {Object.keys(aiMeasureThreads).length > 0 && (
                                                     <div className="mt-2 border-t border-sky-200 pt-1">
@@ -16617,64 +16580,22 @@ ${partsBodyXml}
                                                 </div>
                                             </div>
                                             </div>
-                                            <div className="grid gap-2 text-xs text-gray-500">
-                                                {Array.from({ length: comparePartCount }).map((_, index) => {
-                                                    const partName = compareRightPartsDisplay[index]?.name
-                                                        || compareRightPartsDisplay[index]?.instrumentName
-                                                        || `Part ${index + 1}`;
-                                                    const alignment = compareAlignmentByPart.get(index);
-                                                    const leftCount = alignment?.leftCount ?? 0;
-                                                    const rightCount = alignment?.rightCount ?? 0;
-                                                    return (
-                                                    <div
-                                                        key={`compare-right-part-${index}`}
-                                                        className="flex items-center justify-between rounded border border-dashed border-gray-200 bg-white px-2 py-2"
-                                                    >
-                                                        <span>{partName}</span>
-                                                        <span className="text-[10px] text-gray-400">
-                                                            {leftCount}/{rightCount} measures
-                                                        </span>
-                                                    </div>
-                                                    );
-                                                })}
-                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                            <details className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
-                                <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                    Raw MusicXML
-                                </summary>
-                                <div className="mt-3 grid gap-4 md:grid-cols-2" style={{ height: 'calc(100vh - 300px)' }}>
-                                    <div className="flex flex-col gap-2">
-                                        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                            {compareLeftLabel}
-                                        </span>
-                                        <textarea
-                                            readOnly
-                                            value={compareView.currentXml}
-                                            className="min-h-0 flex-1 w-full rounded border border-gray-200 bg-white p-2 font-mono text-xs text-gray-700"
-                                        />
-                                    </div>
-                                    <div className="flex flex-col gap-2">
-                                        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                            {compareRightLabel}
-                                        </span>
-                                        <textarea
-                                            readOnly
-                                            value={compareView.checkpointXml}
-                                            className="min-h-0 flex-1 w-full rounded border border-gray-200 bg-white p-2 font-mono text-xs text-gray-700"
-                                        />
-                                    </div>
-                                </div>
-                            </details>
+                            <XmlDiffView
+                                leftLabel={compareLeftLabel}
+                                rightLabel={compareRightLabel}
+                                leftXml={compareLeftXml}
+                                rightXml={compareRightXml}
+                            />
                         </div>
                     </div>
                 </div>
             )}
             {isEmbedMode && checkpointBusy && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-white">
+                <div className="fixed inset-0 flex items-center justify-center bg-white" style={{ zIndex: 120 }}>
                     <div className="text-center">
                         <div className="mb-4 inline-block h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-blue-600"></div>
                         <p className="text-sm text-gray-600">Loading comparison...</p>
