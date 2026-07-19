@@ -1168,6 +1168,44 @@ class WebMscore {
     }
 
     /**
+     * Enter grip edit mode for a spanner at a page-relative point.
+     * @returns {Promise<{page:number, grips:Array<{index:number,x:number,y:number,draggable:boolean}>}|null>}
+     */
+    async beginGripEdit(pageNumber, x, y) {
+        const dataptr = Module.ccall('beginGripEdit', 'number',
+            ['number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, pageNumber, x, y, this.excerptId])
+        const json = WasmRes.readText(dataptr)
+        if (!json) return null
+        try {
+            return JSON.parse(json)
+        } catch (e) {
+            return null
+        }
+    }
+
+    /** Drag one grip by an incremental score-space delta. */
+    async dragGrip(gripIndex, dx, dy, modifiers = 0) {
+        const dataptr = Module.ccall('dragGrip', 'number',
+            ['number', 'number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, gripIndex, dx, dy, modifiers, this.excerptId])
+        const json = WasmRes.readText(dataptr)
+        if (!json) return null
+        try {
+            return JSON.parse(json)
+        } catch (e) {
+            return null
+        }
+    }
+
+    /** End grip edit mode, committing or rolling back its undo command. */
+    async endGripEdit(commit) {
+        return Module.ccall('endGripEdit', 'boolean',
+            ['number', 'boolean', 'number'],
+            [this.scoreptr, commit, this.excerptId])
+    }
+
+    /**
      * The score's spatium (staff space) in engraving canvas units — the same
      * coordinate space used by selection and drag point APIs.
      * @returns {Promise<number>}

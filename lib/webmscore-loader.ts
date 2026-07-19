@@ -35,6 +35,16 @@ export interface Positions {
     };
 }
 
+export interface GripEditInfo {
+    page: number;
+    grips: Array<{
+        index: number;
+        x: number;
+        y: number;
+        draggable: boolean;
+    }>;
+}
+
 export interface Score {
     destroy: (soft?: boolean) => void;
     saveSvg: (pageNumber?: number, drawPageBackground?: boolean, highlightSelection?: boolean) => Promise<string>;
@@ -84,6 +94,18 @@ export interface Score {
         dragMode?: 0 | 1 | 2,
     ) => Promise<boolean> | boolean;
     endElementDrag?: (commit: boolean) => Promise<boolean> | boolean;
+    beginGripEdit?: (
+        pageNumber: number,
+        x: number,
+        y: number,
+    ) => Promise<GripEditInfo | null> | GripEditInfo | null;
+    dragGrip?: (
+        gripIndex: number,
+        dx: number,
+        dy: number,
+        modifiers?: number,
+    ) => Promise<GripEditInfo | null> | GripEditInfo | null;
+    endGripEdit?: (commit: boolean) => Promise<boolean> | boolean;
     getSpatium?: () => Promise<number> | number;
     selectNextChord?: () => Promise<unknown> | unknown;
     selectPrevChord?: () => Promise<unknown> | unknown;

@@ -6,6 +6,7 @@ import {
     loadWebMscore,
     loadWebMscoreInProcess,
     Score,
+    type GripEditInfo,
     InputFileFormat,
     Positions,
     type LayoutProgressState,
@@ -489,6 +490,9 @@ type MutationMethods = Pick<
     | 'beginElementDrag'
     | 'updateElementDrag'
     | 'endElementDrag'
+    | 'beginGripEdit'
+    | 'dragGrip'
+    | 'endGripEdit'
     | 'selectAll'
     | 'getSelectionBoundingBox'
     | 'getSelectionBoundingBoxes'
@@ -1144,6 +1148,7 @@ export default function ScoreEditor() {
     const dragAdditiveRef = useRef(false);
     const dragActiveRef = useRef(false);
     const sawPointerMoveRef = useRef(false);
+    const lastSpannerPointerRef = useRef<{ time: number; clientX: number; clientY: number } | null>(null);
     // Ghost-drag note repitch: candidate captured on pointer-down, gesture data once the
     // drag threshold is crossed, ghost box rendered as an overlay in score units.
     const [noteDragGhost, setNoteDragGhost] = useState<{ x: number, y: number, w: number, h: number, steps: number } | null>(null);
@@ -1152,6 +1157,8 @@ export default function ScoreEditor() {
     // Removes the window-level listeners that drive an in-flight note drag; the gesture
     // must outlive the score wrapper because the staff can sit at its very edge.
     const noteDragCleanupRef = useRef<(() => void) | null>(null);
+    const [gripEdit, setGripEdit] = useState<GripEditInfo | null>(null);
+    const gripDragCleanupRef = useRef<(() => void) | null>(null);
     // Engine spatium in score units, refreshed when a drag candidate is armed.
     const scoreSpatiumRef = useRef<number | null>(null);
     // Note-input ("N") mode: clicks place notes instead of selecting.
@@ -1169,6 +1176,11 @@ export default function ScoreEditor() {
         noteDragCleanupRef.current?.();
         noteDragCleanupRef.current = null;
     }, []);
+    useEffect(() => () => {
+        gripDragCleanupRef.current?.();
+        gripDragCleanupRef.current = null;
+        void Promise.resolve(score?.endGripEdit?.(false)).catch(() => {});
+    }, [score]);
     const blockOverlayRefreshRef = useRef(false);
     const selectionOverlayGenerationRef = useRef(0);
     const [mutationEnabled, setMutationEnabled] = useState(false);
@@ -12646,6 +12658,192 @@ ${partsBodyXml}
         };
     };
 
+    const scoreSvgForTarget = (target?: Element | null): SVGSVGElement | null => {
+        const targetedSvg = target?.closest('svg');
+        if (targetedSvg instanceof SVGSVGElement) {
+            return targetedSvg;
+        }
+        return containerRef.current?.querySelector('svg') ?? null;
+    };
+
+    const clientToEngravingPoint = (clientX: number, clientY: number, target?: Element | null) => {
+        const matrix = scoreSvgForTarget(target)?.getScreenCTM();
+        if (!matrix) {
+            return null;
+        }
+        const point = new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse());
+        return { x: point.x, y: point.y };
+    };
+
+    const engravingToOverlayPoint = (x: number, y: number) => {
+        const matrix = scoreSvgForTarget()?.getScreenCTM();
+        const wrapperRect = scoreWrapperRef.current?.getBoundingClientRect();
+        if (!matrix || !wrapperRect) {
+            return { x, y };
+        }
+        const point = new DOMPoint(x, y).matrixTransform(matrix);
+        return {
+            x: (point.x - wrapperRect.left) / zoom,
+            y: (point.y - wrapperRect.top) / zoom,
+        };
+    };
+
+    const closeGripEdit = (commit: boolean) => {
+        gripDragCleanupRef.current?.();
+        gripDragCleanupRef.current = null;
+        setGripEdit(null);
+        if (score?.endGripEdit) {
+            void Promise.resolve(score.endGripEdit(commit)).catch((err: unknown) => {
+                console.warn('Ending grip edit failed:', err);
+            });
+        }
+    };
+
+    useEffect(() => {
+        if (!gripEdit) {
+            return;
+        }
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') {
+                return;
+            }
+            closeGripEdit(false);
+            event.preventDefault();
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [gripEdit, score]);
+
+    const beginGripEditAtPoint = async (pageIndex: number, x: number, y: number) => {
+        if (!interactiveMutationEnabled || noteInputActiveRef.current || !score?.beginGripEdit) {
+            return;
+        }
+        try {
+            const edit = await Promise.resolve(score.beginGripEdit(pageIndex, x, y));
+            setGripEdit(edit?.grips?.length ? edit : null);
+        } catch (err) {
+            console.warn('Starting grip edit failed:', err);
+            setGripEdit(null);
+        }
+    };
+
+    const handleScoreDoubleClick = (event: React.MouseEvent) => {
+        const target = event.target as Element | null;
+        const point = clientToEngravingPoint(event.clientX, event.clientY, target);
+        if (!point) {
+            return;
+        }
+        event.preventDefault();
+        void beginGripEditAtPoint(resolvePageIndex(target), point.x, point.y);
+    };
+
+    const handleGripPointerDown = (event: React.PointerEvent, gripIndex: number) => {
+        if (event.button !== 0 || !score?.dragGrip || !score?.endGripEdit || !gripEdit) {
+            return;
+        }
+        const grip = gripEdit.grips.find(item => item.index === gripIndex);
+        if (!grip?.draggable) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        gripDragCleanupRef.current?.();
+        const pointerId = event.pointerId;
+        const startClient = { x: event.clientX, y: event.clientY };
+        const startEngraving = clientToEngravingPoint(event.clientX, event.clientY);
+        const initial = gripEdit;
+
+        const engravingDelta = (clientX: number, clientY: number) => {
+            const current = clientToEngravingPoint(clientX, clientY);
+            if (!startEngraving || !current) {
+                return {
+                    dx: (clientX - startClient.x) / zoom,
+                    dy: (clientY - startClient.y) / zoom,
+                };
+            }
+            return { dx: current.x - startEngraving.x, dy: current.y - startEngraving.y };
+        };
+
+        const onMove = (moveEvent: PointerEvent) => {
+            if (moveEvent.pointerId !== pointerId) {
+                return;
+            }
+            const { dx, dy } = engravingDelta(moveEvent.clientX, moveEvent.clientY);
+            setGripEdit({
+                ...initial,
+                grips: initial.grips.map(item => item.index === gripIndex
+                    ? { ...item, x: item.x + dx, y: item.y + dy }
+                    : item),
+            });
+            moveEvent.preventDefault();
+        };
+
+        const finish = async (upEvent: PointerEvent, commit: boolean) => {
+            if (upEvent.pointerId !== pointerId) {
+                return;
+            }
+            gripDragCleanupRef.current?.();
+            gripDragCleanupRef.current = null;
+            const { dx, dy } = engravingDelta(upEvent.clientX, upEvent.clientY);
+            let committed = false;
+            try {
+                if (commit && (dx !== 0 || dy !== 0)) {
+                    const modifiers = (upEvent.shiftKey ? 1 : 0)
+                        | (upEvent.ctrlKey ? 2 : 0)
+                        | (upEvent.altKey ? 4 : 0);
+                    const updated = await Promise.resolve(score.dragGrip?.(gripIndex, dx, dy, modifiers));
+                    committed = Boolean(updated);
+                }
+                await Promise.resolve(score.endGripEdit?.(committed));
+                setGripEdit(null);
+                if (!committed) {
+                    return;
+                }
+                setScoreDirtySinceCheckpoint(true);
+                setScoreDirtySinceXml(true);
+                if (score.relayout) {
+                    await Promise.resolve(score.relayout());
+                }
+                const refreshedPage = await refreshPageCount(score, currentPageRef.current);
+                await renderScore(score, refreshedPage);
+                const selectionPoint = engravingToOverlayPoint(grip.x + dx, grip.y + dy);
+                await refreshSelectionFromSvg({
+                    index: null,
+                    point: { page: initial.page, ...selectionPoint },
+                });
+            } catch (err) {
+                console.error('Grip drag failed:', err);
+                await Promise.resolve(score.endGripEdit?.(false)).catch(() => {});
+                setGripEdit(null);
+            }
+        };
+
+        const onUp = (upEvent: PointerEvent) => { void finish(upEvent, true); };
+        const onCancel = (cancelEvent: PointerEvent) => { void finish(cancelEvent, false); };
+        const onKeyDown = (keyEvent: KeyboardEvent) => {
+            if (keyEvent.key !== 'Escape') {
+                return;
+            }
+            gripDragCleanupRef.current?.();
+            gripDragCleanupRef.current = null;
+            setGripEdit(null);
+            void Promise.resolve(score.endGripEdit?.(false)).catch(() => {});
+            keyEvent.preventDefault();
+        };
+
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onCancel);
+        window.addEventListener('keydown', onKeyDown);
+        gripDragCleanupRef.current = () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onCancel);
+            window.removeEventListener('keydown', onKeyDown);
+        };
+    };
+
     const updateNoteInputShadow = (clientX: number, clientY: number, target: Element | null) => {
         if (!noteInputActiveRef.current || !containerRef.current) {
             setNoteInputShadow(null);
@@ -13127,6 +13325,33 @@ ${partsBodyXml}
             return;
         }
 
+        const pointerTarget = e.target as Element | null;
+        const spannerTarget = pointerTarget?.closest(
+            '.SlurSegment, .HairpinSegment, .OttavaSegment, .PedalSegment, .VoltaSegment, .TrillSegment, .TextLineSegment',
+        );
+        const previousSpannerPointer = lastSpannerPointerRef.current;
+        if (previousSpannerPointer
+            && e.timeStamp - previousSpannerPointer.time <= 500
+            && Math.hypot(e.clientX - previousSpannerPointer.clientX, e.clientY - previousSpannerPointer.clientY) <= 8) {
+            lastSpannerPointerRef.current = null;
+            e.preventDefault();
+            e.stopPropagation();
+            const engravingPoint = clientToEngravingPoint(e.clientX, e.clientY, pointerTarget);
+            if (engravingPoint) {
+                void beginGripEditAtPoint(resolvePageIndex(pointerTarget), engravingPoint.x, engravingPoint.y);
+            }
+            return;
+        }
+        if (spannerTarget) {
+            lastSpannerPointerRef.current = {
+                time: e.timeStamp,
+                clientX: e.clientX,
+                clientY: e.clientY,
+            };
+        } else {
+            lastSpannerPointerRef.current = null;
+        }
+
         dragPointerIdRef.current = e.pointerId;
         dragKindRef.current = 'pointer';
         sawPointerMoveRef.current = false;
@@ -13427,6 +13652,9 @@ ${partsBodyXml}
     const handleScoreClick = (e: React.MouseEvent) => {
         if (!interactionReady) {
             return;
+        }
+        if (gripEdit) {
+            closeGripEdit(false);
         }
         if (ignoreNextClickRef.current) {
             ignoreNextClickRef.current = false;
@@ -14185,6 +14413,7 @@ ${partsBodyXml}
                     setChangeReviewNewThreadAnchorId(null);
                     setChangeReviewNewThreadContent('');
                 } : handleScoreClick}
+                onDoubleClick={isChangeReviewSingleScoreMode ? undefined : handleScoreDoubleClick}
                 onPointerDown={isChangeReviewSingleScoreMode ? undefined : handleScorePointerDown}
                     onPointerMove={isChangeReviewSingleScoreMode ? undefined : handleScorePointerMove}
                     onPointerUp={isChangeReviewSingleScoreMode ? undefined : handleScorePointerUp}
@@ -14290,6 +14519,29 @@ ${partsBodyXml}
                             title="Click to place note"
                         />
                     )}
+
+                    {gripEdit?.page === currentPage && gripEdit.grips.map(grip => {
+                        const overlayPoint = engravingToOverlayPoint(grip.x, grip.y);
+                        return (
+                            <button
+                                key={grip.index}
+                                type="button"
+                                data-testid={`spanner-grip-${grip.index}`}
+                                aria-label={`Spanner grip ${grip.index + 1}`}
+                                disabled={!grip.draggable}
+                                className={`absolute z-30 h-3 w-3 -translate-x-1/2 -translate-y-1/2 border-2 shadow-sm ${
+                                    grip.draggable
+                                        ? 'cursor-move border-blue-800 bg-white hover:bg-blue-100'
+                                        : 'cursor-not-allowed border-gray-500 bg-gray-200 opacity-70'
+                                }`}
+                                style={{ left: overlayPoint.x, top: overlayPoint.y }}
+                                onClick={event => event.stopPropagation()}
+                                onDoubleClick={event => event.stopPropagation()}
+                                onPointerDown={event => handleGripPointerDown(event, grip.index)}
+                                title={grip.draggable ? 'Drag to reshape' : 'This anchor requires the desktop score view'}
+                            />
+                        );
+                    })}
 
                     {/* Selection highlighting is now done natively in the SVG via highlightSelection=true in saveSvg(). Keep the overlays around for testing/interaction feedback. */}
                     {secondarySelectionBoxes.map((box, index) => (

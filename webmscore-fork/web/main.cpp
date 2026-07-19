@@ -1,6 +1,7 @@
 #include <emscripten/emscripten.h>
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string>
@@ -68,6 +69,7 @@
 #include "engraving/libmscore/tempotext.h"
 #include "engraving/libmscore/dynamic.h"
 #include "engraving/libmscore/hairpin.h"
+#include "engraving/libmscore/spanner.h"
 #include "engraving/libmscore/pedal.h"
 #include "engraving/libmscore/rehearsalmark.h"
 #include "engraving/libmscore/articulation.h"
@@ -2900,6 +2902,29 @@ struct ElementDragState {
 
 static ElementDragState g_elementDrag;
 
+//---------------------------------------------------------
+//   Spanner grip edit gesture (begin/drag/end)
+//---------------------------------------------------------
+
+struct GripEditState {
+    engraving::MasterScore* score = nullptr;
+    engraving::EngravingItem* element = nullptr;
+    engraving::EditData ed;
+    bool active = false;
+    bool dragging = false;
+
+    void reset()
+    {
+        score = nullptr;
+        element = nullptr;
+        ed = engraving::EditData();
+        active = false;
+        dragging = false;
+    }
+};
+
+static GripEditState g_gripEdit;
+
 // JS-side modifier flags: 1 = shift, 2 = ctrl, 4 = alt
 static engraving::KeyboardModifiers dragModifiersFromFlags(int modifiers)
 {
@@ -2940,10 +2965,93 @@ static void abortElementDragForScore(engraving::MasterScore* master)
     abortElementDragIfActive();
 }
 
+static void abortGripEditIfActive()
+{
+    if (g_gripEdit.active && g_gripEdit.element) {
+        if (g_gripEdit.dragging) {
+            g_gripEdit.element->endEditDrag(g_gripEdit.ed);
+        }
+        g_gripEdit.element->endEdit(g_gripEdit.ed);
+        if (g_gripEdit.dragging && g_gripEdit.score) {
+            g_gripEdit.score->endCmd(true /* rollback */);
+        }
+    }
+    g_gripEdit.reset();
+}
+
+static void abortGripEditForScore(engraving::MasterScore* master)
+{
+    if (!g_gripEdit.active || !g_gripEdit.score) {
+        return;
+    }
+    if (master && g_gripEdit.score->masterScore() != master->masterScore()) {
+        return;
+    }
+    abortGripEditIfActive();
+}
+
+static bool gripCanDrag(const engraving::EngravingItem* element, int gripIndex)
+{
+    if (!element || gripIndex < 0 || gripIndex >= element->gripsCount()) {
+        return false;
+    }
+
+    // Note-anchored endpoints ask EditData::view() to locate a replacement note.
+    // The headless web bridge has no MuseScoreView, so expose the grips for visual
+    // parity but leave those two handles read-only. Shape and segment-anchored
+    // resize grips use only engraving coordinates and are safe here.
+    if (element->isSpannerSegment()
+        && (gripIndex == static_cast<int>(engraving::Grip::START)
+            || gripIndex == static_cast<int>(engraving::Grip::END))) {
+        if (element->isSlurTieSegment()) {
+            return false;
+        }
+        const auto* segment = engraving::toSpannerSegment(element);
+        if (segment->spanner()->anchor() == engraving::Spanner::Anchor::NOTE) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static WasmRes gripEditJson(const GripEditState& state)
+{
+    if (!state.active || !state.element) {
+        return WasmRes(QByteArray("null"));
+    }
+
+    QJsonArray grips;
+    const auto positions = state.element->gripsPositions(state.ed);
+    for (size_t i = 0; i < positions.size(); ++i) {
+        QJsonObject grip;
+        grip.insert(QStringLiteral("index"), static_cast<int>(i));
+        grip.insert(QStringLiteral("x"), positions[i].x());
+        grip.insert(QStringLiteral("y"), positions[i].y());
+        grip.insert(QStringLiteral("draggable"), gripCanDrag(state.element, static_cast<int>(i)));
+        grips.append(grip);
+    }
+
+    int pageNumber = 0;
+    const auto& pages = state.score->pages();
+    auto* elementPage = state.element->findAncestor(engraving::ElementType::PAGE);
+    for (size_t i = 0; i < pages.size(); ++i) {
+        if (elementPage == pages[i]) {
+            pageNumber = static_cast<int>(i);
+            break;
+        }
+    }
+
+    QJsonObject result;
+    result.insert(QStringLiteral("page"), pageNumber);
+    result.insert(QStringLiteral("grips"), grips);
+    return WasmRes(QJsonDocument(result).toJson(QJsonDocument::Compact));
+}
+
 bool _beginElementDrag(uintptr_t score_ptr, int pageNumber, double x, double y, int excerptId)
 {
     // A stale gesture (e.g. lost pointer-up) must not leak an open command
     abortElementDragIfActive();
+    abortGripEditIfActive();
 
     MainScore score(score_ptr, excerptId);
     const auto& pages = score->pages();
@@ -3107,6 +3215,157 @@ static engraving::EngravingItem* resolvePrimarySelectionElement(engraving::Score
     }
 
     return nullptr;
+}
+
+struct GripEditHitScan {
+    mu::PointF point;
+    engraving::EngravingItem* target = nullptr;
+    double bestDistanceSquared = std::numeric_limits<double>::max();
+};
+
+static void scanGripEditTarget(void* data, engraving::EngravingItem* item)
+{
+    auto* scan = static_cast<GripEditHitScan*>(data);
+    if (!scan || !item || !item->isSpannerSegment() || !item->isEditable() || !item->hasGrips()) {
+        return;
+    }
+
+    const mu::RectF rect = item->pageBoundingRect();
+    const double dx = scan->point.x() < rect.left()
+        ? rect.left() - scan->point.x()
+        : (scan->point.x() > rect.right() ? scan->point.x() - rect.right() : 0.0);
+    const double dy = scan->point.y() < rect.top()
+        ? rect.top() - scan->point.y()
+        : (scan->point.y() > rect.bottom() ? scan->point.y() - rect.bottom() : 0.0);
+    const double distanceSquared = dx * dx + dy * dy;
+    constexpr double kMaxDistanceSquared = 20.0 * 20.0;
+    if (distanceSquared <= kMaxDistanceSquared && distanceSquared <= scan->bestDistanceSquared) {
+        scan->bestDistanceSquared = distanceSquared;
+        scan->target = item;
+    }
+}
+
+WasmRes _beginGripEdit(uintptr_t score_ptr, int pageNumber, double x, double y, int excerptId)
+{
+    abortElementDragIfActive();
+    abortGripEditIfActive();
+
+    MainScore score(score_ptr, excerptId);
+    const auto& pages = score->pages();
+    if (pageNumber < 0 || pageNumber >= static_cast<int>(pages.size())) {
+        LOGW() << "beginGripEdit: invalid page index " << pageNumber;
+        return WasmRes(QByteArray("null"));
+    }
+
+    engraving::Page* page = pages.at(pageNumber);
+    const mu::PointF point(x, y);
+    engraving::EngravingItem* target = nullptr;
+    auto findSpanner = [&target](const std::vector<engraving::EngravingItem*>& items) {
+        for (auto it = items.rbegin(); it != items.rend(); ++it) {
+            if (*it && (*it)->isSpannerSegment() && (*it)->isEditable() && (*it)->hasGrips()) {
+                target = *it;
+                return true;
+            }
+        }
+        return false;
+    };
+
+    findSpanner(page->items(point));
+    const mu::PointF localPoint = point - page->pos();
+    constexpr double kGripEditHitRadii[] = { 3.0, 6.0, 10.0, 16.0 };
+    for (double radius : kGripEditHitRadii) {
+        if (target) {
+            break;
+        }
+        const mu::RectF globalRect(point.x() - radius, point.y() - radius, radius * 2.0, radius * 2.0);
+        if (findSpanner(page->items(globalRect))) {
+            break;
+        }
+        const mu::RectF localRect(localPoint.x() - radius, localPoint.y() - radius, radius * 2.0, radius * 2.0);
+        findSpanner(page->items(localRect));
+    }
+    if (!target) {
+        // The page BSP query can return only a broad background item when a thin
+        // curve falls between indexed hit cells. A bounded page scan makes grip
+        // entry reliable for slurs and one-pixel hairpin strokes.
+        GripEditHitScan scan;
+        scan.point = point;
+        page->scanElements(&scan, scanGripEditTarget, false);
+        target = scan.target;
+    }
+    if (!target) {
+        return WasmRes(QByteArray("null"));
+    }
+
+    score->deselectAll();
+    score->select(target, engraving::SelectType::SINGLE, target->staffIdx());
+    score->updateSelection();
+    score->setSelectionChanged(true);
+
+    g_gripEdit.score = score;
+    g_gripEdit.element = target;
+    g_gripEdit.ed = engraving::EditData();
+    g_gripEdit.ed.element = target;
+    g_gripEdit.ed.buttons = engraving::LeftButton;
+    target->startEdit(g_gripEdit.ed);
+    g_gripEdit.active = true;
+    return gripEditJson(g_gripEdit);
+}
+
+WasmRes _dragGrip(uintptr_t score_ptr, int gripIndex, double dx, double dy, int modifiers, int excerptId)
+{
+    if (!g_gripEdit.active || !g_gripEdit.element || !gripCanDrag(g_gripEdit.element, gripIndex)) {
+        return WasmRes(QByteArray("null"));
+    }
+
+    MainScore score(score_ptr, excerptId);
+    if (static_cast<engraving::MasterScore*>(score) != g_gripEdit.score) {
+        LOGW() << "dragGrip: score mismatch, aborting gesture";
+        abortGripEditIfActive();
+        return WasmRes(QByteArray("null"));
+    }
+
+    engraving::EditData& ed = g_gripEdit.ed;
+    ed.curGrip = static_cast<engraving::Grip>(gripIndex);
+    ed.delta = mu::PointF(dx, dy);
+    ed.evtDelta = ed.delta;
+    ed.moveDelta += ed.delta;
+    ed.lastPos = ed.pos;
+    ed.pos += ed.delta;
+    ed.modifiers = dragModifiersFromFlags(modifiers);
+
+    if (!g_gripEdit.dragging) {
+        score->startCmd();
+        g_gripEdit.element->startEditDrag(ed);
+        g_gripEdit.dragging = true;
+    }
+    g_gripEdit.element->editDrag(ed);
+    score->update();
+    return gripEditJson(g_gripEdit);
+}
+
+bool _endGripEdit(uintptr_t score_ptr, bool commit, int excerptId)
+{
+    if (!g_gripEdit.active) {
+        return false;
+    }
+
+    MainScore score(score_ptr, excerptId);
+    if (static_cast<engraving::MasterScore*>(score) != g_gripEdit.score) {
+        LOGW() << "endGripEdit: score mismatch, aborting gesture";
+        abortGripEditIfActive();
+        return false;
+    }
+
+    if (g_gripEdit.dragging) {
+        g_gripEdit.element->endEditDrag(g_gripEdit.ed);
+    }
+    g_gripEdit.element->endEdit(g_gripEdit.ed);
+    if (g_gripEdit.dragging) {
+        score->endCmd(!commit /* rollback */);
+    }
+    g_gripEdit.reset();
+    return true;
 }
 
 static engraving::EngravingItem* resolvePreviewPlayableElement(engraving::EngravingItem* selected)
@@ -5668,6 +5927,21 @@ extern "C" {
     };
 
     EMSCRIPTEN_KEEPALIVE
+    WasmResBytes beginGripEdit(uintptr_t score_ptr, int pageNumber, double x, double y, int excerptId = -1) {
+        return _beginGripEdit(score_ptr, pageNumber, x, y, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    WasmResBytes dragGrip(uintptr_t score_ptr, int gripIndex, double dx, double dy, int modifiers, int excerptId = -1) {
+        return _dragGrip(score_ptr, gripIndex, dx, dy, modifiers, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool endGripEdit(uintptr_t score_ptr, bool commit, int excerptId = -1) {
+        return _endGripEdit(score_ptr, commit, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
     double getSpatium(uintptr_t score_ptr, int excerptId = -1) {
         return _getSpatium(score_ptr, excerptId);
     };
@@ -6061,6 +6335,7 @@ extern "C" {
     void destroy(uintptr_t score_ptr) {
         // Cancel any drag gesture that references this score before its objects are freed
         abortElementDragForScore((engraving::MasterScore*)score_ptr);
+        abortGripEditForScore((engraving::MasterScore*)score_ptr);
         s_loadProfilesByScore.erase(score_ptr);
         // remove the only alive reference to the smart pointer
         engraving::EngravingProjectPtr a = ((engraving::MasterScore*)score_ptr)->project().lock();

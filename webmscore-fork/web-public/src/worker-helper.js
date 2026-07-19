@@ -747,6 +747,21 @@ class WebMscoreW {
         return this.rpc('endElementDrag', [commit])
     }
 
+    /** Enter grip edit mode for a spanner at a page-relative point. */
+    beginGripEdit(pageNumber, x, y) {
+        return this.rpc('beginGripEdit', [pageNumber, x, y])
+    }
+
+    /** Drag one grip by an incremental score-space delta. */
+    dragGrip(gripIndex, dx, dy, modifiers = 0) {
+        return this.rpc('dragGrip', [gripIndex, dx, dy, modifiers])
+    }
+
+    /** End grip edit mode, committing or rolling back its undo command. */
+    endGripEdit(commit) {
+        return this.rpc('endGripEdit', [commit])
+    }
+
     /**
      * The score's spatium (staff space) in engraving canvas units.
      * @returns {Promise<number>}
