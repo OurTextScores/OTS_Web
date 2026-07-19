@@ -511,6 +511,7 @@ type MutationMethods = Pick<
     | 'setInputAccidentalType'
     | 'setInputDurationType'
     | 'toggleInputDot'
+    | 'putNote'
     | 'addPitchByStep'
     | 'enterRest'
     | 'setDurationType'
@@ -1153,6 +1154,17 @@ export default function ScoreEditor() {
     const noteDragCleanupRef = useRef<(() => void) | null>(null);
     // Engine spatium in score units, refreshed when a drag candidate is armed.
     const scoreSpatiumRef = useRef<number | null>(null);
+    // Note-input ("N") mode: clicks place notes instead of selecting.
+    const [noteInputActive, setNoteInputActive] = useState(false);
+    const [noteInputMethod, setNoteInputMethod] = useState(1);
+    const [noteInputShadow, setNoteInputShadow] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+    const noteInputActiveRef = useRef(false);
+    useEffect(() => {
+        noteInputActiveRef.current = false;
+        setNoteInputActive(false);
+        setNoteInputMethod(1);
+        setNoteInputShadow(null);
+    }, [score]);
     useEffect(() => () => {
         noteDragCleanupRef.current?.();
         noteDragCleanupRef.current = null;
@@ -10854,6 +10866,117 @@ ${partsBodyXml}
         return fn();
     }, { skipWasmReselect: true, skipSelectionFallback: true, advanceSelection: true });
 
+    const setNoteInputMode = async (enabled: boolean) => {
+        if (!score?.setNoteEntryMode) {
+            return;
+        }
+        try {
+            if (enabled && score.setInputStateFromSelection) {
+                // Seed the input duration/track from the selection when there is one;
+                // fails harmlessly with no selection (putNote derives position per click).
+                await Promise.resolve(score.setInputStateFromSelection()).catch(() => {});
+            }
+            await Promise.resolve(score.setNoteEntryMode(enabled));
+            noteInputActiveRef.current = enabled;
+            setNoteInputActive(enabled);
+            if (enabled && score.getSpatium) {
+                const spatium = await Promise.resolve(score.getSpatium()).catch(() => null);
+                scoreSpatiumRef.current = typeof spatium === 'number' && Number.isFinite(spatium) && spatium > 0
+                    ? spatium
+                    : null;
+            } else if (!enabled) {
+                setNoteInputShadow(null);
+            }
+        } catch (err) {
+            console.warn('Failed to toggle note input mode:', err);
+        }
+    };
+
+    const toggleNoteInputMode = () => {
+        void setNoteInputMode(!noteInputActiveRef.current);
+    };
+
+    // Input-state setters only touch the engine InputState — no relayout needed.
+    const handleSetInputDuration = async (durationType: number) => {
+        const fn = score?.setInputDurationType;
+        if (!fn) {
+            return;
+        }
+        try {
+            await Promise.resolve(fn.call(score, durationType));
+        } catch (err) {
+            console.warn('setInputDurationType failed:', err);
+        }
+    };
+
+    const handleToggleInputDotState = async () => {
+        const fn = score?.toggleInputDot;
+        if (!fn) {
+            return;
+        }
+        try {
+            await Promise.resolve(fn.call(score));
+        } catch (err) {
+            console.warn('toggleInputDot failed:', err);
+        }
+    };
+
+    const handleSetInputAccidental = async (accidentalType: number) => {
+        const fn = score?.setInputAccidentalType;
+        if (!fn) {
+            return;
+        }
+        try {
+            await Promise.resolve(fn.call(score, accidentalType));
+        } catch (err) {
+            console.warn('setInputAccidentalType failed:', err);
+        }
+    };
+
+    const handleSetInputVoice = async (voiceIndex: number) => {
+        const fn = score?.setVoice;
+        if (!fn) {
+            return;
+        }
+        try {
+            await Promise.resolve(fn.call(score, voiceIndex));
+        } catch (err) {
+            console.warn('setVoice for note input failed:', err);
+        }
+    };
+
+    const handleSetNoteInputMethod = async (method: number) => {
+        const fn = score?.setNoteEntryMethod;
+        if (!fn) {
+            return;
+        }
+        try {
+            const changed = await Promise.resolve(fn.call(score, method));
+            if (changed !== false) {
+                setNoteInputMethod(method);
+            }
+        } catch (err) {
+            console.warn('setNoteEntryMethod failed:', err);
+        }
+    };
+
+    const handlePutNoteAtPoint = async (page: number, x: number, y: number) => {
+        let placed = false;
+        await performMutation('place note', async () => {
+            const fn = requireMutation('putNote');
+            if (!fn) {
+                return false;
+            }
+            const result = await fn(page, x, y);
+            placed = result !== false;
+            return result;
+        }, { skipWasmReselect: true, skipSelectionFallback: true });
+        // The engine selects the placed note; preview it without reselecting.
+        if (placed) {
+            void playSelectionPreview('mutation:place note', undefined, { reselect: false });
+        }
+    };
+
     const handleToggleLineBreak = () => performMutation('toggle line break', async () => {
         await ensureSelectionInWasm();
         const fn = requireMutation('toggleLineBreak');
@@ -11351,7 +11474,19 @@ ${partsBodyXml}
                 }
             }
 
+            if (key === 'escape' && noteInputActiveRef.current) {
+                event.preventDefault();
+                void setNoteInputMode(false);
+                return;
+            }
+
             if (!isMod) {
+                if (key === 'n' && !event.altKey && !event.shiftKey && interactiveMutationEnabled) {
+                    event.preventDefault();
+                    toggleNoteInputMode();
+                    return;
+                }
+
                 const noteMap: Record<string, number> = {
                     c: 0,
                     d: 1,
@@ -11372,6 +11507,27 @@ ${partsBodyXml}
                     '8': 1, // DurationType::V_BREVE
                 };
                 const hasSelection = Boolean(selectedElement) || selectionBoxes.length > 0;
+
+                // In note-input mode the duration/dot keys set the input state for the
+                // next placed note rather than mutating the selection.
+                if (interactiveMutationEnabled && noteInputActiveRef.current) {
+                    if (rawKey in durationMap) {
+                        event.preventDefault();
+                        void handleSetInputDuration(durationMap[rawKey]);
+                        return;
+                    }
+                    if (rawKey === '.') {
+                        event.preventDefault();
+                        void handleToggleInputDotState();
+                        return;
+                    }
+                    if (rawKey === '+' || rawKey === '-' || rawKey === '=') {
+                        event.preventDefault();
+                        const accidentalType = rawKey === '+' ? 3 : rawKey === '-' ? 1 : 2;
+                        void handleSetInputAccidental(accidentalType);
+                        return;
+                    }
+                }
 
                 if (interactiveMutationEnabled && hasSelection) {
                     if (rawKey in durationMap) {
@@ -11426,6 +11582,10 @@ ${partsBodyXml}
             }
 
             if (key === 'arrowup' || key === 'arrowdown') {
+                if (noteInputActiveRef.current) {
+                    event.preventDefault();
+                    return;
+                }
                 if (!interactiveMutationEnabled) {
                     return;
                 }
@@ -12486,6 +12646,74 @@ ${partsBodyXml}
         };
     };
 
+    const updateNoteInputShadow = (clientX: number, clientY: number, target: Element | null) => {
+        if (!noteInputActiveRef.current || !containerRef.current) {
+            setNoteInputShadow(null);
+            return;
+        }
+        const point = clientToScorePoint(clientX, clientY);
+        if (!point) {
+            setNoteInputShadow(null);
+            return;
+        }
+
+        const page = resolvePageIndex(target);
+        const containerRect = containerRef.current.getBoundingClientRect();
+        let nearest: { top: number; left: number; right: number; distance: number; spatium: number } | null = null;
+        for (const staffLines of Array.from(containerRef.current.querySelectorAll('.StaffLines'))) {
+            if (resolvePageIndex(staffLines) !== page) {
+                continue;
+            }
+            const rect = staffLines.getBoundingClientRect();
+            const left = (rect.left - containerRect.left) / zoom;
+            const right = (rect.right - containerRect.left) / zoom;
+            const top = (rect.top - containerRect.top) / zoom;
+            const bottom = (rect.bottom - containerRect.top) / zoom;
+            if (point.x < left || point.x > right) {
+                continue;
+            }
+            const lineSetHeight = bottom - top;
+            const spatium = scoreSpatiumRef.current ?? (lineSetHeight > 0 ? lineSetHeight / 4 : 0);
+            if (!(spatium > 0)) {
+                continue;
+            }
+            const distance = lineSetHeight > 0
+                ? (point.y < top ? top - point.y : point.y > bottom ? point.y - bottom : 0)
+                : Math.abs(point.y - top);
+            if (distance > spatium * 2 || (nearest && distance >= nearest.distance)) {
+                continue;
+            }
+            nearest = { top, left, right, distance, spatium };
+        }
+
+        if (!nearest && target?.closest('svg') && containerRef.current.contains(target)) {
+            const spatium = scoreSpatiumRef.current;
+            if (spatium && spatium > 0) {
+                nearest = {
+                    top: 0,
+                    left: 0,
+                    right: containerRect.width / zoom,
+                    distance: 0,
+                    spatium,
+                };
+            }
+        }
+        if (!nearest || !(nearest.spatium > 0)) {
+            setNoteInputShadow(null);
+            return;
+        }
+        const halfStep = nearest.spatium / 2;
+        const snappedY = nearest.top + Math.round((point.y - nearest.top) / halfStep) * halfStep;
+        const width = nearest.spatium * 1.15;
+        const height = nearest.spatium * 0.78;
+        setNoteInputShadow({
+            x: Math.min(Math.max(point.x - width / 2, nearest.left), nearest.right - width),
+            y: snappedY - height / 2,
+            w: width,
+            h: height,
+        });
+    };
+
     const boxesIntersect = (
         a: { x: number, y: number, w: number, h: number },
         b: { x: number, y: number, w: number, h: number },
@@ -12908,8 +13136,9 @@ ${partsBodyXml}
         dragActiveRef.current = false;
         noteDragRef.current = null;
         // Pointer-down on a note starts a repitch drag instead of a lasso selection
-        // (additive modifier keeps the lasso behavior for multi-select).
-        noteDragCandidateRef.current = noteDragSupported && interactiveMutationEnabled && !dragAdditiveRef.current
+        // (additive modifier keeps the lasso; note-input mode places notes on click).
+        noteDragCandidateRef.current = noteDragSupported && interactiveMutationEnabled
+            && !dragAdditiveRef.current && !noteInputActiveRef.current
             ? findNoteDragCandidate(e.target as Element | null)
             : null;
         if (noteDragCandidateRef.current) {
@@ -12920,6 +13149,10 @@ ${partsBodyXml}
     };
 
     const handleScorePointerMove = (e: React.PointerEvent) => {
+        if (noteInputActiveRef.current) {
+            updateNoteInputShadow(e.clientX, e.clientY, e.target as Element | null);
+            return;
+        }
         if (dragKindRef.current !== 'pointer') {
             return;
         }
@@ -13069,6 +13302,10 @@ ${partsBodyXml}
     };
 
     const handleScoreMouseMove = (e: React.MouseEvent) => {
+        if (noteInputActiveRef.current) {
+            updateNoteInputShadow(e.clientX, e.clientY, e.target as Element | null);
+            return;
+        }
         if (dragKindRef.current === 'pointer' && !sawPointerMoveRef.current && dragPointerIdRef.current !== null && !noteDragCandidateRef.current) {
             const startClient = dragStartClientRef.current;
             const startScore = dragStartScoreRef.current;
@@ -13196,6 +13433,15 @@ ${partsBodyXml}
             return;
         }
         if (!containerRef.current || !score) return;
+
+        if (noteInputActiveRef.current && interactiveMutationEnabled) {
+            const scorePoint = clientToScorePoint(e.clientX, e.clientY);
+            if (scorePoint) {
+                const pageIndex = resolvePageIndex(e.target as Element | null);
+                void handlePutNoteAtPoint(pageIndex, scorePoint.x, scorePoint.y);
+            }
+            return;
+        }
 
         const clearSelectionState = () => {
             setSelectedElement(null);
@@ -13684,7 +13930,7 @@ ${partsBodyXml}
                 onPitchDown={handlePitchDown}
                     onTranspose={handleTranspose}
                     onTransposeEx={handleTransposeEx}
-                    onSetAccidental={handleSetAccidental}
+                    onSetAccidental={noteInputActive ? handleSetInputAccidental : handleSetAccidental}
                 onDurationLonger={handleDurationLonger}
 	                onDurationShorter={handleDurationShorter}
 	                mutationsEnabled={interactiveMutationEnabled}
@@ -13714,12 +13960,12 @@ ${partsBodyXml}
                 onSetTimeSignature={handleSetTimeSignature}
                 onSetKeySignature={handleSetKeySignature}
                 onSetClef={handleSetClef}
-                onToggleDot={handleToggleDot}
-                onToggleDoubleDot={handleToggleDoubleDot}
-                onSetDurationType={handleSetDurationType}
+                onToggleDot={noteInputActive ? handleToggleInputDotState : handleToggleDot}
+                onToggleDoubleDot={noteInputActive ? undefined : handleToggleDoubleDot}
+                onSetDurationType={noteInputActive ? handleSetInputDuration : handleSetDurationType}
                 onToggleLineBreak={handleToggleLineBreak}
                 onTogglePageBreak={handleTogglePageBreak}
-                onSetVoice={handleSetVoice}
+                onSetVoice={noteInputActive ? handleSetInputVoice : handleSetVoice}
                 onAddDynamic={handleAddDynamic}
                 onAddHairpin={handleAddHairpin}
                 onAddPedal={handleAddPedal}
@@ -13743,6 +13989,10 @@ ${partsBodyXml}
                 onAddSlur={handleAddSlur}
                 onAddTie={handleAddTie}
                 onAddGraceNote={handleAddGraceNote}
+                onToggleNoteInput={toggleNoteInputMode}
+                noteInputActive={noteInputActive}
+                noteInputMethod={noteInputMethod}
+                onSetNoteInputMethod={handleSetNoteInputMethod}
                 onAddTuplet={handleAddTuplet}
                 onAddNoteFromRest={handleAddNoteFromRest}
                 onToggleRepeatStart={handleToggleRepeatStart}
@@ -13927,7 +14177,8 @@ ${partsBodyXml}
 	                data-testid="score-wrapper"
 	                style={{
 	                    transform: `scale(${zoom})`,
-	                    width: 'fit-content'
+	                    width: 'fit-content',
+	                    cursor: noteInputActive ? 'crosshair' : undefined
 	                }}
                 onClick={isChangeReviewSingleScoreMode ? () => {
                     setChangeReviewFocusedAnchorId(null);
@@ -13938,6 +14189,11 @@ ${partsBodyXml}
                     onPointerMove={isChangeReviewSingleScoreMode ? undefined : handleScorePointerMove}
                     onPointerUp={isChangeReviewSingleScoreMode ? undefined : handleScorePointerUp}
                     onPointerCancel={isChangeReviewSingleScoreMode ? undefined : handleScorePointerCancel}
+                    onPointerLeave={isChangeReviewSingleScoreMode ? undefined : () => {
+                        if (noteInputActiveRef.current && dragPointerIdRef.current === null) {
+                            setNoteInputShadow(null);
+                        }
+                    }}
                 onMouseDown={isChangeReviewSingleScoreMode ? undefined : handleScoreMouseDown}
                 onMouseMove={isChangeReviewSingleScoreMode ? undefined : handleScoreMouseMove}
                 onMouseUp={isChangeReviewSingleScoreMode ? undefined : handleScoreMouseUp}
@@ -14018,6 +14274,21 @@ ${partsBodyXml}
                                 </div>
                             )}
                         </div>
+                    )}
+
+                    {noteInputActive && noteInputShadow && (
+                        <div
+                            data-testid="note-input-shadow"
+                            className="absolute pointer-events-none z-20 rounded-full border-2 border-sky-600 bg-sky-400/45"
+                            style={{
+                                left: noteInputShadow.x,
+                                top: noteInputShadow.y,
+                                width: noteInputShadow.w,
+                                height: noteInputShadow.h,
+                                transform: 'rotate(-12deg)',
+                            }}
+                            title="Click to place note"
+                        />
                     )}
 
                     {/* Selection highlighting is now done natively in the SVG via highlightSelection=true in saveSvg(). Keep the overlays around for testing/interaction feedback. */}

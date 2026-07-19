@@ -1317,6 +1317,24 @@ class WebMscore {
     }
 
     /**
+     * Place a note at a page-relative point while in note entry mode
+     * (click-to-place). Honors the current input duration/accidental/voice.
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @param {boolean} replace
+     * @param {boolean} insert
+     * @returns {Promise<boolean>}
+     */
+    async putNote(pageNumber, x, y, replace = false, insert = false) {
+        return Module.ccall('putNote',
+            'boolean',
+            ['number', 'number', 'number', 'number', 'boolean', 'boolean', 'number'],
+            [this.scoreptr, pageNumber, x, y, replace, insert, this.excerptId]
+        )
+    }
+
+    /**
      * Add a pitch by letter step (0=C ... 6=B)
      * @param {number} note
      * @param {boolean} addToChord

@@ -14,15 +14,17 @@ export const DurationSection: React.FC<ToolbarSectionProps> = ({
     onAddTuplet,
     mutationsEnabled,
     selectionActive,
+    noteInputActive,
 }) => {
     const mutationDisabled = !mutationsEnabled;
+    const durationControlDisabled = mutationDisabled || (!noteInputActive && !selectionActive);
 
     return (
         <>
             <Button
                 data-testid="btn-duration-shorter"
                 onClick={onDurationShorter}
-                disabled={mutationDisabled || !onDurationShorter || !selectionActive}
+                disabled={mutationDisabled || !onDurationShorter || !selectionActive || noteInputActive}
                 variant="outline"
                 size="xs"
                 className="shadow-sm"
@@ -34,7 +36,7 @@ export const DurationSection: React.FC<ToolbarSectionProps> = ({
             <Button
                 data-testid="btn-duration-longer"
                 onClick={onDurationLonger}
-                disabled={mutationDisabled || !onDurationLonger || !selectionActive}
+                disabled={mutationDisabled || !onDurationLonger || !selectionActive || noteInputActive}
                 variant="outline"
                 size="xs"
                 className="shadow-sm"
@@ -54,13 +56,13 @@ export const DurationSection: React.FC<ToolbarSectionProps> = ({
                 <DropdownMenuContent>
                     <DropdownMenuLabel>Duration</DropdownMenuLabel>
                     {durationOptions.map(opt => (
-                        <DropdownMenuItem key={opt.value} data-testid={opt.testId} disabled={mutationDisabled || !selectionActive || !onSetDurationType} title={`Shortcut: press ${opt.shortcut} for ${opt.label}`} onSelect={() => onSetDurationType?.(opt.value)}>
+                        <DropdownMenuItem key={opt.value} data-testid={opt.testId} disabled={durationControlDisabled || !onSetDurationType} title={`Shortcut: press ${opt.shortcut} for ${opt.label}`} onSelect={() => onSetDurationType?.(opt.value)}>
                             {opt.label}
                         </DropdownMenuItem>
                     ))}
                     <DropdownMenuLabel>Dots</DropdownMenuLabel>
-                    <DropdownMenuItem data-testid="btn-dot" disabled={mutationDisabled || !selectionActive || !onToggleDot} onSelect={() => onToggleDot?.()}>Dot</DropdownMenuItem>
-                    <DropdownMenuItem data-testid="btn-double-dot" disabled={mutationDisabled || !selectionActive || !onToggleDoubleDot} onSelect={() => onToggleDoubleDot?.()}>Double Dot</DropdownMenuItem>
+                    <DropdownMenuItem data-testid="btn-dot" disabled={durationControlDisabled || !onToggleDot} onSelect={() => onToggleDot?.()}>Dot</DropdownMenuItem>
+                    <DropdownMenuItem data-testid="btn-double-dot" disabled={mutationDisabled || !selectionActive || !onToggleDoubleDot || noteInputActive} onSelect={() => onToggleDoubleDot?.()}>Double Dot</DropdownMenuItem>
                     <DropdownMenuLabel>Tuplets</DropdownMenuLabel>
                     {tupletOptions.map(opt => (
                         <DropdownMenuItem key={opt.count} data-testid={`btn-tuplet-${opt.count}`} disabled={mutationDisabled || !selectionActive || !onAddTuplet} onSelect={() => onAddTuplet?.(opt.count)}>

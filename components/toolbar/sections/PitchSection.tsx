@@ -14,6 +14,7 @@ export const PitchSection: React.FC<ToolbarSectionProps> = ({
     onSetAccidental,
     mutationsEnabled,
     selectionActive,
+    noteInputActive,
 }) => {
     const mutationDisabled = !mutationsEnabled;
     const [transposeDialogOpen, setTransposeDialogOpen] = useState(false);
@@ -25,7 +26,7 @@ export const PitchSection: React.FC<ToolbarSectionProps> = ({
                 title="Shortcut: Arrow Down (Pitch Down)"
                 aria-label="Pitch Down"
                 onClick={onPitchDown}
-                disabled={mutationDisabled || !onPitchDown || !selectionActive}
+                disabled={mutationDisabled || !onPitchDown || !selectionActive || noteInputActive}
                 variant="outline"
                 size="xs"
                 className="shadow-sm"
@@ -37,7 +38,7 @@ export const PitchSection: React.FC<ToolbarSectionProps> = ({
                 title="Shortcut: Arrow Up (Pitch Up)"
                 aria-label="Pitch Up"
                 onClick={onPitchUp}
-                disabled={mutationDisabled || !onPitchUp || !selectionActive}
+                disabled={mutationDisabled || !onPitchUp || !selectionActive || noteInputActive}
                 variant="outline"
                 size="xs"
                 className="shadow-sm"
@@ -50,7 +51,7 @@ export const PitchSection: React.FC<ToolbarSectionProps> = ({
                 onClick={() => onTranspose?.(-12)}
                 title="Shortcut: Ctrl/Cmd + Arrow Down (Octave Down)"
                 aria-label="Octave Down"
-                disabled={mutationDisabled || !selectionActive || !onTranspose}
+                disabled={mutationDisabled || !selectionActive || !onTranspose || noteInputActive}
                 variant="outline"
                 size="xs"
                 className="shadow-sm"
@@ -62,7 +63,7 @@ export const PitchSection: React.FC<ToolbarSectionProps> = ({
                 title="Shortcut: Ctrl/Cmd + Arrow Up (Octave Up)"
                 aria-label="Octave Up"
                 onClick={() => onTranspose?.(12)}
-                disabled={mutationDisabled || !selectionActive || !onTranspose}
+                disabled={mutationDisabled || !selectionActive || !onTranspose || noteInputActive}
                 variant="outline"
                 size="xs"
                 className="shadow-sm"
@@ -75,7 +76,7 @@ export const PitchSection: React.FC<ToolbarSectionProps> = ({
                 title="Transpose... (full options)"
                 aria-label="Transpose"
                 onClick={() => setTransposeDialogOpen(true)}
-                disabled={mutationDisabled || !onTransposeEx}
+                disabled={mutationDisabled || !onTransposeEx || noteInputActive}
                 variant="outline"
                 size="sm"
                 className="shadow-sm"
@@ -93,14 +94,14 @@ export const PitchSection: React.FC<ToolbarSectionProps> = ({
             <div className="h-3 w-px bg-slate-200"></div>
             <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
-                    <Button data-testid="dropdown-accidental" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive || !onSetAccidental} className="shadow-sm">
+                    <Button data-testid="dropdown-accidental" variant="outline" size="sm" disabled={mutationDisabled || (!noteInputActive && !selectionActive) || !onSetAccidental} className="shadow-sm">
                         <Hash size={14} className="mr-2" />
                         Accidental
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     {accidentalOptions.map(opt => (
-                        <DropdownMenuItem key={opt.label} data-testid={`btn-acc-${opt.value}`} disabled={mutationDisabled || !selectionActive || !onSetAccidental} onSelect={() => onSetAccidental?.(opt.value)}>
+                        <DropdownMenuItem key={opt.label} data-testid={`btn-acc-${opt.value}`} disabled={mutationDisabled || (!noteInputActive && !selectionActive) || !onSetAccidental} onSelect={() => onSetAccidental?.(opt.value)}>
                             {opt.label}
                         </DropdownMenuItem>
                     ))}

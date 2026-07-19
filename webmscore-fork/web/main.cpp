@@ -3991,9 +3991,19 @@ bool _setDurationType(uintptr_t score_ptr, int durationType, int excerptId)
 bool _setNoteEntryMode(uintptr_t score_ptr, bool enabled, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
+    auto& inputState = score->inputState();
+    if (enabled) {
+        // Match NotationNoteInput::startNoteInput(): entering note input always
+        // starts in note (not rest) mode with no carried accidental.
+        inputState.setRest(false);
+        inputState.setAccidentalType(engraving::AccidentalType::NONE);
+        if (inputState.noteEntryMethod() == engraving::NoteEntryMethod::UNKNOWN) {
+            inputState.setNoteEntryMethod(engraving::NoteEntryMethod::STEPTIME);
+        }
+    }
     score->setNoteEntryMode(enabled);
-    if (enabled && !score->inputState().duration().isValid()) {
-        score->inputState().setDuration(engraving::TDuration(engraving::DurationType::V_QUARTER));
+    if (enabled && !inputState.duration().isValid()) {
+        inputState.setDuration(engraving::TDuration(engraving::DurationType::V_QUARTER));
     }
     return true;
 }
@@ -4073,6 +4083,41 @@ bool _toggleInputDot(uintptr_t score_ptr, int excerptId)
     const int nextDots = duration.dots() > 0 ? 0 : 1;
     score->inputState().setDots(nextDots);
     return true;
+}
+
+// Place a note at a page-relative point while in note entry mode (desktop
+// "click to place" — wraps Score::putNote, which resolves staff/line/segment
+// from the position and honors the current input state).
+bool _putNote(uintptr_t score_ptr, int pageNumber, double x, double y, bool replace, bool insert, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    const auto& pages = score->pages();
+
+    if (pageNumber < 0 || pageNumber >= (int)pages.size()) {
+        LOGW() << "putNote: invalid page index " << pageNumber;
+        return false;
+    }
+    if (!score->inputState().noteEntryMode()) {
+        LOGW() << "putNote: not in note entry mode";
+        return false;
+    }
+
+    engraving::Page* page = pages.at(pageNumber);
+    // Score::getPosition expects canvas coordinates; accept either canvas or
+    // page-local input (mirrors the tolerant hit-testing used for selection).
+    mu::PointF pos(x, y);
+    const mu::RectF canvasRect = page->bbox().translated(page->pos());
+    if (!canvasRect.contains(pos)) {
+        const mu::PointF shifted = pos + page->pos();
+        if (canvasRect.contains(shifted)) {
+            pos = shifted;
+        }
+    }
+
+    score->startCmd();
+    const auto ret = score->putNote(pos, replace, insert);
+    score->endCmd();
+    return ret.success();
 }
 
 bool _addPitchByStep(uintptr_t score_ptr, int note, bool addToChord, bool insert, int excerptId)
@@ -5759,6 +5804,11 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool toggleInputDot(uintptr_t score_ptr, int excerptId = -1) {
         return _toggleInputDot(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool putNote(uintptr_t score_ptr, int pageNumber, double x, double y, bool replace, bool insert, int excerptId = -1) {
+        return _putNote(score_ptr, pageNumber, x, y, replace, insert, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

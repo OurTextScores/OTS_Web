@@ -30,6 +30,12 @@
         <duration>1</duration>
         <type>quarter</type>
       </note>
+      <note>
+        <rest/>
+        <duration>3</duration>
+        <type>half</type>
+        <dot/>
+      </note>
     </measure>
   </part>
 </score-partwise>

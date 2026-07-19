@@ -111,6 +111,10 @@ export interface ToolbarSectionProps {
     onAddTie?: () => void;
     onAddGraceNote?: (graceType: number) => void;
     onAddTuplet?: (tupletCount: number) => void;
+    onToggleNoteInput?: () => void;
+    noteInputActive?: boolean;
+    noteInputMethod?: number;
+    onSetNoteInputMethod?: (method: number) => void;
     onAddNoteFromRest?: () => void;
     onToggleRepeatStart?: () => void;
     onToggleRepeatEnd?: () => void;

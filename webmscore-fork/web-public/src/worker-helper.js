@@ -855,6 +855,19 @@ class WebMscoreW {
         return this.rpc('setInputDurationType', [durationType])
     }
 
+    /**
+     * Place a note at a page-relative point while in note entry mode.
+     * @param {number} pageNumber
+     * @param {number} x
+     * @param {number} y
+     * @param {boolean} replace
+     * @param {boolean} insert
+     * @returns {Promise<boolean>}
+     */
+    putNote(pageNumber, x, y, replace = false, insert = false) {
+        return this.rpc('putNote', [pageNumber, x, y, replace, insert])
+    }
+
     toggleInputDot() {
         return this.rpc('toggleInputDot')
     }

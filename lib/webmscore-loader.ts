@@ -111,6 +111,7 @@ export interface Score {
     setInputAccidentalType?: (accidentalType: number) => Promise<unknown> | unknown;
     setInputDurationType?: (durationType: number) => Promise<unknown> | unknown;
     toggleInputDot?: () => Promise<unknown> | unknown;
+    putNote?: (pageNumber: number, x: number, y: number, replace?: boolean, insert?: boolean) => Promise<boolean> | boolean;
     addPitchByStep?: (note: number, addToChord?: boolean, insert?: boolean) => Promise<unknown> | unknown;
     enterRest?: () => Promise<unknown> | unknown;
     setDurationType?: (durationType: number) => Promise<unknown> | unknown;
