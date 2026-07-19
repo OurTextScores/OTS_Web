@@ -53,6 +53,7 @@
 #include "playback/iplaybackcontroller.h"
 #include "engraving/libmscore/chord.h"
 #include "engraving/libmscore/editdata.h"
+#include "engraving/libmscore/elementgroup.h"
 #include "engraving/libmscore/instrtemplate.h"
 #include "engraving/libmscore/part.h"
 #include "engraving/libmscore/property.h"
@@ -2873,6 +2874,209 @@ bool _extendSelectionPrevChord(uintptr_t score_ptr, int excerptId)
     return false;
 }
 
+//---------------------------------------------------------
+//   Element drag gesture (begin/update/end)
+//   Mirrors NotationInteraction::startDrag/drag/endDrag from desktop
+//   MuseScore: one EditData across the gesture, ElementGroup drag
+//   primitives, all inside a single undoable command.
+//---------------------------------------------------------
+
+struct ElementDragState {
+    engraving::MasterScore* score = nullptr;
+    engraving::EditData ed;
+    std::vector<std::unique_ptr<engraving::ElementGroup> > groups;
+    mu::PointF beginMove;
+    bool active = false;
+
+    void reset()
+    {
+        score = nullptr;
+        ed = engraving::EditData();
+        groups.clear();
+        beginMove = mu::PointF();
+        active = false;
+    }
+};
+
+static ElementDragState g_elementDrag;
+
+// JS-side modifier flags: 1 = shift, 2 = ctrl, 4 = alt
+static engraving::KeyboardModifiers dragModifiersFromFlags(int modifiers)
+{
+    engraving::KeyboardModifiers mods = {};
+    if (modifiers & 1) {
+        mods |= engraving::ShiftModifier;
+    }
+    if (modifiers & 2) {
+        mods |= engraving::ControlModifier;
+    }
+    if (modifiers & 4) {
+        mods |= engraving::AltModifier;
+    }
+    return mods;
+}
+
+static void abortElementDragIfActive()
+{
+    if (g_elementDrag.active && g_elementDrag.score) {
+        for (auto& g : g_elementDrag.groups) {
+            g->endDrag(g_elementDrag.ed);
+        }
+        g_elementDrag.score->endCmd(true /* rollback */);
+    }
+    g_elementDrag.reset();
+}
+
+// Must run before a MasterScore is destroyed: the drag state holds raw element and
+// score pointers that would otherwise dangle into freed memory.
+static void abortElementDragForScore(engraving::MasterScore* master)
+{
+    if (!g_elementDrag.active || !g_elementDrag.score) {
+        return;
+    }
+    if (master && g_elementDrag.score->masterScore() != master->masterScore()) {
+        return;
+    }
+    abortElementDragIfActive();
+}
+
+bool _beginElementDrag(uintptr_t score_ptr, int pageNumber, double x, double y, int excerptId)
+{
+    // A stale gesture (e.g. lost pointer-up) must not leak an open command
+    abortElementDragIfActive();
+
+    MainScore score(score_ptr, excerptId);
+    const auto& pages = score->pages();
+
+    if (pageNumber < 0 || pageNumber >= (int)pages.size()) {
+        LOGW() << "beginElementDrag: invalid page index " << pageNumber;
+        return false;
+    }
+
+    engraving::Page* page = pages.at(pageNumber);
+    const mu::PointF pt(x, y);
+
+    auto items = selectableItemsAtPoint(page, pt);
+    engraving::EngravingItem* target = pickTopmostSelectableItem(items);
+    if (!target || !target->isMovable()) {
+        return false;
+    }
+
+    // Match desktop behavior: starting a drag on an unselected element selects it
+    if (!target->selected()) {
+        score->deselectAll();
+        score->select(target, engraving::SelectType::SINGLE, target->staffIdx());
+        score->updateSelection();
+        score->setSelectionChanged(true);
+    }
+
+    auto isDraggable = [](const engraving::EngravingItem* e) {
+        return e && e->isMovable();
+    };
+
+    std::unique_ptr<engraving::ElementGroup> group = target->getDragGroup(isDraggable);
+    if (!group || !group->enabled()) {
+        return false;
+    }
+
+    g_elementDrag.score = score;
+    g_elementDrag.beginMove = pt + page->pos();
+    g_elementDrag.ed = engraving::EditData();
+    g_elementDrag.ed.pos = g_elementDrag.beginMove;
+    g_elementDrag.ed.startMove = g_elementDrag.beginMove;
+    g_elementDrag.ed.normalizedStartMove = g_elementDrag.beginMove;
+    g_elementDrag.ed.buttons = engraving::LeftButton;
+    g_elementDrag.groups.push_back(std::move(group));
+
+    score->startCmd();
+    for (auto& g : g_elementDrag.groups) {
+        g->startDrag(g_elementDrag.ed);
+    }
+
+    g_elementDrag.active = true;
+    return true;
+}
+
+// dragMode mirrors desktop DragMode: 0 = both axes, 1 = X only, 2 = Y only
+bool _updateElementDrag(uintptr_t score_ptr, int pageNumber, double x, double y, int modifiers, int dragMode, int excerptId)
+{
+    if (!g_elementDrag.active) {
+        return false;
+    }
+
+    MainScore score(score_ptr, excerptId);
+    if (static_cast<engraving::MasterScore*>(score) != g_elementDrag.score) {
+        LOGW() << "updateElementDrag: score mismatch, aborting gesture";
+        abortElementDragIfActive();
+        return false;
+    }
+
+    const auto& pages = score->pages();
+    if (pageNumber < 0 || pageNumber >= (int)pages.size()) {
+        return false;
+    }
+
+    const mu::PointF toPos = mu::PointF(x, y) + pages.at(pageNumber)->pos();
+
+    engraving::EditData& ed = g_elementDrag.ed;
+
+    mu::PointF delta = toPos - g_elementDrag.beginMove;
+    mu::PointF evtDelta = toPos - ed.pos;
+    mu::PointF moveDelta = delta;
+
+    if (dragMode == 1) {
+        delta.setY(ed.delta.y());
+        moveDelta.setY(ed.moveDelta.y());
+        evtDelta.setY(0.0);
+    } else if (dragMode == 2) {
+        delta.setX(ed.delta.x());
+        moveDelta.setX(ed.moveDelta.x());
+        evtDelta.setX(0.0);
+    }
+
+    ed.lastPos = ed.pos;
+    ed.delta = delta;
+    ed.moveDelta = moveDelta;
+    ed.evtDelta = evtDelta;
+    ed.pos = toPos;
+    ed.modifiers = dragModifiersFromFlags(modifiers);
+
+    for (auto& g : g_elementDrag.groups) {
+        g->drag(ed);
+    }
+
+    score->update();
+    return true;
+}
+
+double _getSpatium(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    return score->spatium();
+}
+
+bool _endElementDrag(uintptr_t score_ptr, bool commit, int excerptId)
+{
+    if (!g_elementDrag.active) {
+        return false;
+    }
+
+    MainScore score(score_ptr, excerptId);
+    if (static_cast<engraving::MasterScore*>(score) != g_elementDrag.score) {
+        LOGW() << "endElementDrag: score mismatch, aborting gesture";
+        abortElementDragIfActive();
+        return false;
+    }
+
+    for (auto& g : g_elementDrag.groups) {
+        g->endDrag(g_elementDrag.ed);
+    }
+
+    score->endCmd(!commit /* rollback */);
+    g_elementDrag.reset();
+    return true;
+}
+
 static engraving::EngravingItem* resolvePrimarySelectionElement(engraving::Score* score)
 {
     if (!score) {
@@ -5404,6 +5608,26 @@ extern "C" {
     };
 
     EMSCRIPTEN_KEEPALIVE
+    bool beginElementDrag(uintptr_t score_ptr, int pageNumber, double x, double y, int excerptId = -1) {
+        return _beginElementDrag(score_ptr, pageNumber, x, y, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool updateElementDrag(uintptr_t score_ptr, int pageNumber, double x, double y, int modifiers, int dragMode, int excerptId = -1) {
+        return _updateElementDrag(score_ptr, pageNumber, x, y, modifiers, dragMode, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool endElementDrag(uintptr_t score_ptr, bool commit, int excerptId = -1) {
+        return _endElementDrag(score_ptr, commit, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    double getSpatium(uintptr_t score_ptr, int excerptId = -1) {
+        return _getSpatium(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
     WasmResBytes getSelectionBoundingBox(uintptr_t score_ptr, int excerptId = -1) {
         return _getSelectionBoundingBox(score_ptr, excerptId);
     };
@@ -5785,6 +6009,8 @@ extern "C" {
 
     EMSCRIPTEN_KEEPALIVE
     void destroy(uintptr_t score_ptr) {
+        // Cancel any drag gesture that references this score before its objects are freed
+        abortElementDragForScore((engraving::MasterScore*)score_ptr);
         s_loadProfilesByScore.erase(score_ptr);
         // remove the only alive reference to the smart pointer
         engraving::EngravingProjectPtr a = ((engraving::MasterScore*)score_ptr)->project().lock();

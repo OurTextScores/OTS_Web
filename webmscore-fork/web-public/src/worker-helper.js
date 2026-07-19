@@ -715,6 +715,47 @@ class WebMscoreW {
     }
 
     /**
+     * Begin an element drag gesture at a page-relative point.
+     * @param {number} pageNumber
+     * @param {number} x
+     * @param {number} y
+     * @returns {Promise<boolean>}
+     */
+    beginElementDrag(pageNumber, x, y) {
+        return this.rpc('beginElementDrag', [pageNumber, x, y])
+    }
+
+    /**
+     * Update the active element drag gesture.
+     * @param {number} pageNumber
+     * @param {number} x
+     * @param {number} y
+     * @param {number} modifiers bitmask: 1=shift, 2=ctrl, 4=alt
+     * @param {0|1|2} dragMode 0=both axes, 1=X only, 2=Y only
+     * @returns {Promise<boolean>}
+     */
+    updateElementDrag(pageNumber, x, y, modifiers = 0, dragMode = 0) {
+        return this.rpc('updateElementDrag', [pageNumber, x, y, modifiers, dragMode])
+    }
+
+    /**
+     * End the active element drag gesture.
+     * @param {boolean} commit true to commit, false to rollback
+     * @returns {Promise<boolean>}
+     */
+    endElementDrag(commit) {
+        return this.rpc('endElementDrag', [commit])
+    }
+
+    /**
+     * The score's spatium (staff space) in engraving canvas units.
+     * @returns {Promise<number>}
+     */
+    getSpatium() {
+        return this.rpc('getSpatium')
+    }
+
+    /**
      * Delete the current selection.
      * @returns {Promise<boolean>}
      */

@@ -486,6 +486,9 @@ type MutationMethods = Pick<
     | 'selectPrevChord'
     | 'extendSelectionNextChord'
     | 'extendSelectionPrevChord'
+    | 'beginElementDrag'
+    | 'updateElementDrag'
+    | 'endElementDrag'
     | 'selectAll'
     | 'getSelectionBoundingBox'
     | 'getSelectionBoundingBoxes'
@@ -1140,6 +1143,20 @@ export default function ScoreEditor() {
     const dragAdditiveRef = useRef(false);
     const dragActiveRef = useRef(false);
     const sawPointerMoveRef = useRef(false);
+    // Ghost-drag note repitch: candidate captured on pointer-down, gesture data once the
+    // drag threshold is crossed, ghost box rendered as an overlay in score units.
+    const [noteDragGhost, setNoteDragGhost] = useState<{ x: number, y: number, w: number, h: number, steps: number } | null>(null);
+    const noteDragCandidateRef = useRef<{ page: number, noteBox: { x: number, y: number, w: number, h: number } } | null>(null);
+    const noteDragRef = useRef<{ page: number, startX: number, startY: number, noteBox: { x: number, y: number, w: number, h: number }, halfStep: number } | null>(null);
+    // Removes the window-level listeners that drive an in-flight note drag; the gesture
+    // must outlive the score wrapper because the staff can sit at its very edge.
+    const noteDragCleanupRef = useRef<(() => void) | null>(null);
+    // Engine spatium in score units, refreshed when a drag candidate is armed.
+    const scoreSpatiumRef = useRef<number | null>(null);
+    useEffect(() => () => {
+        noteDragCleanupRef.current?.();
+        noteDragCleanupRef.current = null;
+    }, []);
     const blockOverlayRefreshRef = useRef(false);
     const selectionOverlayGenerationRef = useRef(0);
     const [mutationEnabled, setMutationEnabled] = useState(false);
@@ -12626,6 +12643,240 @@ ${partsBodyXml}
         return fallback;
     };
 
+    const noteDragSupported = Boolean(score?.beginElementDrag && score?.updateElementDrag && score?.endElementDrag);
+
+    const findNoteDragCandidate = (target: Element | null) => {
+        if (!containerRef.current || !target || typeof target.closest !== 'function') {
+            return null;
+        }
+        const noteEl = target.closest('.Note');
+        if (!noteEl || !containerRef.current.contains(noteEl)) {
+            return null;
+        }
+        const containerRect = containerRef.current.getBoundingClientRect();
+        const rect = noteEl.getBoundingClientRect();
+        if (!(rect.width > 0 && rect.height > 0)) {
+            return null;
+        }
+        return {
+            page: resolvePageIndex(noteEl),
+            noteBox: {
+                x: (rect.left - containerRect.left) / zoom,
+                y: (rect.top - containerRect.top) / zoom,
+                w: rect.width / zoom,
+                h: rect.height / zoom,
+            },
+        };
+    };
+
+    // Half a staff space (one diatonic step) in score units, from the engine's own
+    // spatium — the same value Note::verticalDrag divides by, so ghost and commit
+    // agree exactly. Falls back to half the notehead height (a notehead is ~1 space
+    // tall) if the export is unavailable or hasn't resolved yet.
+    const resolveNoteDragHalfStep = (noteBox: { x: number, y: number, w: number, h: number }): number => {
+        const spatium = scoreSpatiumRef.current;
+        if (spatium !== null && spatium > 0) {
+            return spatium / 2;
+        }
+        return noteBox.h / 2;
+    };
+
+    const refreshScoreSpatium = async () => {
+        if (!score?.getSpatium) {
+            return;
+        }
+        try {
+            const spatium = await Promise.resolve(score.getSpatium());
+            scoreSpatiumRef.current = Number.isFinite(spatium) && spatium > 0 ? spatium : null;
+        } catch {
+            scoreSpatiumRef.current = null;
+        }
+    };
+
+    const commitNoteDrag = async (
+        drag: { page: number, startX: number, startY: number, halfStep: number },
+        steps: number,
+        modifiers: number,
+    ) => {
+        if (!score) {
+            return;
+        }
+        const begin = score.beginElementDrag?.bind(score);
+        const update = score.updateElementDrag?.bind(score);
+        const end = score.endElementDrag?.bind(score);
+        if (!begin || !update || !end) {
+            return;
+        }
+
+        const targetY = drag.startY + steps * drag.halfStep;
+
+        try {
+            const began = await begin(drag.page, drag.startX, drag.startY);
+            if (!began) {
+                console.warn('Note drag: engine found no draggable element at the start point.');
+                return;
+            }
+            let committed = false;
+            try {
+                // Y-only drag (mode 2) keeps the whole gesture in ChangePitch semantics.
+                await update(drag.page, drag.startX, targetY, modifiers, 2);
+                committed = (await end(true)) !== false;
+            } finally {
+                if (!committed) {
+                    await Promise.resolve(end(false)).catch(() => {});
+                }
+            }
+            if (!committed) {
+                return;
+            }
+
+            setScoreDirtySinceCheckpoint(true);
+            setScoreDirtySinceXml(true);
+
+            if (score.relayout) {
+                await Promise.resolve(score.relayout()).catch((err: unknown) => {
+                    console.warn('Relayout after note drag failed:', err);
+                });
+            }
+            const refreshedPage = await refreshPageCount(score, currentPageRef.current);
+            await renderScore(score, refreshedPage);
+
+            const generation = ++selectionOverlayGenerationRef.current;
+            scheduleSelectionOverlayRefresh(null, { page: drag.page, x: drag.startX, y: targetY }, generation);
+            // The engine keeps the dragged note selected, so preview it without reselecting.
+            void playSelectionPreview('mutation:drag note pitch', undefined, { reselect: false });
+        } catch (err) {
+            console.error('Note drag failed:', err);
+        }
+    };
+
+    const resetScorePointerGesture = () => {
+        dragKindRef.current = null;
+        sawPointerMoveRef.current = false;
+        dragPointerIdRef.current = null;
+        dragStartClientRef.current = null;
+        dragStartScoreRef.current = null;
+        dragAdditiveRef.current = false;
+        dragActiveRef.current = false;
+        noteDragRef.current = null;
+        noteDragCandidateRef.current = null;
+    };
+
+    // A note drag is driven by window-level listeners rather than the wrapper's React
+    // handlers: notes can sit at the very edge of the score wrapper, and the pointer
+    // leaves it (into toolbars) before the drag threshold is even reached.
+    const beginNoteDragWindowListeners = (pointerId: number) => {
+        noteDragCleanupRef.current?.();
+
+        const onMove = (ev: PointerEvent) => {
+            if (ev.pointerId !== pointerId) {
+                return;
+            }
+            const startClient = dragStartClientRef.current;
+            const startScore = dragStartScoreRef.current;
+            const candidate = noteDragCandidateRef.current;
+            if (!startClient || !startScore || !candidate) {
+                return;
+            }
+            if (!dragActiveRef.current) {
+                if (Math.hypot(ev.clientX - startClient.x, ev.clientY - startClient.y) < 4) {
+                    return;
+                }
+                dragActiveRef.current = true;
+                noteDragRef.current = {
+                    page: candidate.page,
+                    startX: startScore.x,
+                    startY: startScore.y,
+                    noteBox: candidate.noteBox,
+                    halfStep: resolveNoteDragHalfStep(candidate.noteBox),
+                };
+            }
+            const noteDrag = noteDragRef.current;
+            const current = clientToScorePoint(ev.clientX, ev.clientY);
+            if (!noteDrag || !current) {
+                return;
+            }
+            const steps = Math.round((current.y - noteDrag.startY) / noteDrag.halfStep);
+            setNoteDragGhost({
+                x: noteDrag.noteBox.x,
+                y: noteDrag.noteBox.y + steps * noteDrag.halfStep,
+                w: noteDrag.noteBox.w,
+                h: noteDrag.noteBox.h,
+                steps,
+            });
+            ev.preventDefault();
+        };
+
+        const onUp = (ev: PointerEvent) => {
+            if (ev.pointerId !== pointerId) {
+                return;
+            }
+            noteDragCleanupRef.current?.();
+            noteDragCleanupRef.current = null;
+
+            const noteDrag = noteDragRef.current;
+            const wasActive = dragActiveRef.current;
+            resetScorePointerGesture();
+            setNoteDragGhost(null);
+
+            if (!wasActive || !noteDrag) {
+                // Never crossed the drag threshold: let the normal click flow handle it.
+                return;
+            }
+
+            ignoreNextClickRef.current = true;
+            const endScore = clientToScorePoint(ev.clientX, ev.clientY);
+            if (!endScore) {
+                return;
+            }
+            const steps = Math.round((endScore.y - noteDrag.startY) / noteDrag.halfStep);
+            if (steps === 0) {
+                return;
+            }
+            const modifiers = (ev.shiftKey ? 1 : 0) | (ev.ctrlKey ? 2 : 0) | (ev.altKey ? 4 : 0);
+            void commitNoteDrag(noteDrag, steps, modifiers);
+        };
+
+        const onCancel = (ev: PointerEvent) => {
+            if (ev.pointerId !== pointerId) {
+                return;
+            }
+            noteDragCleanupRef.current?.();
+            noteDragCleanupRef.current = null;
+            resetScorePointerGesture();
+            setNoteDragGhost(null);
+        };
+
+        // Escape aborts the gesture without committing (roadmap §2.1). No engine call is
+        // needed: the WASM drag only begins on release.
+        const onKeyDown = (ev: KeyboardEvent) => {
+            if (ev.key !== 'Escape') {
+                return;
+            }
+            noteDragCleanupRef.current?.();
+            noteDragCleanupRef.current = null;
+            const wasActive = dragActiveRef.current;
+            resetScorePointerGesture();
+            setNoteDragGhost(null);
+            if (wasActive) {
+                // Swallow the click fired when the still-held pointer is released.
+                ignoreNextClickRef.current = true;
+                ev.preventDefault();
+            }
+        };
+
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onCancel);
+        window.addEventListener('keydown', onKeyDown);
+        noteDragCleanupRef.current = () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onCancel);
+            window.removeEventListener('keydown', onKeyDown);
+        };
+    };
+
     const handleScorePointerDown = (e: React.PointerEvent) => {
         if (!interactionReady) {
             return;
@@ -12655,6 +12906,17 @@ ${partsBodyXml}
         dragStartScoreRef.current = start;
         dragAdditiveRef.current = e.metaKey || e.ctrlKey;
         dragActiveRef.current = false;
+        noteDragRef.current = null;
+        // Pointer-down on a note starts a repitch drag instead of a lasso selection
+        // (additive modifier keeps the lasso behavior for multi-select).
+        noteDragCandidateRef.current = noteDragSupported && interactiveMutationEnabled && !dragAdditiveRef.current
+            ? findNoteDragCandidate(e.target as Element | null)
+            : null;
+        if (noteDragCandidateRef.current) {
+            // Async; typically resolved well before the drag threshold is crossed.
+            void refreshScoreSpatium();
+            beginNoteDragWindowListeners(e.pointerId);
+        }
     };
 
     const handleScorePointerMove = (e: React.PointerEvent) => {
@@ -12662,6 +12924,10 @@ ${partsBodyXml}
             return;
         }
         sawPointerMoveRef.current = true;
+        if (noteDragCandidateRef.current) {
+            // A note drag owns this gesture via window-level listeners.
+            return;
+        }
         if (dragPointerIdRef.current !== e.pointerId) {
             return;
         }
@@ -12706,6 +12972,10 @@ ${partsBodyXml}
         if (dragKindRef.current !== 'pointer') {
             return;
         }
+        if (noteDragCandidateRef.current) {
+            // A note drag owns this gesture via window-level listeners.
+            return;
+        }
         if (dragPointerIdRef.current !== e.pointerId) {
             return;
         }
@@ -12714,13 +12984,7 @@ ${partsBodyXml}
         const additive = dragAdditiveRef.current;
         const startScore = dragStartScoreRef.current;
 
-        dragKindRef.current = null;
-        sawPointerMoveRef.current = false;
-        dragPointerIdRef.current = null;
-        dragStartClientRef.current = null;
-        dragStartScoreRef.current = null;
-        dragAdditiveRef.current = false;
-        dragActiveRef.current = false;
+        resetScorePointerGesture();
 
         try {
             e.currentTarget.releasePointerCapture(e.pointerId);
@@ -12756,16 +13020,14 @@ ${partsBodyXml}
         if (dragKindRef.current !== 'pointer') {
             return;
         }
+        if (noteDragCandidateRef.current) {
+            // A note drag owns this gesture via window-level listeners.
+            return;
+        }
         if (dragPointerIdRef.current !== e.pointerId) {
             return;
         }
-        dragKindRef.current = null;
-        sawPointerMoveRef.current = false;
-        dragPointerIdRef.current = null;
-        dragStartClientRef.current = null;
-        dragStartScoreRef.current = null;
-        dragAdditiveRef.current = false;
-        dragActiveRef.current = false;
+        resetScorePointerGesture();
         setDragSelectionRect(null);
 
         try {
@@ -12807,7 +13069,7 @@ ${partsBodyXml}
     };
 
     const handleScoreMouseMove = (e: React.MouseEvent) => {
-        if (dragKindRef.current === 'pointer' && !sawPointerMoveRef.current && dragPointerIdRef.current !== null) {
+        if (dragKindRef.current === 'pointer' && !sawPointerMoveRef.current && dragPointerIdRef.current !== null && !noteDragCandidateRef.current) {
             const startClient = dragStartClientRef.current;
             const startScore = dragStartScoreRef.current;
             if (!startClient || !startScore) {
@@ -13736,6 +13998,26 @@ ${partsBodyXml}
                                 height: dragSelectionRect.h
                             }}
                         />
+                    )}
+
+                    {noteDragGhost && (
+                        <div
+                            data-testid="note-drag-ghost"
+                            className="absolute pointer-events-none z-20"
+                            style={{
+                                left: noteDragGhost.x,
+                                top: noteDragGhost.y,
+                                width: noteDragGhost.w,
+                                height: noteDragGhost.h
+                            }}
+                        >
+                            <div className="h-full w-full rounded-full border-2 border-blue-600 bg-blue-400/40" />
+                            {noteDragGhost.steps !== 0 && (
+                                <div className="absolute left-full top-1/2 -translate-y-1/2 ml-1 rounded bg-blue-600 px-1 text-[10px] leading-tight text-white whitespace-nowrap">
+                                    {noteDragGhost.steps < 0 ? `▲ ${-noteDragGhost.steps}` : `▼ ${noteDragGhost.steps}`}
+                                </div>
+                            )}
+                        </div>
                     )}
 
                     {/* Selection highlighting is now done natively in the SVG via highlightSelection=true in saveSvg(). Keep the overlays around for testing/interaction feedback. */}

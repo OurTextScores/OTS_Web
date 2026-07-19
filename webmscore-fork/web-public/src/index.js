@@ -1121,6 +1121,66 @@ class WebMscore {
     }
 
     /**
+     * Begin an element drag gesture at a page-relative point.
+     * Hit-tests the point; if a draggable element is found, selects it and
+     * opens an undoable command wrapping the whole gesture.
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @returns {Promise<boolean>} true if a drag gesture started
+     */
+    async beginElementDrag(pageNumber, x, y) {
+        return Module.ccall('beginElementDrag',
+            'boolean',
+            ['number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, pageNumber, x, y, this.excerptId]
+        )
+    }
+
+    /**
+     * Update the active element drag gesture with a new pointer position.
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @param {number} modifiers bitmask: 1=shift, 2=ctrl, 4=alt
+     * @param {0|1|2} dragMode 0=both axes, 1=X only, 2=Y only
+     * @returns {Promise<boolean>}
+     */
+    async updateElementDrag(pageNumber, x, y, modifiers = 0, dragMode = 0) {
+        return Module.ccall('updateElementDrag',
+            'boolean',
+            ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, pageNumber, x, y, modifiers, dragMode, this.excerptId]
+        )
+    }
+
+    /**
+     * End the active element drag gesture.
+     * @param {boolean} commit true to commit (endCmd), false to rollback
+     * @returns {Promise<boolean>}
+     */
+    async endElementDrag(commit) {
+        return Module.ccall('endElementDrag',
+            'boolean',
+            ['number', 'boolean', 'number'],
+            [this.scoreptr, commit, this.excerptId]
+        )
+    }
+
+    /**
+     * The score's spatium (staff space) in engraving canvas units — the same
+     * coordinate space used by selection and drag point APIs.
+     * @returns {Promise<number>}
+     */
+    async getSpatium() {
+        return Module.ccall('getSpatium',
+            'number',
+            ['number', 'number'],
+            [this.scoreptr, this.excerptId]
+        )
+    }
+
+    /**
      * Delete the current selection
      * @returns {Promise<boolean>}
      */

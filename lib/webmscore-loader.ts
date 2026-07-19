@@ -75,6 +75,16 @@ export interface Score {
         y: number,
         mode: 0 | 1 | 2 | 3,
     ) => Promise<unknown> | unknown;
+    beginElementDrag?: (pageNumber: number, x: number, y: number) => Promise<boolean> | boolean;
+    updateElementDrag?: (
+        pageNumber: number,
+        x: number,
+        y: number,
+        modifiers?: number,
+        dragMode?: 0 | 1 | 2,
+    ) => Promise<boolean> | boolean;
+    endElementDrag?: (commit: boolean) => Promise<boolean> | boolean;
+    getSpatium?: () => Promise<number> | number;
     selectNextChord?: () => Promise<unknown> | unknown;
     selectPrevChord?: () => Promise<unknown> | unknown;
     extendSelectionNextChord?: () => Promise<unknown> | unknown;
