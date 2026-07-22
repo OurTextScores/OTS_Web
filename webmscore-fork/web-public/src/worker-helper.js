@@ -928,6 +928,18 @@ class WebMscoreW {
         return this.rpc('addHairpin', [hairpinType])
     }
 
+    addOttava(ottavaType) {
+        return this.rpc('addOttava', [ottavaType])
+    }
+
+    addTrill(trillType) {
+        return this.rpc('addTrill', [trillType])
+    }
+
+    addGlissando(glissandoType) {
+        return this.rpc('addGlissando', [glissandoType])
+    }
+
     addPedal(pedalVariant) {
         return this.rpc('addPedal', [pedalVariant])
     }

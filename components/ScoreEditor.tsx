@@ -527,6 +527,9 @@ type MutationMethods = Pick<
     | 'changeSelectedElementsVoice'
     | 'addDynamic'
     | 'addHairpin'
+    | 'addOttava'
+    | 'addTrill'
+    | 'addGlissando'
     | 'addPedal'
     | 'addSostenutoPedal'
     | 'addUnaCorda'
@@ -11049,6 +11052,27 @@ ${partsBodyXml}
         return fn(hairpinType);
     });
 
+    const handleAddOttava = (ottavaType: number) => performMutation('add ottava', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addOttava');
+        if (!fn) return false;
+        return fn(ottavaType);
+    });
+
+    const handleAddTrill = (trillType: number) => performMutation('add trill line', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addTrill');
+        if (!fn) return false;
+        return fn(trillType);
+    });
+
+    const handleAddGlissando = (glissandoType: number) => performMutation('add glissando', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addGlissando');
+        if (!fn) return false;
+        return fn(glissandoType);
+    });
+
     const handleAddPedal = (pedalVariant: number) => performMutation('add pedal', async () => {
         await ensureSelectionInWasm();
         const fn = requireMutation('addPedal');
@@ -14356,6 +14380,9 @@ ${partsBodyXml}
                 onSetVoice={noteInputActive ? handleSetInputVoice : handleSetVoice}
                 onAddDynamic={handleAddDynamic}
                 onAddHairpin={handleAddHairpin}
+                onAddOttava={handleAddOttava}
+                onAddTrill={handleAddTrill}
+                onAddGlissando={handleAddGlissando}
                 onAddPedal={handleAddPedal}
                 onAddSostenutoPedal={handleAddSostenutoPedal}
                 onAddUnaCorda={handleAddUnaCorda}

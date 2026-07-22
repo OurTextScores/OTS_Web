@@ -1531,6 +1531,21 @@ class WebMscore {
         return Module.ccall('addHairpin', 'boolean', ['number', 'number', 'number'], [this.scoreptr, hairpinType, this.excerptId])
     }
 
+    /** Add an ottava line to the current selection. */
+    async addOttava(ottavaType) {
+        return Module.ccall('addOttava', 'boolean', ['number', 'number', 'number'], [this.scoreptr, ottavaType, this.excerptId])
+    }
+
+    /** Add a trill line to the current selection. */
+    async addTrill(trillType) {
+        return Module.ccall('addTrill', 'boolean', ['number', 'number', 'number'], [this.scoreptr, trillType, this.excerptId])
+    }
+
+    /** Add a glissando between exactly two selected notes. */
+    async addGlissando(glissandoType) {
+        return Module.ccall('addGlissando', 'boolean', ['number', 'number', 'number'], [this.scoreptr, glissandoType, this.excerptId])
+    }
+
     /**
      * Add a pedal marking at the current selection
      * @param {number} pedalVariant 0=line, 1=text

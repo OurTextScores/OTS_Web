@@ -15,3 +15,15 @@
     line-height: 1.1;
     color: #0f172a;
 }
+
+.lineSymbol {
+    display: inline-flex;
+    min-width: 2.5rem;
+    justify-content: center;
+    font-family: "LelandNotesToolbar", serif;
+    font-size: 1.55rem;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1.15;
+    color: #0f172a;
+}

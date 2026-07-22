@@ -397,6 +397,43 @@ describe('Toolbar', () => {
     expect(onAddGraceNote).toHaveBeenCalledWith(1);
   });
 
+  it('renders and wires ottava, trill, and glissando line options', async () => {
+    const user = userEvent.setup();
+    const onAddOttava = vi.fn();
+    const onAddTrill = vi.fn();
+    const onAddGlissando = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        mutationsEnabled
+        selectionActive
+        onAddOttava={onAddOttava}
+        onAddTrill={onAddTrill}
+        onAddGlissando={onAddGlissando}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Lines' }));
+    expect(screen.getByTestId('ottava-symbol-0')).toHaveTextContent('\uE511');
+    expect(screen.getByTestId('btn-ottava-0')).toHaveTextContent('8va');
+    expect(screen.getByTestId('trill-symbol-0')).toHaveTextContent('\uE566\uEAA4');
+    expect(screen.getByTestId('glissando-symbol-1')).toHaveTextContent('\uEAAF');
+    await user.click(screen.getByTestId('btn-ottava-3'));
+    expect(onAddOttava).toHaveBeenCalledWith(3);
+
+    await user.click(screen.getByRole('button', { name: 'Lines' }));
+    await user.click(screen.getByTestId('btn-trill-2'));
+    expect(onAddTrill).toHaveBeenCalledWith(2);
+
+    await user.click(screen.getByRole('button', { name: 'Lines' }));
+    await user.click(screen.getByTestId('btn-glissando-1'));
+    expect(onAddGlissando).toHaveBeenCalledWith(1);
+  });
+
   it('lists the slur keyboard shortcut', async () => {
     const user = userEvent.setup();
 

@@ -69,6 +69,9 @@
 #include "engraving/libmscore/tempotext.h"
 #include "engraving/libmscore/dynamic.h"
 #include "engraving/libmscore/hairpin.h"
+#include "engraving/libmscore/ottava.h"
+#include "engraving/libmscore/trill.h"
+#include "engraving/libmscore/glissando.h"
 #include "engraving/libmscore/spanner.h"
 #include "engraving/libmscore/pedal.h"
 #include "engraving/libmscore/rehearsalmark.h"
@@ -4823,6 +4826,139 @@ bool _addHairpin(uintptr_t score_ptr, int hairpinType, int excerptId)
     return added;
 }
 
+static std::vector<engraving::Note*> selectedNormalNotes(MainScore& score)
+{
+    std::vector<engraving::Note*> notes;
+    for (auto* note : score->selection().noteList()) {
+        if (note && note->chord() && !note->chord()->isGrace()) {
+            notes.push_back(note);
+        }
+    }
+    std::sort(notes.begin(), notes.end(), [](const engraving::Note* left, const engraving::Note* right) {
+        const auto* leftChord = left->chord();
+        const auto* rightChord = right->chord();
+        if (leftChord->tick() != rightChord->tick()) {
+            return leftChord->tick() < rightChord->tick();
+        }
+        if (leftChord->track() != rightChord->track()) {
+            return leftChord->track() < rightChord->track();
+        }
+        return left->pitch() < right->pitch();
+    });
+    return notes;
+}
+
+bool _addOttava(uintptr_t score_ptr, int ottavaType, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (ottavaType < static_cast<int>(engraving::OttavaType::OTTAVA_8VA)
+        || ottavaType > static_cast<int>(engraving::OttavaType::OTTAVA_22MB)) {
+        LOGW() << "addOttava: invalid ottava type " << ottavaType;
+        return false;
+    }
+    if (score->selection().isNone() || !score->selection().firstChordRest()) {
+        LOGW() << "addOttava: no chord/rest selection";
+        return false;
+    }
+
+    score->startCmd();
+    score->cmdAddOttava(static_cast<engraving::OttavaType>(ottavaType));
+    score->endCmd();
+    return true;
+}
+
+bool _addTrill(uintptr_t score_ptr, int trillType, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (trillType < static_cast<int>(engraving::TrillType::TRILL_LINE)
+        || trillType > static_cast<int>(engraving::TrillType::PRALLPRALL_LINE)) {
+        LOGW() << "addTrill: invalid trill type " << trillType;
+        return false;
+    }
+
+    const auto notes = selectedNormalNotes(score);
+    if (notes.empty()) {
+        LOGW() << "addTrill: selection contains no notes";
+        return false;
+    }
+
+    auto* firstChord = notes.front()->chord();
+    auto* lastChord = notes.back()->chord();
+    if (!firstChord || !lastChord || firstChord->staffIdx() != lastChord->staffIdx()) {
+        LOGW() << "addTrill: selection must stay on one staff";
+        return false;
+    }
+
+    auto* trill = engraving::Factory::createTrill(score->dummy());
+    if (!trill) {
+        LOGW() << "addTrill: Factory returned null";
+        return false;
+    }
+    trill->setTrillType(static_cast<engraving::TrillType>(trillType));
+    trill->setTrack(engraving::staff2track(firstChord->staffIdx(), 0));
+    trill->setTrack2(trill->track());
+    trill->setTick(firstChord->tick());
+    trill->setTick2(lastChord->tick() + lastChord->actualTicks());
+
+    score->startCmd();
+    score->undoAddElement(trill);
+    score->endCmd();
+    return true;
+}
+
+bool _addGlissando(uintptr_t score_ptr, int glissandoType, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (glissandoType < static_cast<int>(engraving::GlissandoType::STRAIGHT)
+        || glissandoType > static_cast<int>(engraving::GlissandoType::WAVY)) {
+        LOGW() << "addGlissando: invalid glissando type " << glissandoType;
+        return false;
+    }
+
+    const auto notes = selectedNormalNotes(score);
+    if (notes.size() != 2) {
+        LOGW() << "addGlissando: select exactly two notes";
+        return false;
+    }
+
+    auto* startNote = notes.front();
+    auto* endNote = notes.back();
+    auto* startChord = startNote->chord();
+    auto* endChord = endNote->chord();
+    if (!startChord || !endChord || startChord->tick() >= endChord->tick()
+        || startChord->staffIdx() != endChord->staffIdx()) {
+        LOGW() << "addGlissando: notes must be ordered on the same staff";
+        return false;
+    }
+    const bool alreadyHasGlissando = std::any_of(startNote->spannerFor().begin(), startNote->spannerFor().end(), [](const auto* spanner) {
+        return spanner && spanner->isGlissando();
+    });
+    if (alreadyHasGlissando) {
+        LOGW() << "addGlissando: start note already has a glissando";
+        return false;
+    }
+
+    auto* glissando = engraving::Factory::createGlissando(startNote);
+    if (!glissando) {
+        LOGW() << "addGlissando: Factory returned null";
+        return false;
+    }
+    glissando->setGlissandoType(static_cast<engraving::GlissandoType>(glissandoType));
+    glissando->setAnchor(engraving::Spanner::Anchor::NOTE);
+    glissando->setStartElement(startNote);
+    glissando->setEndElement(endNote);
+    glissando->setTick(startChord->tick());
+    glissando->setTick2(endChord->tick());
+    glissando->setTrack(startNote->track());
+    glissando->setTrack2(endNote->track());
+    glissando->setParent(startNote);
+
+    score->startCmd();
+    score->undoAddElement(glissando);
+    score->endCmd();
+    return true;
+}
+
 static engraving::staff_idx_t resolvePedalStaffIdx(engraving::Score* score, engraving::staff_idx_t staffIdx, const engraving::Fraction& tick)
 {
     if (!score || staffIdx == mu::nidx) {
@@ -6279,6 +6415,21 @@ extern "C" {
     bool addHairpin(uintptr_t score_ptr, int hairpinType, int excerptId = -1) {
         return _addHairpin(score_ptr, hairpinType, excerptId);
     };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addOttava(uintptr_t score_ptr, int ottavaType, int excerptId = -1) {
+        return _addOttava(score_ptr, ottavaType, excerptId);
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addTrill(uintptr_t score_ptr, int trillType, int excerptId = -1) {
+        return _addTrill(score_ptr, trillType, excerptId);
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addGlissando(uintptr_t score_ptr, int glissandoType, int excerptId = -1) {
+        return _addGlissando(score_ptr, glissandoType, excerptId);
+    }
 
     EMSCRIPTEN_KEEPALIVE
     bool addPedal(uintptr_t score_ptr, int pedalVariant, int excerptId = -1) {

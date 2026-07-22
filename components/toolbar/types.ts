@@ -90,6 +90,9 @@ export interface ToolbarSectionProps {
     onSetVoice?: (voiceIndex: number) => void;
     onAddDynamic?: (dynamicType: number) => void;
     onAddHairpin?: (hairpinType: number) => void;
+    onAddOttava?: (ottavaType: number) => void;
+    onAddTrill?: (trillType: number) => void;
+    onAddGlissando?: (glissandoType: number) => void;
     onAddPedal?: (pedalVariant: number) => void;
     onAddSostenutoPedal?: () => void;
     onAddUnaCorda?: () => void;
