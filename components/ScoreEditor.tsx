@@ -527,6 +527,10 @@ type MutationMethods = Pick<
     | 'changeSelectedElementsVoice'
     | 'addDynamic'
     | 'addHairpin'
+    | 'addFermata'
+    | 'addBreath'
+    | 'addArpeggio'
+    | 'addTremolo'
     | 'addOttava'
     | 'addTrill'
     | 'addGlissando'
@@ -11052,6 +11056,34 @@ ${partsBodyXml}
         return fn(hairpinType);
     });
 
+    const handleAddFermata = (fermataVariant: number) => performMutation('add fermata', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addFermata');
+        if (!fn) return false;
+        return fn(fermataVariant);
+    });
+
+    const handleAddBreath = (breathType: number) => performMutation('add breath or caesura', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addBreath');
+        if (!fn) return false;
+        return fn(breathType);
+    });
+
+    const handleAddArpeggio = (arpeggioType: number) => performMutation('add arpeggio', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addArpeggio');
+        if (!fn) return false;
+        return fn(arpeggioType);
+    });
+
+    const handleAddTremolo = (tremoloType: number) => performMutation('add tremolo', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addTremolo');
+        if (!fn) return false;
+        return fn(tremoloType);
+    });
+
     const handleAddOttava = (ottavaType: number) => performMutation('add ottava', async () => {
         await ensureSelectionInWasm();
         const fn = requireMutation('addOttava');
@@ -14383,6 +14415,10 @@ ${partsBodyXml}
                 onAddOttava={handleAddOttava}
                 onAddTrill={handleAddTrill}
                 onAddGlissando={handleAddGlissando}
+                onAddFermata={handleAddFermata}
+                onAddBreath={handleAddBreath}
+                onAddArpeggio={handleAddArpeggio}
+                onAddTremolo={handleAddTremolo}
                 onAddPedal={handleAddPedal}
                 onAddSostenutoPedal={handleAddSostenutoPedal}
                 onAddUnaCorda={handleAddUnaCorda}

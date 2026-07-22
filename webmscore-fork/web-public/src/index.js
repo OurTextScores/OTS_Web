@@ -1531,6 +1531,26 @@ class WebMscore {
         return Module.ccall('addHairpin', 'boolean', ['number', 'number', 'number'], [this.scoreptr, hairpinType, this.excerptId])
     }
 
+    /** Add a fermata variant to each selected chord/rest. */
+    async addFermata(fermataVariant) {
+        return Module.ccall('addFermata', 'boolean', ['number', 'number', 'number'], [this.scoreptr, fermataVariant, this.excerptId])
+    }
+
+    /** Add a breath or caesura to each selected chord/rest boundary. */
+    async addBreath(breathType) {
+        return Module.ccall('addBreath', 'boolean', ['number', 'number', 'number'], [this.scoreptr, breathType, this.excerptId])
+    }
+
+    /** Add an arpeggio to each selected multi-note chord. */
+    async addArpeggio(arpeggioType) {
+        return Module.ccall('addArpeggio', 'boolean', ['number', 'number', 'number'], [this.scoreptr, arpeggioType, this.excerptId])
+    }
+
+    /** Add a single- or two-note tremolo to the selected chord(s). */
+    async addTremolo(tremoloType) {
+        return Module.ccall('addTremolo', 'boolean', ['number', 'number', 'number'], [this.scoreptr, tremoloType, this.excerptId])
+    }
+
     /** Add an ottava line to the current selection. */
     async addOttava(ottavaType) {
         return Module.ccall('addOttava', 'boolean', ['number', 'number', 'number'], [this.scoreptr, ottavaType, this.excerptId])

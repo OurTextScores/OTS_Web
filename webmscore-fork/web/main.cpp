@@ -76,6 +76,10 @@
 #include "engraving/libmscore/pedal.h"
 #include "engraving/libmscore/rehearsalmark.h"
 #include "engraving/libmscore/articulation.h"
+#include "engraving/libmscore/arpeggio.h"
+#include "engraving/libmscore/breath.h"
+#include "engraving/libmscore/fermata.h"
+#include "engraving/libmscore/tremolo.h"
 #include "engraving/libmscore/barline.h"
 #include "engraving/libmscore/figuredbass.h"
 #include "engraving/libmscore/text.h"
@@ -4848,6 +4852,215 @@ static std::vector<engraving::Note*> selectedNormalNotes(MainScore& score)
     return notes;
 }
 
+static std::vector<engraving::ChordRest*> selectedChordRests(MainScore& score)
+{
+    std::set<engraving::ChordRest*> uniqueChordRests;
+    const auto& selection = score->selection();
+
+    if (selection.isRange()) {
+        auto* startSegment = selection.startSegment();
+        auto* endSegment = selection.endSegment();
+        for (auto* segment = startSegment; segment && segment != endSegment; segment = segment->next1()) {
+            if (segment->segmentType() != engraving::SegmentType::ChordRest) {
+                continue;
+            }
+            for (auto staffIdx = selection.staffStart(); staffIdx < selection.staffEnd(); ++staffIdx) {
+                for (int voice = 0; voice < engraving::VOICES; ++voice) {
+                    auto* item = segment->element(staffIdx * engraving::VOICES + voice);
+                    if (item && item->isChordRest()) {
+                        uniqueChordRests.insert(engraving::toChordRest(item));
+                    }
+                }
+            }
+        }
+    } else {
+        for (auto* item : selection.elements()) {
+            if (!item) {
+                continue;
+            }
+            if (item->isNote()) {
+                item = engraving::toNote(item)->chord();
+            }
+            if (item->isChordRest()) {
+                uniqueChordRests.insert(engraving::toChordRest(item));
+            }
+        }
+        if (uniqueChordRests.empty() && selection.cr()) {
+            uniqueChordRests.insert(selection.cr());
+        }
+    }
+
+    std::vector<engraving::ChordRest*> chordRests(uniqueChordRests.begin(), uniqueChordRests.end());
+    std::sort(chordRests.begin(), chordRests.end(), [](const auto* left, const auto* right) {
+        if (left->tick() != right->tick()) {
+            return left->tick() < right->tick();
+        }
+        return left->track() < right->track();
+    });
+    return chordRests;
+}
+
+static std::vector<engraving::Chord*> selectedChords(MainScore& score, bool requireMultipleNotes)
+{
+    std::vector<engraving::Chord*> chords;
+    for (auto* chordRest : selectedChordRests(score)) {
+        if (!chordRest->isChord()) {
+            continue;
+        }
+        auto* chord = engraving::toChord(chordRest);
+        if (!requireMultipleNotes || chord->notes().size() >= 2) {
+            chords.push_back(chord);
+        }
+    }
+    return chords;
+}
+
+bool _addFermata(uintptr_t score_ptr, int fermataVariant, int excerptId)
+{
+    static const engraving::SymId fermataSymbols[] = {
+        engraving::SymId::fermataAbove,
+        engraving::SymId::fermataShortAbove,
+        engraving::SymId::fermataLongAbove,
+        engraving::SymId::fermataVeryShortAbove,
+        engraving::SymId::fermataVeryLongAbove,
+    };
+    if (fermataVariant < 0 || fermataVariant >= static_cast<int>(std::size(fermataSymbols))) {
+        LOGW() << "addFermata: invalid variant " << fermataVariant;
+        return false;
+    }
+
+    MainScore score(score_ptr, excerptId);
+    auto chordRests = selectedChordRests(score);
+    const auto symbol = fermataSymbols[fermataVariant];
+    chordRests.erase(std::remove_if(chordRests.begin(), chordRests.end(), [symbol](const auto* chordRest) {
+        for (auto* annotation : chordRest->segment()->annotations()) {
+            if (annotation && annotation->isFermata() && annotation->track() == chordRest->track()
+                && engraving::toFermata(annotation)->symId() == symbol) {
+                return true;
+            }
+        }
+        return false;
+    }), chordRests.end());
+    if (chordRests.empty()) {
+        LOGW() << "addFermata: no eligible chord/rest selection";
+        return false;
+    }
+
+    score->startCmd();
+    for (auto* chordRest : chordRests) {
+        auto* fermata = engraving::Factory::createFermata(score->dummy());
+        fermata->setSymId(symbol);
+        engraving::EditData editData;
+        editData.dropElement = fermata;
+        chordRest->drop(editData);
+    }
+    score->endCmd();
+    return true;
+}
+
+bool _addBreath(uintptr_t score_ptr, int breathType, int excerptId)
+{
+    if (breathType < 0 || breathType >= static_cast<int>(engraving::Breath::breathList.size())) {
+        LOGW() << "addBreath: invalid type " << breathType;
+        return false;
+    }
+    MainScore score(score_ptr, excerptId);
+    const auto chordRests = selectedChordRests(score);
+    if (chordRests.empty()) {
+        LOGW() << "addBreath: no chord/rest selection";
+        return false;
+    }
+
+    const auto& breathTypeDefinition = engraving::Breath::breathList[breathType];
+    score->startCmd();
+    for (auto* chordRest : chordRests) {
+        auto* breath = engraving::Factory::createBreath(score->dummy()->segment());
+        breath->setSymId(breathTypeDefinition.id);
+        breath->setPause(breathTypeDefinition.pause);
+        engraving::EditData editData;
+        editData.dropElement = breath;
+        chordRest->drop(editData);
+    }
+    score->endCmd();
+    return true;
+}
+
+bool _addArpeggio(uintptr_t score_ptr, int arpeggioType, int excerptId)
+{
+    if (arpeggioType < static_cast<int>(engraving::ArpeggioType::NORMAL)
+        || arpeggioType > static_cast<int>(engraving::ArpeggioType::BRACKET)) {
+        LOGW() << "addArpeggio: invalid type " << arpeggioType;
+        return false;
+    }
+    MainScore score(score_ptr, excerptId);
+    const auto chords = selectedChords(score, true);
+    if (chords.empty()) {
+        LOGW() << "addArpeggio: select at least one chord with two or more notes";
+        return false;
+    }
+
+    score->startCmd();
+    for (auto* chord : chords) {
+        auto* arpeggio = engraving::Factory::createArpeggio(chord);
+        arpeggio->setArpeggioType(static_cast<engraving::ArpeggioType>(arpeggioType));
+        engraving::EditData editData;
+        editData.dropElement = arpeggio;
+        chord->drop(editData);
+    }
+    score->endCmd();
+    return true;
+}
+
+bool _addTremolo(uintptr_t score_ptr, int tremoloType, int excerptId)
+{
+    if (tremoloType < static_cast<int>(engraving::TremoloType::R8)
+        || tremoloType > static_cast<int>(engraving::TremoloType::C64)) {
+        LOGW() << "addTremolo: invalid type " << tremoloType;
+        return false;
+    }
+    MainScore score(score_ptr, excerptId);
+    const bool twoNoteTremolo = tremoloType >= static_cast<int>(engraving::TremoloType::C8);
+    const auto chords = selectedChords(score, false);
+    if (chords.empty()) {
+        LOGW() << "addTremolo: no chord selection";
+        return false;
+    }
+
+    if (twoNoteTremolo) {
+        if (chords.size() != 2 || chords[0]->track() != chords[1]->track()
+            || chords[0]->ticks() != chords[1]->ticks()) {
+            LOGW() << "addTremolo: select exactly two equal-duration chords in the same voice";
+            return false;
+        }
+        auto* segment = chords[0]->segment()->next();
+        while (segment && (!segment->element(chords[0]->track()) || !segment->element(chords[0]->track())->isChord())) {
+            segment = segment->next();
+        }
+        if (!segment || segment->element(chords[0]->track()) != chords[1]) {
+            LOGW() << "addTremolo: selected chords must be consecutive in the same voice";
+            return false;
+        }
+    }
+
+    score->startCmd();
+    const auto applyTremolo = [tremoloType](engraving::Chord* chord) {
+        auto* tremolo = engraving::Factory::createTremolo(chord);
+        tremolo->setTremoloType(static_cast<engraving::TremoloType>(tremoloType));
+        engraving::EditData editData;
+        editData.dropElement = tremolo;
+        chord->drop(editData);
+    };
+    if (twoNoteTremolo) {
+        applyTremolo(chords.front());
+    } else {
+        for (auto* chord : chords) {
+            applyTremolo(chord);
+        }
+    }
+    score->endCmd();
+    return true;
+}
+
 bool _addOttava(uintptr_t score_ptr, int ottavaType, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
@@ -6415,6 +6628,26 @@ extern "C" {
     bool addHairpin(uintptr_t score_ptr, int hairpinType, int excerptId = -1) {
         return _addHairpin(score_ptr, hairpinType, excerptId);
     };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addFermata(uintptr_t score_ptr, int fermataVariant, int excerptId = -1) {
+        return _addFermata(score_ptr, fermataVariant, excerptId);
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addBreath(uintptr_t score_ptr, int breathType, int excerptId = -1) {
+        return _addBreath(score_ptr, breathType, excerptId);
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addArpeggio(uintptr_t score_ptr, int arpeggioType, int excerptId = -1) {
+        return _addArpeggio(score_ptr, arpeggioType, excerptId);
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addTremolo(uintptr_t score_ptr, int tremoloType, int excerptId = -1) {
+        return _addTremolo(score_ptr, tremoloType, excerptId);
+    }
 
     EMSCRIPTEN_KEEPALIVE
     bool addOttava(uintptr_t score_ptr, int ottavaType, int excerptId = -1) {

@@ -165,6 +165,10 @@ export interface Score {
     setClef?: (clefType: number) => Promise<unknown> | unknown;
     addDynamic?: (dynamicType: number) => Promise<unknown> | unknown;
     addHairpin?: (hairpinType: number) => Promise<unknown> | unknown;
+    addFermata?: (fermataVariant: number) => Promise<boolean> | boolean;
+    addBreath?: (breathType: number) => Promise<boolean> | boolean;
+    addArpeggio?: (arpeggioType: number) => Promise<boolean> | boolean;
+    addTremolo?: (tremoloType: number) => Promise<boolean> | boolean;
     addOttava?: (ottavaType: number) => Promise<boolean> | boolean;
     addTrill?: (trillType: number) => Promise<boolean> | boolean;
     addGlissando?: (glissandoType: number) => Promise<boolean> | boolean;

@@ -37,6 +37,25 @@ const glissandoOptions = [
     { label: 'Wavy glissando', value: 1, symbol: '\uEAAF' },
 ] as const;
 
+const arpeggioOptions = [
+    { label: 'Arpeggio', value: 0, symbol: '\uE63C' },
+    { label: 'Arpeggio up', value: 1, symbol: '\uE634' },
+    { label: 'Arpeggio down', value: 2, symbol: '\uE635' },
+    { label: 'Arpeggio bracket', value: 3, symbol: '\uE002' },
+] as const;
+
+const tremoloOptions = [
+    { label: 'Eighth-note tremolo', value: 0, symbol: '\uE220', common: true },
+    { label: '16th-note tremolo', value: 1, symbol: '\uE221', common: true },
+    { label: '32nd-note tremolo', value: 2, symbol: '\uE222', common: true },
+    { label: '64th-note tremolo', value: 3, symbol: '\uE223', common: false },
+    { label: 'Buzz roll', value: 4, symbol: '\uE22A', common: false },
+    { label: 'Two-note eighth tremolo', value: 5, symbol: '\uE220', common: false },
+    { label: 'Two-note 16th tremolo', value: 6, symbol: '\uE221', common: false },
+    { label: 'Two-note 32nd tremolo', value: 7, symbol: '\uE222', common: false },
+    { label: 'Two-note 64th tremolo', value: 8, symbol: '\uE223', common: false },
+] as const;
+
 export const NotesSection: React.FC<ToolbarSectionProps> = ({
     onAddGraceNote,
     onSetVoice,
@@ -45,6 +64,8 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
     onAddOttava,
     onAddTrill,
     onAddGlissando,
+    onAddArpeggio,
+    onAddTremolo,
     onToggleNoteInput,
     noteInputActive,
     noteInputMethod,
@@ -189,6 +210,38 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
                     {glissandoOptions.map(option => (
                         <DropdownMenuItem key={option.value} data-testid={`btn-glissando-${option.value}`} className="min-h-10 gap-3" disabled={!onAddGlissando} onSelect={() => onAddGlissando?.(option.value)}>
                             <span data-testid={`glissando-symbol-${option.value}`} className={styles.lineSymbol} aria-hidden="true">{option.symbol}</span>
+                            <span>{option.label}</span>
+                        </DropdownMenuItem>
+                    ))}
+                </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                    <Button data-testid="dropdown-chord" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive} className="shadow-sm">
+                        <span className={styles.chordTriggerSymbol} aria-hidden="true">{'\uE63C'}</span>
+                        Chord
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent data-testid="chord-menu" className="max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto">
+                    <DropdownMenuLabel>Arpeggios</DropdownMenuLabel>
+                    {arpeggioOptions.map(option => (
+                        <DropdownMenuItem key={option.value} data-testid={`btn-arpeggio-${option.value}`} className="min-h-10 gap-3" disabled={!onAddArpeggio} onSelect={() => onAddArpeggio?.(option.value)}>
+                            <span data-testid={`arpeggio-symbol-${option.value}`} className={styles.chordSymbol} aria-hidden="true">{option.symbol}</span>
+                            <span>{option.label}</span>
+                        </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuLabel>Tremolos — Common</DropdownMenuLabel>
+                    {tremoloOptions.filter(option => option.common).map(option => (
+                        <DropdownMenuItem key={option.value} data-testid={`btn-tremolo-${option.value}`} className="min-h-10 gap-3" disabled={!onAddTremolo} onSelect={() => onAddTremolo?.(option.value)}>
+                            <span data-testid={`tremolo-symbol-${option.value}`} className={styles.chordSymbol} aria-hidden="true">{option.symbol}</span>
+                            <span>{option.label}</span>
+                        </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuLabel>Tremolos — Other</DropdownMenuLabel>
+                    {tremoloOptions.filter(option => !option.common).map(option => (
+                        <DropdownMenuItem key={option.value} data-testid={`btn-tremolo-${option.value}`} className="min-h-10 gap-3" disabled={!onAddTremolo} onSelect={() => onAddTremolo?.(option.value)}>
+                            <span data-testid={`tremolo-symbol-${option.value}`} className={styles.chordSymbol} aria-hidden="true">{option.symbol}</span>
                             <span>{option.label}</span>
                         </DropdownMenuItem>
                     ))}

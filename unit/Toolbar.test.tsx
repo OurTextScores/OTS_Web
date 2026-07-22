@@ -373,6 +373,40 @@ describe('Toolbar', () => {
     expect(onAddArticulation).toHaveBeenCalledWith('articStaccatoAbove');
   });
 
+  it('groups and wires fermatas, breaths, and caesuras in the articulations menu', async () => {
+    const user = userEvent.setup();
+    const onAddFermata = vi.fn();
+    const onAddBreath = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        mutationsEnabled
+        selectionActive
+        onAddFermata={onAddFermata}
+        onAddBreath={onAddBreath}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Articulations' }));
+    expect(screen.getByTestId('articulations-menu').className).toContain('markingsMenu');
+    expect(screen.getByText('Fermatas — Common')).toBeInTheDocument();
+    expect(screen.getByText('Fermatas — Other')).toBeInTheDocument();
+    expect(screen.getByText('Breaths & Caesuras — Common')).toBeInTheDocument();
+    expect(screen.getByText('Breaths & Caesuras — Other')).toBeInTheDocument();
+    expect(screen.getByTestId('fermata-symbol-4')).toHaveTextContent('\uE4C8');
+    expect(screen.getByTestId('breath-symbol-5')).toHaveTextContent('\uE4D1');
+    await user.click(screen.getByTestId('btn-fermata-4'));
+    expect(onAddFermata).toHaveBeenCalledWith(4);
+
+    await user.click(screen.getByRole('button', { name: 'Articulations' }));
+    await user.click(screen.getByTestId('btn-breath-5'));
+    expect(onAddBreath).toHaveBeenCalledWith(5);
+  });
+
   it('renders grace-note symbols with labels in the Leland font', async () => {
     const user = userEvent.setup();
     const onAddGraceNote = vi.fn();
@@ -432,6 +466,38 @@ describe('Toolbar', () => {
     await user.click(screen.getByRole('button', { name: 'Lines' }));
     await user.click(screen.getByTestId('btn-glissando-1'));
     expect(onAddGlissando).toHaveBeenCalledWith(1);
+  });
+
+  it('renders and wires arpeggio and tremolo chord options', async () => {
+    const user = userEvent.setup();
+    const onAddArpeggio = vi.fn();
+    const onAddTremolo = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        mutationsEnabled
+        selectionActive
+        onAddArpeggio={onAddArpeggio}
+        onAddTremolo={onAddTremolo}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Chord' }));
+    expect(screen.getByText('Arpeggios')).toBeInTheDocument();
+    expect(screen.getByText('Tremolos — Common')).toBeInTheDocument();
+    expect(screen.getByText('Tremolos — Other')).toBeInTheDocument();
+    expect(screen.getByTestId('arpeggio-symbol-1')).toHaveTextContent('\uE634');
+    expect(screen.getByTestId('tremolo-symbol-4')).toHaveTextContent('\uE22A');
+    await user.click(screen.getByTestId('btn-arpeggio-3'));
+    expect(onAddArpeggio).toHaveBeenCalledWith(3);
+
+    await user.click(screen.getByRole('button', { name: 'Chord' }));
+    await user.click(screen.getByTestId('btn-tremolo-7'));
+    expect(onAddTremolo).toHaveBeenCalledWith(7);
   });
 
   it('lists the slur keyboard shortcut', async () => {

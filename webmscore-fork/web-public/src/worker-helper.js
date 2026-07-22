@@ -928,6 +928,22 @@ class WebMscoreW {
         return this.rpc('addHairpin', [hairpinType])
     }
 
+    addFermata(fermataVariant) {
+        return this.rpc('addFermata', [fermataVariant])
+    }
+
+    addBreath(breathType) {
+        return this.rpc('addBreath', [breathType])
+    }
+
+    addArpeggio(arpeggioType) {
+        return this.rpc('addArpeggio', [arpeggioType])
+    }
+
+    addTremolo(tremoloType) {
+        return this.rpc('addTremolo', [tremoloType])
+    }
+
     addOttava(ottavaType) {
         return this.rpc('addOttava', [ottavaType])
     }
