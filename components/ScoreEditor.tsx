@@ -11542,6 +11542,12 @@ ${partsBodyXml}
                 }
 
                 if (interactiveMutationEnabled && hasSelection) {
+                    if (key === 's' && !event.altKey && !event.shiftKey && !noteInputActiveRef.current) {
+                        event.preventDefault();
+                        handleAddSlur();
+                        return;
+                    }
+
                     if (rawKey in durationMap) {
                         event.preventDefault();
                         handleSetDurationType(durationMap[rawKey]);
@@ -11671,6 +11677,7 @@ ${partsBodyXml}
         handleSetAccidental,
         handleSetDurationType,
         handleToggleDot,
+        handleAddSlur,
         handleAddTie,
         handleUndo,
         handleRedo,
@@ -12667,7 +12674,8 @@ ${partsBodyXml}
     };
 
     const clientToEngravingPoint = (clientX: number, clientY: number, target?: Element | null) => {
-        const matrix = scoreSvgForTarget(target)?.getScreenCTM();
+        const svg = scoreSvgForTarget(target);
+        const matrix = svg && typeof svg.getScreenCTM === 'function' ? svg.getScreenCTM() : null;
         if (!matrix) {
             return null;
         }
@@ -13903,9 +13911,15 @@ ${partsBodyXml}
                     : 0  // Replace selection
                 : null;
 
+            // DOM overlay coordinates are in the wrapper's CSS space, while
+            // engine hit testing expects the SVG's engraving coordinate space.
+            const engravingPoint = clientToEngravingPoint(e.clientX, e.clientY, targetElement);
+            const selectionX = engravingPoint?.x ?? centerX;
+            const selectionY = engravingPoint?.y ?? centerY;
+
             const selectionPromise = canModeSelect
-                ? score.selectElementAtPointWithMode!(pageIndex, centerX, centerY, mode as 0 | 1 | 2 | 3)
-                : score.selectElementAtPoint?.(pageIndex, centerX, centerY);
+                ? score.selectElementAtPointWithMode!(pageIndex, selectionX, selectionY, mode as 0 | 1 | 2 | 3)
+                : score.selectElementAtPoint?.(pageIndex, selectionX, selectionY);
 
             if (selectionPromise !== undefined) {
                 Promise.resolve(selectionPromise)

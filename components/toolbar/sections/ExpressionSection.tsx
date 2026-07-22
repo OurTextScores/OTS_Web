@@ -3,7 +3,8 @@ import { Button } from '../../ui/Button';
 import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenu, DropdownMenuLabel } from '../../ui/DropdownMenu';
 import { ToolbarSectionProps } from '../types';
 import { dynamicOptions, hairpinOptions, pedalOptions, articulationOptions } from '../constants';
-import { Pencil, Footprints, Type, CircleDot } from 'lucide-react';
+import { Pencil, ChevronsRight, Footprints, Type, CircleDot } from 'lucide-react';
+import styles from './ExpressionSection.module.css';
 
 const resolveMenuPoint = (event?: any) => {
     if (event && 'clientX' in event && typeof event.clientX === 'number' && typeof event.clientY === 'number') {
@@ -19,6 +20,20 @@ const resolveMenuPoint = (event?: any) => {
     }
     return { clientX: 0, clientY: 0 };
 };
+
+const dynamicGlyphs: Record<string, string> = {
+    p: '\uE520',
+    m: '\uE521',
+    f: '\uE522',
+    r: '\uE523',
+    s: '\uE524',
+    z: '\uE525',
+    n: '\uE526',
+};
+
+const dynamicSymbol = (label: string) => Array.from(label)
+    .map(character => dynamicGlyphs[character] ?? character)
+    .join('');
 
 export const ExpressionSection: React.FC<ToolbarSectionProps> = ({
     onAddDynamic,
@@ -56,16 +71,34 @@ export const ExpressionSection: React.FC<ToolbarSectionProps> = ({
                         Markings
                     </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent>
+                <DropdownMenuContent data-testid="markings-menu" className={styles.markingsMenu}>
                     <DropdownMenuLabel>Dynamics</DropdownMenuLabel>
                     {dynamicOptions.map(opt => (
-                        <DropdownMenuItem key={opt.label} data-testid={`btn-dynamic-${opt.value}`} disabled={mutationDisabled || !selectionActive || !onAddDynamic} onSelect={() => onAddDynamic?.(opt.value)}>
-                            {opt.label}
+                        <DropdownMenuItem
+                            key={opt.label}
+                            data-testid={`btn-dynamic-${opt.value}`}
+                            aria-label={`Add ${opt.label} dynamic`}
+                            disabled={mutationDisabled || !selectionActive || !onAddDynamic}
+                            className="min-h-9 justify-center"
+                            onSelect={() => onAddDynamic?.(opt.value)}
+                        >
+                            <span data-testid={`dynamic-symbol-${opt.value}`} className={styles.dynamicSymbol} aria-hidden="true">{dynamicSymbol(opt.label)}</span>
+                            <span className="sr-only">{opt.label}</span>
                         </DropdownMenuItem>
                     ))}
-                    <DropdownMenuLabel>Hairpins</DropdownMenuLabel>
+                </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                    <Button data-testid="dropdown-hairpins" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive || !onAddHairpin} className="shadow-sm">
+                        <ChevronsRight size={14} className="mr-2" />
+                        Hairpins
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
                     {hairpinOptions.map(opt => (
-                        <DropdownMenuItem key={opt.label} data-testid={opt.testId} disabled={mutationDisabled || !selectionActive || !onAddHairpin} onSelect={() => onAddHairpin?.(opt.value)}>
+                        <DropdownMenuItem key={opt.label} data-testid={opt.testId} onSelect={() => onAddHairpin?.(opt.value)}>
                             {opt.label}
                         </DropdownMenuItem>
                     ))}

@@ -10,6 +10,29 @@ const loadSlur = async (page: import('@playwright/test').Page) => {
     await page.waitForTimeout(500);
 };
 
+const loadNotesAndAddHairpin = async (page: import('@playwright/test').Page) => {
+    await page.goto('/');
+    await page.getByTestId('open-score-input').setInputFiles('public/test_scores/three_notes_cde.musicxml');
+    const notes = page.locator('svg .Note');
+    await notes.first().waitFor({ timeout: 60_000 });
+    await expect(page.getByTestId('btn-note-input')).toBeEnabled({ timeout: 60_000 });
+    await notes.nth(0).click();
+    await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
+    const rightmost = await notes.evaluateAll(elements => elements.reduce((best, element) => {
+        const rect = element.getBoundingClientRect();
+        const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        return !best || point.x > best.x ? point : best;
+    }, null as { x: number; y: number } | null));
+    expect(rightmost).not.toBeNull();
+    await page.keyboard.down('Control');
+    await page.mouse.click(rightmost!.x, rightmost!.y);
+    await page.keyboard.up('Control');
+    await page.getByTestId('dropdown-hairpins').click();
+    await page.getByTestId('btn-hairpin-cresc').click();
+    await page.locator('svg .HairpinSegment').first().waitFor({ timeout: 20_000 });
+    await page.waitForTimeout(500);
+};
+
 const doubleClickGeometry = async (page: import('@playwright/test').Page, selector: string) => {
     const geometry = page.locator(selector).first();
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -76,7 +99,7 @@ test('dragging a slur shape grip commits one undoable reshape', async ({ page })
 });
 
 test('dragging a hairpin endpoint extends the line', async ({ page }) => {
-    await loadSlur(page);
+    await loadNotesAndAddHairpin(page);
     const hairpin = page.locator('svg .HairpinSegment').first();
     await expect(hairpin).toBeVisible();
     const pointsBefore = await hairpin.getAttribute('points');

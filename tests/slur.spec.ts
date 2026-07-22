@@ -1,36 +1,47 @@
 import { expect, test } from 'playwright/test';
 
-test('slur button adds a slur spanning multi-selection', async ({ page }) => {
-  await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
+const loadThreeNotes = async (page: import('@playwright/test').Page) => {
+  await page.goto('/');
+  await page.getByTestId('open-score-input').setInputFiles('public/test_scores/three_notes_cde.musicxml');
   await page.waitForSelector('svg .Note', { timeout: 60_000 });
+  await expect(page.getByTestId('btn-note-input')).toBeEnabled({ timeout: 60_000 });
+};
 
-  const readXml = async (): Promise<string> => {
-    return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
-      if (!score?.saveXml) {
-        throw new Error('window.__webmscore.saveXml is not available');
-      }
-      return score.saveXml();
-    });
-  };
-
-  const xmlBefore = await readXml();
-  expect(xmlBefore.includes('<slur type="start"') || xmlBefore.includes('<slur type="stop"')).toBe(false);
-
+const selectFirstThroughThirdNotes = async (page: import('@playwright/test').Page) => {
   const notes = page.locator('svg .Note');
   await notes.nth(0).click();
   await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
-  await notes.nth(2).click({ modifiers: ['Control'] });
+  const rightmost = await notes.evaluateAll(elements => elements.reduce((best, element) => {
+    const rect = element.getBoundingClientRect();
+    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    return !best || point.x > best.x ? point : best;
+  }, null as { x: number; y: number } | null));
+  expect(rightmost).not.toBeNull();
+  await page.keyboard.down('Control');
+  await page.mouse.click(rightmost!.x, rightmost!.y);
+  await page.keyboard.up('Control');
+};
 
+const expectRenderedSlur = async (page: import('@playwright/test').Page) => {
+  await expect(page.locator('svg .SlurSegment').first()).toBeVisible({ timeout: 20_000 });
+};
+
+test('slur button adds a slur spanning multi-selection', async ({ page }) => {
+  await loadThreeNotes(page);
+
+  await expect(page.locator('svg .SlurSegment')).toHaveCount(0);
+
+  await selectFirstThroughThirdNotes(page);
+
+  await page.getByTestId('dropdown-slur-tie').click();
   await page.getByTestId('btn-slur').click();
-
-  await expect
-    .poll(async () => {
-      const xml = await readXml();
-      const hasStart = xml.includes('<slur type="start"');
-      const hasStop = xml.includes('<slur type="stop"');
-      return hasStart && hasStop;
-    }, { timeout: 20_000 })
-    .toBe(true);
+  await expectRenderedSlur(page);
 });
 
+test('S adds a slur spanning the selected notes', async ({ page }) => {
+  await loadThreeNotes(page);
+  await selectFirstThroughThirdNotes(page);
+
+  await page.keyboard.press('s');
+  await expectRenderedSlur(page);
+});

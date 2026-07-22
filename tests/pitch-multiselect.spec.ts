@@ -25,7 +25,15 @@ test('pitch up preserves multi-selection across repeated edits', async ({ page }
   const notes = page.locator('svg .Note');
   await notes.nth(0).click();
   await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
-  await notes.nth(2).click({ modifiers: ['Control'] });
+  const rightmost = await notes.evaluateAll(elements => elements.reduce((best, element) => {
+    const rect = element.getBoundingClientRect();
+    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    return !best || point.x > best.x ? point : best;
+  }, null as { x: number; y: number } | null));
+  expect(rightmost).not.toBeNull();
+  await page.keyboard.down('Control');
+  await page.mouse.click(rightmost!.x, rightmost!.y);
+  await page.keyboard.up('Control');
 
   await page.getByTestId('btn-pitch-up').click();
   await expect.poll(async () => await readPitches(), { timeout: 20_000 }).toEqual(['C14', 'D4', 'F4']);
@@ -33,4 +41,3 @@ test('pitch up preserves multi-selection across repeated edits', async ({ page }
   await page.getByTestId('btn-pitch-up').click();
   await expect.poll(async () => await readPitches(), { timeout: 20_000 }).toEqual(['D4', 'D4', 'F14']);
 });
-

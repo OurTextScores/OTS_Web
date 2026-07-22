@@ -286,13 +286,50 @@ describe('Toolbar', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Markings' }));
+    await user.click(screen.getByRole('button', { name: 'Hairpins' }));
     await user.click(screen.getByTestId('btn-hairpin-cresc'));
-    await user.click(screen.getByRole('button', { name: 'Markings' }));
+    await user.click(screen.getByRole('button', { name: 'Hairpins' }));
     await user.click(screen.getByTestId('btn-hairpin-decresc'));
 
     expect(onAddHairpin).toHaveBeenCalledWith(0);
     expect(onAddHairpin).toHaveBeenCalledWith(1);
+  });
+
+  it('renders a scrollable markings menu with notation-font dynamic symbols', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        mutationsEnabled
+        selectionActive
+        onAddDynamic={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Markings' }));
+    expect(screen.getByTestId('markings-menu').className).toContain('markingsMenu');
+    const pianoSymbol = screen.getByTestId('dynamic-symbol-6');
+    expect(pianoSymbol).toHaveTextContent('\uE520');
+  });
+
+  it('lists the slur keyboard shortcut', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Shortcuts' }));
+    expect(screen.getByText('Slur: S')).toBeInTheDocument();
   });
 
   it('wires sticking text', async () => {

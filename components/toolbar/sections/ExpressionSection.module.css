@@ -1,0 +1,19 @@
+@font-face {
+    font-family: "LelandToolbar";
+    src: url("../../../webmscore-fork/fonts/leland/Leland.woff2") format("woff2");
+    font-display: swap;
+}
+
+.markingsMenu {
+    max-height: var(--radix-dropdown-menu-content-available-height);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.dynamicSymbol {
+    font-family: "LelandToolbar", serif;
+    font-size: 1.75rem;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1;
+}
