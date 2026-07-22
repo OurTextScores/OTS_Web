@@ -172,6 +172,8 @@ export interface Score {
     addOttava?: (ottavaType: number) => Promise<boolean> | boolean;
     addTrill?: (trillType: number) => Promise<boolean> | boolean;
     addGlissando?: (glissandoType: number) => Promise<boolean> | boolean;
+    addMarker?: (markerType: number) => Promise<boolean> | boolean;
+    addJump?: (jumpType: number) => Promise<boolean> | boolean;
     addPedal?: (pedalVariant: number) => Promise<unknown> | unknown;
     addSostenutoPedal?: () => Promise<unknown> | unknown;
     addUnaCorda?: () => Promise<unknown> | unknown;

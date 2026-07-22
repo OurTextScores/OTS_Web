@@ -500,6 +500,40 @@ describe('Toolbar', () => {
     expect(onAddTremolo).toHaveBeenCalledWith(7);
   });
 
+  it('renders and wires semantic markers and jumps', async () => {
+    const user = userEvent.setup();
+    const onAddMarker = vi.fn();
+    const onAddJump = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        mutationsEnabled
+        selectionActive
+        onAddMarker={onAddMarker}
+        onAddJump={onAddJump}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Repeats & Navigation' }));
+    expect(screen.getByTestId('repeats-navigation-menu').className).toContain('navigationMenu');
+    expect(screen.getByText('Markers — Common')).toBeInTheDocument();
+    expect(screen.getByText('Markers — Other')).toBeInTheDocument();
+    expect(screen.getByText('Jumps — Common')).toBeInTheDocument();
+    expect(screen.getByText('Jumps — Other')).toBeInTheDocument();
+    expect(screen.getByTestId('marker-symbol-0')).toHaveTextContent('\uE047');
+    expect(screen.getByTestId('marker-symbol-3')).toHaveTextContent('\uE049');
+    await user.click(screen.getByTestId('btn-marker-3'));
+    expect(onAddMarker).toHaveBeenCalledWith(3);
+
+    await user.click(screen.getByRole('button', { name: 'Repeats & Navigation' }));
+    await user.click(screen.getByTestId('btn-jump-10'));
+    expect(onAddJump).toHaveBeenCalledWith(10);
+  });
+
   it('lists the slur keyboard shortcut', async () => {
     const user = userEvent.setup();
 

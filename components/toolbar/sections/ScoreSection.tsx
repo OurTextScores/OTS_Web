@@ -11,6 +11,33 @@ import styles from './ScoreSection.module.css';
 
 const commonClefValues = new Set([0, 20, 10, 11]);
 
+const markerOptions = [
+    { label: 'Segno', value: 0, symbol: '\uE047', common: true },
+    { label: 'Coda', value: 2, symbol: '\uE048', common: true },
+    { label: 'Fine', value: 5, symbol: 'Fine', common: true },
+    { label: 'To Coda', value: 6, symbol: '\uE048', common: true },
+    { label: 'Serpent segno', value: 1, symbol: '\uE04A', common: false },
+    { label: 'Square coda', value: 3, symbol: '\uE049', common: false },
+    { label: 'To Coda symbol', value: 7, symbol: '\uE048', common: false },
+] as const;
+
+const jumpOptions = [
+    { label: 'D.C.', value: 0, common: true },
+    { label: 'D.C. al Fine', value: 1, common: true },
+    { label: 'D.C. al Coda', value: 2, common: true },
+    { label: 'D.S. al Coda', value: 3, common: true },
+    { label: 'D.S. al Fine', value: 4, common: true },
+    { label: 'D.S.', value: 5, common: true },
+    { label: 'D.C. al Double Coda', value: 6, common: false },
+    { label: 'D.S. al Double Coda', value: 7, common: false },
+    { label: 'Dal Segno Segno', value: 8, common: false },
+    { label: 'D.S.S. al Coda', value: 9, common: false },
+    { label: 'D.S.S. al Double Coda', value: 10, common: false },
+    { label: 'D.S.S. al Fine', value: 11, common: false },
+    { label: 'Da Coda', value: 12, common: false },
+    { label: 'Da Double Coda', value: 13, common: false },
+] as const;
+
 const clefSymbol = (clefType: number): string => {
     const exactGlyphs: Record<number, string> = {
         0: '\uE050', 1: '\uE051', 2: '\uE052', 3: '\uE053', 4: '\uE054',
@@ -46,6 +73,8 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
     onSetRepeatCount,
     onSetBarLineType,
     onAddVolta,
+    onAddMarker,
+    onAddJump,
     exportsEnabled,
     mutationsEnabled,
     paletteDropEnabled,
@@ -257,10 +286,10 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
                 <DropdownMenuTrigger asChild>
                     <Button data-testid="dropdown-repeats" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive} className="shadow-sm">
                         <Repeat size={14} className="mr-2" />
-                        Repeats
+                        Repeats & Navigation
                     </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent>
+                <DropdownMenuContent data-testid="repeats-navigation-menu" className={styles.navigationMenu}>
                     <DropdownMenuLabel>Repeats</DropdownMenuLabel>
                     <DropdownMenuItem data-testid="btn-repeat-start" disabled={mutationDisabled || !selectionActive || !onToggleRepeatStart} onSelect={() => onToggleRepeatStart?.()}>Start Repeat</DropdownMenuItem>
                     <DropdownMenuItem data-testid="btn-repeat-end" disabled={mutationDisabled || !selectionActive || !onToggleRepeatEnd} onSelect={() => onToggleRepeatEnd?.()}>End Repeat</DropdownMenuItem>
@@ -280,6 +309,32 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
                     {voltaOptions.map(opt => (
                         <DropdownMenuItem key={opt.ending} data-testid={`btn-volta-${opt.ending}`} disabled={mutationDisabled || !selectionActive || !onAddVolta} onSelect={() => onAddVolta?.(opt.ending)}>
                             {opt.label}
+                        </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuLabel>Markers — Common</DropdownMenuLabel>
+                    {markerOptions.filter(option => option.common).map(option => (
+                        <DropdownMenuItem key={option.value} data-testid={`btn-marker-${option.value}`} className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onAddMarker} onSelect={() => onAddMarker?.(option.value)}>
+                            <span data-testid={`marker-symbol-${option.value}`} className={styles.markerSymbol} aria-hidden="true">{option.symbol}</span>
+                            <span>{option.label}</span>
+                        </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuLabel>Markers — Other</DropdownMenuLabel>
+                    {markerOptions.filter(option => !option.common).map(option => (
+                        <DropdownMenuItem key={option.value} data-testid={`btn-marker-${option.value}`} className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onAddMarker} onSelect={() => onAddMarker?.(option.value)}>
+                            <span data-testid={`marker-symbol-${option.value}`} className={styles.markerSymbol} aria-hidden="true">{option.symbol}</span>
+                            <span>{option.label}</span>
+                        </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuLabel>Jumps — Common</DropdownMenuLabel>
+                    {jumpOptions.filter(option => option.common).map(option => (
+                        <DropdownMenuItem key={option.value} data-testid={`btn-jump-${option.value}`} disabled={mutationDisabled || !selectionActive || !onAddJump} onSelect={() => onAddJump?.(option.value)}>
+                            {option.label}
+                        </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuLabel>Jumps — Other</DropdownMenuLabel>
+                    {jumpOptions.filter(option => !option.common).map(option => (
+                        <DropdownMenuItem key={option.value} data-testid={`btn-jump-${option.value}`} disabled={mutationDisabled || !selectionActive || !onAddJump} onSelect={() => onAddJump?.(option.value)}>
+                            {option.label}
                         </DropdownMenuItem>
                     ))}
                 </DropdownMenuContent>

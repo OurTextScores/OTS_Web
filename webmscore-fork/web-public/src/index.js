@@ -1566,6 +1566,16 @@ class WebMscore {
         return Module.ccall('addGlissando', 'boolean', ['number', 'number', 'number'], [this.scoreptr, glissandoType, this.excerptId])
     }
 
+    /** Add a semantic navigation marker to the selected measure. */
+    async addMarker(markerType) {
+        return Module.ccall('addMarker', 'boolean', ['number', 'number', 'number'], [this.scoreptr, markerType, this.excerptId])
+    }
+
+    /** Add a semantic playback jump to the selected measure. */
+    async addJump(jumpType) {
+        return Module.ccall('addJump', 'boolean', ['number', 'number', 'number'], [this.scoreptr, jumpType, this.excerptId])
+    }
+
     /**
      * Add a pedal marking at the current selection
      * @param {number} pedalVariant 0=line, 1=text

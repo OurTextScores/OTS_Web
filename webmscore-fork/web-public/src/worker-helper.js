@@ -956,6 +956,14 @@ class WebMscoreW {
         return this.rpc('addGlissando', [glissandoType])
     }
 
+    addMarker(markerType) {
+        return this.rpc('addMarker', [markerType])
+    }
+
+    addJump(jumpType) {
+        return this.rpc('addJump', [jumpType])
+    }
+
     addPedal(pedalVariant) {
         return this.rpc('addPedal', [pedalVariant])
     }

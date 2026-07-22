@@ -10,6 +10,12 @@
     overscroll-behavior: contain;
 }
 
+.navigationMenu {
+    max-height: var(--radix-dropdown-menu-content-available-height);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
 .clefSymbol {
     display: inline-flex;
     min-width: 2rem;
@@ -19,5 +25,17 @@
     font-style: normal;
     font-weight: 400;
     line-height: 1.2;
+    color: #0f172a;
+}
+
+.markerSymbol {
+    display: inline-flex;
+    min-width: 2rem;
+    justify-content: center;
+    font-family: "LelandScoreToolbar", serif;
+    font-size: 1.65rem;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1;
     color: #0f172a;
 }

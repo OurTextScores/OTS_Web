@@ -20,13 +20,9 @@ const readMscx = async (page: Page): Promise<string> => {
 
 const openRepeatsDropdown = async (page: Page) => {
   const dropdown = page.getByTestId('dropdown-repeats');
-  await dropdown.evaluate((el: HTMLElement) => {
-    if (el instanceof HTMLDetailsElement) {
-      el.open = true;
-    }
-  });
-  await dropdown.getByTestId('btn-repeat-start').waitFor({ state: 'visible' });
-  return dropdown;
+  await dropdown.click();
+  await page.getByTestId('btn-repeat-start').waitFor({ state: 'visible' });
+  return page;
 };
 
 const countMatches = (value: string, pattern: RegExp): number => {

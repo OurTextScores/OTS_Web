@@ -578,6 +578,8 @@ type MutationMethods = Pick<
     | 'setRepeatCount'
     | 'setBarLineType'
     | 'addVolta'
+    | 'addMarker'
+    | 'addJump'
     | 'insertMeasures'
     | 'addPickupMeasure'
     | 'removeTrailingEmptyMeasures'
@@ -11382,6 +11384,20 @@ ${partsBodyXml}
         return fn(endingNumber);
     });
 
+    const handleAddMarker = (markerType: number) => performMutation('add navigation marker', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addMarker');
+        if (!fn) return false;
+        return fn(markerType);
+    });
+
+    const handleAddJump = (jumpType: number) => performMutation('add playback jump', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addJump');
+        if (!fn) return false;
+        return fn(jumpType);
+    });
+
     const handleSetTitleText = async () => {
         if (!score) {
             return;
@@ -14451,6 +14467,8 @@ ${partsBodyXml}
                 onSetRepeatCount={handleSetRepeatCount}
                 onSetBarLineType={handleSetBarLineType}
                 onAddVolta={handleAddVolta}
+                onAddMarker={handleAddMarker}
+                onAddJump={handleAddJump}
                 onInsertMeasures={handleInsertMeasures}
                 onAddPickup={handleAddPickup}
                 onRemoveTrailingEmptyMeasures={handleRemoveTrailingEmptyMeasures}

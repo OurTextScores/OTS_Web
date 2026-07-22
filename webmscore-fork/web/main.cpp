@@ -75,6 +75,8 @@
 #include "engraving/libmscore/spanner.h"
 #include "engraving/libmscore/pedal.h"
 #include "engraving/libmscore/rehearsalmark.h"
+#include "engraving/libmscore/marker.h"
+#include "engraving/libmscore/jump.h"
 #include "engraving/libmscore/articulation.h"
 #include "engraving/libmscore/arpeggio.h"
 #include "engraving/libmscore/breath.h"
@@ -2052,6 +2054,89 @@ bool _addVolta(uintptr_t score_ptr, int endingNumber, int excerptId)
 
     score->startCmd();
     score->cmdAddSpanner(volta, 0, startSegment, endSegment);
+    score->endCmd();
+    return true;
+}
+
+bool _addMarker(uintptr_t score_ptr, int markerType, int excerptId)
+{
+    const auto type = static_cast<engraving::MarkerType>(markerType);
+    switch (type) {
+    case engraving::MarkerType::SEGNO:
+    case engraving::MarkerType::VARSEGNO:
+    case engraving::MarkerType::CODA:
+    case engraving::MarkerType::VARCODA:
+    case engraving::MarkerType::FINE:
+    case engraving::MarkerType::TOCODA:
+    case engraving::MarkerType::TOCODASYM:
+        break;
+    default:
+        LOGW() << "addMarker: unsupported marker type " << markerType;
+        return false;
+    }
+
+    MainScore score(score_ptr, excerptId);
+    engraving::Measure* startMeasure = nullptr;
+    engraving::Measure* endMeasure = nullptr;
+    if (!selectionMeasureRange(score, startMeasure, endMeasure) || !startMeasure) {
+        LOGW() << "addMarker: no measure selected";
+        return false;
+    }
+    auto* target = startMeasure->isMMRest() ? startMeasure->mmRestFirst() : startMeasure;
+    if (!target) {
+        LOGW() << "addMarker: invalid target measure";
+        return false;
+    }
+
+    auto* marker = engraving::Factory::createMarker(score->dummy());
+    if (!marker) {
+        LOGW() << "addMarker: Factory returned null";
+        return false;
+    }
+    marker->setMarkerType(type);
+    marker->setParent(target);
+    marker->setTrack(0);
+
+    score->startCmd();
+    score->undoAddElement(marker);
+    score->endCmd();
+    return true;
+}
+
+bool _addJump(uintptr_t score_ptr, int jumpType, int excerptId)
+{
+    const auto type = static_cast<engraving::JumpType>(jumpType);
+    const bool supported = std::any_of(engraving::jumpTypeTable.begin(), engraving::jumpTypeTable.end(), [type](const auto& item) {
+        return item.type == type;
+    });
+    if (!supported) {
+        LOGW() << "addJump: unsupported jump type " << jumpType;
+        return false;
+    }
+
+    MainScore score(score_ptr, excerptId);
+    engraving::Measure* startMeasure = nullptr;
+    engraving::Measure* endMeasure = nullptr;
+    if (!selectionMeasureRange(score, startMeasure, endMeasure) || !startMeasure) {
+        LOGW() << "addJump: no measure selected";
+        return false;
+    }
+    auto* target = startMeasure->isMMRest() ? startMeasure->mmRestFirst() : startMeasure;
+    if (!target) {
+        LOGW() << "addJump: invalid target measure";
+        return false;
+    }
+
+    auto* jump = engraving::Factory::createJump(target);
+    if (!jump) {
+        LOGW() << "addJump: Factory returned null";
+        return false;
+    }
+    jump->setJumpType(type);
+    jump->setTrack(0);
+
+    score->startCmd();
+    score->undoAddElement(jump);
     score->endCmd();
     return true;
 }
@@ -6227,6 +6312,16 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool addVolta(uintptr_t score_ptr, int endingNumber, int excerptId = -1) {
         return _addVolta(score_ptr, endingNumber, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addMarker(uintptr_t score_ptr, int markerType, int excerptId = -1) {
+        return _addMarker(score_ptr, markerType, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addJump(uintptr_t score_ptr, int jumpType, int excerptId = -1) {
+        return _addJump(score_ptr, jumpType, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE
