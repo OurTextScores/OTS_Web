@@ -146,6 +146,14 @@ describe('Toolbar', () => {
     expect(onSetKeySignature).toHaveBeenCalledWith(-1);
 
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Clef' }));
+    expect(screen.getByTestId('clef-symbol-0')).toHaveTextContent('\uE050');
+    expect(screen.getByTestId('btn-clef-0')).toHaveTextContent('Treble');
+    const otherClefsHeading = screen.getByText('Other');
+    for (const value of [10, 11]) {
+      expect(screen.getByTestId(`btn-clef-${value}`).compareDocumentPosition(otherClefsHeading))
+        .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(screen.getByTestId(`clef-symbol-${value}`)).toHaveTextContent('\uE05C');
+    }
     fireEvent.click(screen.getByTestId('btn-clef-0'));
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Clef' }));
     fireEvent.click(screen.getByTestId('btn-clef-20'));
@@ -287,16 +295,87 @@ describe('Toolbar', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Hairpins' }));
+    expect(screen.getByTestId('btn-hairpin-cresc')).toHaveTextContent(/^\uE53E$/);
+    expect(screen.getByTestId('btn-hairpin-cresc').firstElementChild?.className).toContain('hairpinSymbol');
     await user.click(screen.getByTestId('btn-hairpin-cresc'));
     await user.click(screen.getByRole('button', { name: 'Hairpins' }));
+    expect(screen.getByTestId('btn-hairpin-decresc')).toHaveTextContent(/^\uE53F$/);
     await user.click(screen.getByTestId('btn-hairpin-decresc'));
 
     expect(onAddHairpin).toHaveBeenCalledWith(0);
     expect(onAddHairpin).toHaveBeenCalledWith(1);
   });
 
-  it('renders a scrollable markings menu with notation-font dynamic symbols', async () => {
+  it('renders a scrollable dynamics menu with notation-font symbols', async () => {
     const user = userEvent.setup();
+    const onAddDynamic = vi.fn();
+    const setData = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        mutationsEnabled
+        paletteDropEnabled
+        selectionActive
+        onAddDynamic={onAddDynamic}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Dynamics' }));
+    expect(screen.getByTestId('markings-menu').className).toContain('markingsMenu');
+    expect(screen.getByText('Common')).toBeInTheDocument();
+    expect(screen.getByText('Other')).toBeInTheDocument();
+    const pianoSymbol = screen.getByTestId('dynamic-symbol-6');
+    expect(pianoSymbol).toHaveTextContent('\uE520');
+    expect(screen.getByTestId('btn-dynamic-6')).toHaveTextContent(/^\uE520$/);
+    expect(screen.getByTestId('btn-dynamic-18')).toHaveTextContent(/^\uE524\uE522\uE525$/);
+    const otherHeading = screen.getByText('Other');
+    for (const value of [15, 16, 18]) {
+      expect(screen.getByTestId(`btn-dynamic-${value}`).compareDocumentPosition(otherHeading))
+        .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    }
+    fireEvent.dragStart(screen.getByTestId('btn-dynamic-18'), {
+      dataTransfer: { effectAllowed: 'none', setData },
+    });
+    expect(setData).toHaveBeenCalledWith(
+      'application/x-ots-score-palette+json',
+      expect.stringContaining('"subtype":18'),
+    );
+
+    await user.click(screen.getByTestId('btn-dynamic-18'));
+    expect(onAddDynamic).toHaveBeenCalledWith(18);
+  });
+
+  it('renders articulation symbols with labels in the Leland font', async () => {
+    const user = userEvent.setup();
+    const onAddArticulation = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        mutationsEnabled
+        paletteDropEnabled
+        selectionActive
+        onAddArticulation={onAddArticulation}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Articulations' }));
+    expect(screen.getByTestId('artic-symbol-articStaccatoAbove')).toHaveTextContent('\uE4A2');
+    expect(screen.getByTestId('btn-artic-articStaccatoAbove')).toHaveTextContent('Staccato');
+    await user.click(screen.getByTestId('btn-artic-articStaccatoAbove'));
+    expect(onAddArticulation).toHaveBeenCalledWith('articStaccatoAbove');
+  });
+
+  it('renders grace-note symbols with labels in the Leland font', async () => {
+    const user = userEvent.setup();
+    const onAddGraceNote = vi.fn();
 
     render(
       <Toolbar
@@ -306,14 +385,16 @@ describe('Toolbar', () => {
         zoomLevel={1}
         mutationsEnabled
         selectionActive
-        onAddDynamic={() => {}}
+        onAddGraceNote={onAddGraceNote}
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Markings' }));
-    expect(screen.getByTestId('markings-menu').className).toContain('markingsMenu');
-    const pianoSymbol = screen.getByTestId('dynamic-symbol-6');
-    expect(pianoSymbol).toHaveTextContent('\uE520');
+    await user.click(screen.getByRole('button', { name: 'Grace Notes' }));
+    expect(screen.getByTestId('grace-symbol-1')).toHaveTextContent('\uE560');
+    expect(screen.getByTestId('btn-grace-acciaccatura')).toHaveTextContent('Acciaccatura');
+    expect(screen.getByTestId('grace-symbol-16')).toHaveTextContent('\uE1DB');
+    await user.click(screen.getByTestId('btn-grace-acciaccatura'));
+    expect(onAddGraceNote).toHaveBeenCalledWith(1);
   });
 
   it('lists the slur keyboard shortcut', async () => {
@@ -556,4 +637,5 @@ describe('Toolbar', () => {
 
     expect(screen.queryByTestId('btn-add-note-top')).not.toBeInTheDocument();
   });
+
 });

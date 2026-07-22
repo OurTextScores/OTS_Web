@@ -4,8 +4,32 @@ import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMen
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../../ui/Select';
 import { ToolbarSectionProps } from '../types';
 import { keySignatureButtonOptionsDefault, clefButtonOptionsDefault, barlineOptions, repeatCountOptions, voltaOptions } from '../constants';
+import { clefScorePaletteItem, SCORE_PALETTE_DRAG_MIME } from '../palette';
 import { Guitar, Repeat } from 'lucide-react';
 import { ClefIcon, KeySignatureIcon } from '../CustomIcons';
+import styles from './ScoreSection.module.css';
+
+const commonClefValues = new Set([0, 20, 10, 11]);
+
+const clefSymbol = (clefType: number): string => {
+    const exactGlyphs: Record<number, string> = {
+        0: '\uE050', 1: '\uE051', 2: '\uE052', 3: '\uE053', 4: '\uE054',
+        5: '\uE055', 6: '\uE057', 7: '\uE050',
+        20: '\uE062', 21: '\uE063', 22: '\uE064', 23: '\uE065', 24: '\uE066',
+        29: '\uE069', 30: '\uE06A',
+        31: '\uE06D', 32: '\uE06E', 33: '\uE06D', 34: '\uE06E',
+    };
+    if (exactGlyphs[clefType]) {
+        return exactGlyphs[clefType];
+    }
+    if (clefType >= 8 && clefType <= 19) {
+        return '\uE05C';
+    }
+    if (clefType >= 20 && clefType <= 28) {
+        return '\uE062';
+    }
+    return '\uE050';
+};
 
 export const ScoreSection: React.FC<ToolbarSectionProps> = ({
     instrumentGroups = [],
@@ -24,6 +48,7 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
     onAddVolta,
     exportsEnabled,
     mutationsEnabled,
+    paletteDropEnabled,
     selectionActive,
 }) => {
     const [selectedInstrumentId, setSelectedInstrumentId] = useState('');
@@ -62,7 +87,7 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
     ]), []);
 
     const commonInstruments = useMemo(() => {
-        const results: { instrument: any; label: string }[] = [];
+        const results: { instrument: (typeof instrumentOptions)[number]; label: string }[] = [];
         const used = new Set<string>();
         for (const pref of commonInstrumentPreferences) {
             const found = pref.ids
@@ -81,6 +106,46 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
 
     const keySignatureButtonOptions = keySignatureOptions ?? keySignatureButtonOptionsDefault;
     const clefButtonOptions = clefOptions ?? clefButtonOptionsDefault;
+    const commonClefOptions = clefButtonOptions.filter(option => commonClefValues.has(option.value));
+    const otherClefOptions = clefButtonOptions.filter(option => !commonClefValues.has(option.value));
+
+    const renderClefOption = (opt: (typeof clefButtonOptions)[number]) => {
+        const canClickApply = !mutationDisabled && Boolean(onSetClef);
+        const canDragApply = !mutationDisabled && Boolean(paletteDropEnabled);
+        return (
+            <DropdownMenuItem
+                key={opt.value}
+                data-testid={`btn-clef-${opt.value}`}
+                disabled={!canClickApply && !canDragApply}
+                draggable={canDragApply}
+                className={canDragApply ? 'min-h-12 cursor-grab gap-3 py-2 active:cursor-grabbing' : 'min-h-12 gap-3 py-2'}
+                title={canClickApply && canDragApply ? `Click to apply ${opt.label}; drag to place it` : canDragApply ? `Drag ${opt.label} onto a measure` : `Click to apply ${opt.label}`}
+                onSelect={(event) => {
+                    if (!canClickApply) {
+                        event.preventDefault();
+                        return;
+                    }
+                    onSetClef?.(opt.value);
+                }}
+                onDragStart={(event) => {
+                    if (!canDragApply) {
+                        event.preventDefault();
+                        return;
+                    }
+                    event.stopPropagation();
+                    event.dataTransfer.effectAllowed = 'copy';
+                    const item = clefScorePaletteItem(opt.label, opt.value);
+                    event.dataTransfer.setData(SCORE_PALETTE_DRAG_MIME, JSON.stringify(item));
+                    event.dataTransfer.setData('text/plain', item.label);
+                }}
+            >
+                <span data-testid={`clef-symbol-${opt.value}`} className={styles.clefSymbol} aria-hidden="true">
+                    {clefSymbol(opt.value)}
+                </span>
+                <span>{opt.label}</span>
+            </DropdownMenuItem>
+        );
+    };
 
     return (
         <>
@@ -175,18 +240,16 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
 
             <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
-                    <Button data-testid="dropdown-clef" variant="outline" size="sm" disabled={mutationDisabled || !onSetClef} className="shadow-sm">
+                    <Button data-testid="dropdown-clef" variant="outline" size="sm" disabled={mutationDisabled || (!onSetClef && !paletteDropEnabled)} className="shadow-sm">
                         <ClefIcon size={14} className="mr-2" />
                         Clef
                     </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent>
+                <DropdownMenuContent data-testid="clef-menu" className={styles.clefMenu}>
                     <DropdownMenuLabel>Common</DropdownMenuLabel>
-                    {clefButtonOptions.map(opt => (
-                        <DropdownMenuItem key={opt.value} data-testid={`btn-clef-${opt.value}`} disabled={mutationDisabled || !onSetClef} onSelect={() => onSetClef?.(opt.value)}>
-                            {opt.label}
-                        </DropdownMenuItem>
-                    ))}
+                    {commonClefOptions.map(renderClefOption)}
+                    <DropdownMenuLabel>Other</DropdownMenuLabel>
+                    {otherClefOptions.map(renderClefOption)}
                 </DropdownMenuContent>
             </DropdownMenu>
 

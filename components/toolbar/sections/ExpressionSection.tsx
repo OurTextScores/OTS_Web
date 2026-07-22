@@ -3,14 +3,18 @@ import { Button } from '../../ui/Button';
 import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenu, DropdownMenuLabel } from '../../ui/DropdownMenu';
 import { ToolbarSectionProps } from '../types';
 import { dynamicOptions, hairpinOptions, pedalOptions, articulationOptions } from '../constants';
-import { Pencil, ChevronsRight, Footprints, Type, CircleDot } from 'lucide-react';
+import { articulationScorePaletteItem, dynamicScorePaletteItem, SCORE_PALETTE_DRAG_MIME } from '../palette';
+import { Pencil, Footprints, Type, CircleDot } from 'lucide-react';
 import styles from './ExpressionSection.module.css';
 
-const resolveMenuPoint = (event?: any) => {
-    if (event && 'clientX' in event && typeof event.clientX === 'number' && typeof event.clientY === 'number') {
-        return { clientX: event.clientX, clientY: event.clientY };
+const resolveMenuPoint = (event?: unknown) => {
+    const eventRecord = typeof event === 'object' && event !== null
+        ? event as { clientX?: unknown; clientY?: unknown; currentTarget?: EventTarget | null }
+        : null;
+    if (typeof eventRecord?.clientX === 'number' && typeof eventRecord.clientY === 'number') {
+        return { clientX: eventRecord.clientX, clientY: eventRecord.clientY };
     }
-    const target = event?.currentTarget as HTMLElement | null;
+    const target = eventRecord?.currentTarget instanceof HTMLElement ? eventRecord.currentTarget : null;
     if (target?.getBoundingClientRect) {
         const rect = target.getBoundingClientRect();
         return { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
@@ -35,6 +39,65 @@ const dynamicSymbol = (label: string) => Array.from(label)
     .map(character => dynamicGlyphs[character] ?? character)
     .join('');
 
+const commonDynamicValues = new Set([4, 5, 6, 7, 8, 9, 10, 11, 15, 16, 18]);
+const commonDynamics = dynamicOptions.filter(option => commonDynamicValues.has(option.value));
+const otherDynamics = dynamicOptions.filter(option => !commonDynamicValues.has(option.value));
+const articulationGlyphs: Record<string, string> = {
+    articStaccatoAbove: '\uE4A2',
+    articTenutoAbove: '\uE4A4',
+    articMarcatoAbove: '\uE4AC',
+    articAccentAbove: '\uE4A0',
+};
+
+const renderDynamicOption = (
+    opt: (typeof dynamicOptions)[number],
+    mutationDisabled: boolean,
+    selectionActive: boolean | undefined,
+    onAddDynamic: ToolbarSectionProps['onAddDynamic'],
+    paletteDropEnabled: boolean | undefined,
+) => {
+    const symbol = dynamicSymbol(opt.label);
+    const canClickApply = !mutationDisabled && Boolean(selectionActive && onAddDynamic);
+    const canDragApply = !mutationDisabled && Boolean(paletteDropEnabled);
+    return (
+        <DropdownMenuItem
+            key={opt.label}
+            data-testid={`btn-dynamic-${opt.value}`}
+            aria-label={`Add ${opt.label} dynamic`}
+            disabled={!canClickApply && !canDragApply}
+            draggable={canDragApply}
+            className={`min-h-9 justify-center ${canDragApply ? 'cursor-grab active:cursor-grabbing' : ''}`}
+            title={canClickApply && canDragApply
+                ? `Click to apply ${opt.label}; drag to place it`
+                : canClickApply
+                    ? `Click to apply ${opt.label}`
+                    : `Drag ${opt.label} onto a note`}
+            onSelect={(event) => {
+                if (!canClickApply) {
+                    event.preventDefault();
+                    return;
+                }
+                onAddDynamic?.(opt.value);
+            }}
+            onDragStart={(event) => {
+                if (!canDragApply) {
+                    event.preventDefault();
+                    return;
+                }
+                event.stopPropagation();
+                event.dataTransfer.effectAllowed = 'copy';
+                const item = dynamicScorePaletteItem(opt.label, symbol, opt.value);
+                event.dataTransfer.setData(SCORE_PALETTE_DRAG_MIME, JSON.stringify(item));
+                event.dataTransfer.setData('text/plain', item.label);
+            }}
+        >
+            <span data-testid={`dynamic-symbol-${opt.value}`} className={styles.dynamicSymbol} aria-hidden="true">
+                {symbol}
+            </span>
+        </DropdownMenuItem>
+    );
+};
+
 export const ExpressionSection: React.FC<ToolbarSectionProps> = ({
     onAddDynamic,
     onAddHairpin,
@@ -57,6 +120,7 @@ export const ExpressionSection: React.FC<ToolbarSectionProps> = ({
     onAddInstrumentChangeText,
     onAddArticulation,
     mutationsEnabled,
+    paletteDropEnabled,
     selectionActive,
 }) => {
     const mutationDisabled = !mutationsEnabled;
@@ -68,38 +132,30 @@ export const ExpressionSection: React.FC<ToolbarSectionProps> = ({
                 <DropdownMenuTrigger asChild>
                     <Button data-testid="dropdown-markings" variant="outline" size="sm" disabled={mutationDisabled} className="shadow-sm">
                         <Pencil size={14} className="mr-2" />
-                        Markings
+                        Dynamics
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent data-testid="markings-menu" className={styles.markingsMenu}>
-                    <DropdownMenuLabel>Dynamics</DropdownMenuLabel>
-                    {dynamicOptions.map(opt => (
-                        <DropdownMenuItem
-                            key={opt.label}
-                            data-testid={`btn-dynamic-${opt.value}`}
-                            aria-label={`Add ${opt.label} dynamic`}
-                            disabled={mutationDisabled || !selectionActive || !onAddDynamic}
-                            className="min-h-9 justify-center"
-                            onSelect={() => onAddDynamic?.(opt.value)}
-                        >
-                            <span data-testid={`dynamic-symbol-${opt.value}`} className={styles.dynamicSymbol} aria-hidden="true">{dynamicSymbol(opt.label)}</span>
-                            <span className="sr-only">{opt.label}</span>
-                        </DropdownMenuItem>
-                    ))}
+                    <DropdownMenuLabel>Common</DropdownMenuLabel>
+                    {commonDynamics.map(opt => renderDynamicOption(opt, mutationDisabled, selectionActive, onAddDynamic, paletteDropEnabled))}
+                    <DropdownMenuLabel>Other</DropdownMenuLabel>
+                    {otherDynamics.map(opt => renderDynamicOption(opt, mutationDisabled, selectionActive, onAddDynamic, paletteDropEnabled))}
                 </DropdownMenuContent>
             </DropdownMenu>
 
             <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
                     <Button data-testid="dropdown-hairpins" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive || !onAddHairpin} className="shadow-sm">
-                        <ChevronsRight size={14} className="mr-2" />
+                        <span className={styles.hairpinTriggerSymbol} aria-hidden="true">{''}</span>
                         Hairpins
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     {hairpinOptions.map(opt => (
-                        <DropdownMenuItem key={opt.label} data-testid={opt.testId} onSelect={() => onAddHairpin?.(opt.value)}>
-                            {opt.label}
+                        <DropdownMenuItem key={opt.label} data-testid={opt.testId} aria-label={`Add ${opt.label}`} className="min-h-9 justify-center" onSelect={() => onAddHairpin?.(opt.value)}>
+                            <span className={styles.hairpinSymbol} aria-hidden="true">
+                                {opt.value === 0 ? '' : ''}
+                            </span>
                         </DropdownMenuItem>
                     ))}
                 </DropdownMenuContent>
@@ -164,17 +220,49 @@ export const ExpressionSection: React.FC<ToolbarSectionProps> = ({
 
             <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
-                    <Button data-testid="dropdown-articulations" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive} className="shadow-sm">
+                    <Button data-testid="dropdown-articulations" variant="outline" size="sm" disabled={mutationDisabled || (!paletteDropEnabled && (!selectionActive || !onAddArticulation))} className="shadow-sm">
                         <CircleDot size={14} className="mr-2" />
                         Articulations
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                    {articulationOptions.map(opt => (
-                        <DropdownMenuItem key={opt.symbol} data-testid={`btn-artic-${opt.symbol}`} disabled={mutationDisabled || !selectionActive || !onAddArticulation} onSelect={() => onAddArticulation?.(opt.symbol)}>
-                            {opt.label}
+                    {articulationOptions.map((opt, subtype) => {
+                        const canClickApply = !mutationDisabled && Boolean(selectionActive && onAddArticulation);
+                        const canDragApply = !mutationDisabled && Boolean(paletteDropEnabled);
+                        return (
+                        <DropdownMenuItem
+                            key={opt.symbol}
+                            data-testid={`btn-artic-${opt.symbol}`}
+                            disabled={!canClickApply && !canDragApply}
+                            draggable={canDragApply}
+                            className={canDragApply ? 'cursor-grab gap-2 active:cursor-grabbing' : 'gap-2'}
+                            title={canClickApply && canDragApply ? `Click to apply ${opt.label}; drag to place it` : canDragApply ? `Drag ${opt.label} onto a note` : `Click to apply ${opt.label}`}
+                            onSelect={(event) => {
+                                if (!canClickApply) {
+                                    event.preventDefault();
+                                    return;
+                                }
+                                onAddArticulation?.(opt.symbol);
+                            }}
+                            onDragStart={(event) => {
+                                if (!canDragApply) {
+                                    event.preventDefault();
+                                    return;
+                                }
+                                event.stopPropagation();
+                                event.dataTransfer.effectAllowed = 'copy';
+                                const item = articulationScorePaletteItem(opt.label, subtype);
+                                event.dataTransfer.setData(SCORE_PALETTE_DRAG_MIME, JSON.stringify(item));
+                                event.dataTransfer.setData('text/plain', item.label);
+                            }}
+                        >
+                            <span data-testid={`artic-symbol-${opt.symbol}`} className={styles.articulationSymbol} aria-hidden="true">
+                                {articulationGlyphs[opt.symbol]}
+                            </span>
+                            <span>{opt.label}</span>
                         </DropdownMenuItem>
-                    ))}
+                        );
+                    })}
                 </DropdownMenuContent>
             </DropdownMenu>
         </>

@@ -3163,6 +3163,150 @@ double _getSpatium(uintptr_t score_ptr, int excerptId)
     return score->spatium();
 }
 
+// Palette drop kinds shared with the web toolbar. Keep these values stable: they
+// are part of the JS-visible bridge contract, not ElementType enum values.
+enum class PaletteDropKind {
+    CLEF = 0,
+    DYNAMIC = 1,
+    ARTICULATION = 2,
+};
+
+bool _applyDropAtPoint(uintptr_t score_ptr, int pageNumber, double x, double y,
+                       int elementType, int subtype, int excerptId)
+{
+    abortElementDragIfActive();
+    abortGripEditIfActive();
+
+    MainScore score(score_ptr, excerptId);
+    const auto& pages = score->pages();
+    if (pageNumber < 0 || pageNumber >= static_cast<int>(pages.size())) {
+        LOGW() << "applyDropAtPoint: invalid page index " << pageNumber;
+        return false;
+    }
+
+    auto* page = pages.at(pageNumber);
+    const mu::PointF pagePoint(x, y);
+    const mu::PointF canvasPoint = pagePoint + page->pos();
+    auto items = selectableItemsAtPoint(page, pagePoint);
+
+    engraving::EngravingItem* target = nullptr;
+    // Notes and chord/rests are the meaningful targets for dynamics and
+    // articulations. Prefer them over stems, beams, and other higher-z items.
+    for (auto* item : items) {
+        if (item && item->isNote()) {
+            target = item;
+            break;
+        }
+    }
+    if (!target) {
+        for (auto* item : items) {
+            if (item && item->isChordRest()) {
+                target = item;
+                break;
+            }
+        }
+    }
+    if (!target) {
+        target = pickTopmostSelectableItem(items);
+    }
+
+    engraving::EditData ed;
+    ed.pos = canvasPoint;
+    ed.dragOffset = mu::PointF();
+
+    const auto kind = static_cast<PaletteDropKind>(elementType);
+    switch (kind) {
+    case PaletteDropKind::CLEF:
+    {
+        if (subtype < 0 || subtype > static_cast<int>(engraving::ClefType::MAX)) {
+            LOGW() << "applyDropAtPoint: invalid clef subtype " << subtype;
+            return false;
+        }
+        engraving::Measure* measure = target ? target->findMeasure() : nullptr;
+        if (!measure) {
+            engraving::staff_idx_t staffIdx = mu::nidx;
+            engraving::Segment* segment = nullptr;
+            measure = score->pos2measure(canvasPoint, &staffIdx, nullptr, &segment, nullptr);
+        }
+        if (!measure) {
+            LOGW() << "applyDropAtPoint: no measure at clef drop point";
+            return false;
+        }
+        auto* clef = engraving::Factory::createClef(score->dummy()->segment());
+        clef->setClefType(static_cast<engraving::ClefType>(subtype));
+        ed.dropElement = clef;
+        score->startCmd();
+        measure->drop(ed);
+        score->endCmd();
+        return true;
+    }
+    case PaletteDropKind::DYNAMIC:
+    {
+        if (subtype < 0 || subtype >= static_cast<int>(engraving::DynamicType::LAST)) {
+            LOGW() << "applyDropAtPoint: invalid dynamic subtype " << subtype;
+            return false;
+        }
+        engraving::ChordRest* chordRest = nullptr;
+        if (target && target->isNote()) {
+            chordRest = engraving::toNote(target)->chord();
+        } else if (target && target->isChordRest()) {
+            chordRest = engraving::toChordRest(target);
+        }
+        if (!chordRest) {
+            LOGW() << "applyDropAtPoint: dynamics must be dropped on a note or rest";
+            return false;
+        }
+        auto* dynamic = engraving::Factory::createDynamic(score->dummy()->segment());
+        const auto dynamicType = static_cast<engraving::DynamicType>(subtype);
+        dynamic->setDynamicType(dynamicType);
+        dynamic->setXmlText(engraving::Dynamic::dynamicText(dynamicType));
+        ed.dropElement = dynamic;
+        score->startCmd();
+        engraving::EngravingItem* dropped = chordRest->drop(ed);
+        score->endCmd();
+        return dropped != nullptr;
+    }
+    case PaletteDropKind::ARTICULATION:
+    {
+        static constexpr const char* ARTICULATION_NAMES[] = {
+            "articStaccatoAbove",
+            "articTenutoAbove",
+            "articMarcatoAbove",
+            "articAccentAbove",
+        };
+        if (subtype < 0 || subtype >= static_cast<int>(std::size(ARTICULATION_NAMES))) {
+            LOGW() << "applyDropAtPoint: invalid articulation subtype " << subtype;
+            return false;
+        }
+        engraving::Chord* chord = nullptr;
+        if (target && target->isNote()) {
+            chord = engraving::toNote(target)->chord();
+        } else if (target && target->isChord()) {
+            chord = engraving::toChord(target);
+        }
+        if (!chord) {
+            LOGW() << "applyDropAtPoint: articulations must be dropped on a note";
+            return false;
+        }
+        const auto symId = engraving::SymNames::symIdByName(
+            AsciiStringView(ARTICULATION_NAMES[subtype]), engraving::SymId::noSym);
+        if (symId == engraving::SymId::noSym) {
+            return false;
+        }
+        auto* articulation = engraving::Factory::createArticulation(score->dummy()->chord());
+        articulation->setSymId(symId);
+        ed.dropElement = articulation;
+        score->startCmd();
+        engraving::EngravingItem* dropped = chord->drop(ed);
+        score->endCmd();
+        return dropped != nullptr;
+    }
+    }
+
+    LOGW() << "applyDropAtPoint: unsupported palette element type " << elementType;
+    return false;
+}
+
 bool _endElementDrag(uintptr_t score_ptr, bool commit, int excerptId)
 {
     if (!g_elementDrag.active) {
@@ -5924,6 +6068,12 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool endElementDrag(uintptr_t score_ptr, bool commit, int excerptId = -1) {
         return _endElementDrag(score_ptr, commit, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool applyDropAtPoint(uintptr_t score_ptr, int pageNumber, double x, double y,
+                          int elementType, int subtype, int excerptId = -1) {
+        return _applyDropAtPoint(score_ptr, pageNumber, x, y, elementType, subtype, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

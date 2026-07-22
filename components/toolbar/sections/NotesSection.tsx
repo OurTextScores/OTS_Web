@@ -4,6 +4,17 @@ import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMen
 import { ToolbarSectionProps } from '../types';
 import { graceNoteOptions } from '../constants';
 import { Music2, PenLine, Speech, Spline } from 'lucide-react';
+import styles from './NotesSection.module.css';
+
+const graceNoteGlyphs: Record<number, string> = {
+    1: '\uE560',
+    2: '\uE562',
+    8: '\uE1D9',
+    16: '\uE1DB',
+    32: '\uE1D7',
+    64: '\uE1D9',
+    128: '\uE1DB',
+};
 
 export const NotesSection: React.FC<ToolbarSectionProps> = ({
     onAddGraceNote,
@@ -82,8 +93,11 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     {graceNoteOptions.map(opt => (
-                        <DropdownMenuItem key={opt.value} data-testid={opt.testId} disabled={mutationDisabled || !selectionActive || !onAddGraceNote} onSelect={() => onAddGraceNote?.(opt.value)}>
-                            {opt.label}
+                        <DropdownMenuItem key={opt.value} data-testid={opt.testId} className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onAddGraceNote} onSelect={() => onAddGraceNote?.(opt.value)}>
+                            <span data-testid={`grace-symbol-${opt.value}`} className={styles.graceNoteSymbol} aria-hidden="true">
+                                {graceNoteGlyphs[opt.value]}
+                            </span>
+                            <span>{opt.label}</span>
                         </DropdownMenuItem>
                     ))}
                 </DropdownMenuContent>

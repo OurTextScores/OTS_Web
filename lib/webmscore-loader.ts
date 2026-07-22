@@ -94,6 +94,13 @@ export interface Score {
         dragMode?: 0 | 1 | 2,
     ) => Promise<boolean> | boolean;
     endElementDrag?: (commit: boolean) => Promise<boolean> | boolean;
+    applyDropAtPoint?: (
+        pageNumber: number,
+        x: number,
+        y: number,
+        elementType: 0 | 1 | 2,
+        subtype: number,
+    ) => Promise<boolean> | boolean;
     beginGripEdit?: (
         pageNumber: number,
         x: number,

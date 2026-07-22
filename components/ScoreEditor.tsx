@@ -24,6 +24,7 @@ import {
 } from '../lib/checkpoints';
 import { CodeMirrorEditor, type CodeEditorThemeMode } from './CodeMirrorEditor';
 import { Toolbar, type MeasureInsertTarget } from './Toolbar';
+import { SCORE_PALETTE_DRAG_MIME, parseScorePaletteItem } from './toolbar/palette';
 import { LeftSidebar, type LeftSidebarTab } from './score-editor/LeftSidebar';
 import {
     AI_PROVIDER_CONFIGS,
@@ -490,6 +491,7 @@ type MutationMethods = Pick<
     | 'beginElementDrag'
     | 'updateElementDrag'
     | 'endElementDrag'
+    | 'applyDropAtPoint'
     | 'beginGripEdit'
     | 'dragGrip'
     | 'endGripEdit'
@@ -1154,6 +1156,16 @@ export default function ScoreEditor() {
     const [noteDragGhost, setNoteDragGhost] = useState<{ x: number, y: number, w: number, h: number, steps: number } | null>(null);
     const noteDragCandidateRef = useRef<{ page: number, noteBox: { x: number, y: number, w: number, h: number } } | null>(null);
     const noteDragRef = useRef<{ page: number, startX: number, startY: number, noteBox: { x: number, y: number, w: number, h: number }, halfStep: number } | null>(null);
+    const noteDragEngineBeginRef = useRef<Promise<boolean> | null>(null);
+    const noteDragLiveUpdateRef = useRef<{
+        drag: { page: number, startX: number, startY: number, halfStep: number };
+        steps: number;
+        modifiers: number;
+    } | null>(null);
+    const noteDragLiveInFlightRef = useRef<Promise<void> | null>(null);
+    const noteDragLiveFrameRef = useRef<number | null>(null);
+    const noteDragRenderedStepsRef = useRef<number | null>(null);
+    const noteDragFinishingRef = useRef(false);
     // Removes the window-level listeners that drive an in-flight note drag; the gesture
     // must outlive the score wrapper because the staff can sit at its very edge.
     const noteDragCleanupRef = useRef<(() => void) | null>(null);
@@ -1165,6 +1177,7 @@ export default function ScoreEditor() {
     const [noteInputActive, setNoteInputActive] = useState(false);
     const [noteInputMethod, setNoteInputMethod] = useState(1);
     const [noteInputShadow, setNoteInputShadow] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+    const [paletteDropActive, setPaletteDropActive] = useState(false);
     const noteInputActiveRef = useRef(false);
     useEffect(() => {
         noteInputActiveRef.current = false;
@@ -1175,6 +1188,11 @@ export default function ScoreEditor() {
     useEffect(() => () => {
         noteDragCleanupRef.current?.();
         noteDragCleanupRef.current = null;
+        if (noteDragLiveFrameRef.current !== null) {
+            cancelAnimationFrame(noteDragLiveFrameRef.current);
+            noteDragLiveFrameRef.current = null;
+        }
+        void Promise.resolve(scoreRef.current?.endElementDrag?.(false)).catch(() => {});
     }, []);
     useEffect(() => () => {
         gripDragCleanupRef.current?.();
@@ -12683,6 +12701,50 @@ ${partsBodyXml}
         return { x: point.x, y: point.y };
     };
 
+    const eventHasScorePaletteData = (event: React.DragEvent) => (
+        Array.from(event.dataTransfer.types).includes(SCORE_PALETTE_DRAG_MIME)
+    );
+
+    const handlePaletteDragOver = (event: React.DragEvent) => {
+        if (!interactiveMutationEnabled || !score?.applyDropAtPoint || !eventHasScorePaletteData(event)) {
+            return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        setPaletteDropActive(true);
+    };
+
+    const handlePaletteDragLeave = (event: React.DragEvent) => {
+        const nextTarget = event.relatedTarget as Node | null;
+        if (!nextTarget || !event.currentTarget.contains(nextTarget)) {
+            setPaletteDropActive(false);
+        }
+    };
+
+    const handlePaletteDrop = (event: React.DragEvent) => {
+        if (!interactiveMutationEnabled || !score?.applyDropAtPoint || !eventHasScorePaletteData(event)) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        setPaletteDropActive(false);
+
+        const item = parseScorePaletteItem(event.dataTransfer.getData(SCORE_PALETTE_DRAG_MIME));
+        const target = event.target as Element | null;
+        const point = clientToEngravingPoint(event.clientX, event.clientY, target);
+        if (!item || !point) {
+            return;
+        }
+        const page = resolvePageIndex(target);
+        void performMutation(`drop ${item.label}`, async () => {
+            const fn = requireMutation('applyDropAtPoint');
+            if (!fn) {
+                return false;
+            }
+            return fn(page, point.x, point.y, item.elementType, item.subtype);
+        }, { skipWasmReselect: true, skipSelectionFallback: true });
+    };
+
     const engravingToOverlayPoint = (x: number, y: number) => {
         const matrix = scoreSvgForTarget()?.getScreenCTM();
         const wrapperRect = scoreWrapperRef.current?.getBoundingClientRect();
@@ -13127,45 +13189,109 @@ ${partsBodyXml}
         }
     };
 
-    const commitNoteDrag = async (
+    const ensureLiveNoteDragStarted = (
+        drag: { page: number, startX: number, startY: number, halfStep: number },
+    ): Promise<boolean> => {
+        if (noteDragEngineBeginRef.current) {
+            return noteDragEngineBeginRef.current;
+        }
+        const begin = score?.beginElementDrag?.bind(score);
+        if (!begin) {
+            return Promise.resolve(false);
+        }
+        noteDragEngineBeginRef.current = Promise.resolve(begin(drag.page, drag.startX, drag.startY))
+            .then((began) => {
+                if (!began) {
+                    console.warn('Note drag: engine found no draggable element at the start point.');
+                }
+                return began;
+            })
+            .catch((err) => {
+                console.warn('Starting live note drag failed:', err);
+                return false;
+            });
+        return noteDragEngineBeginRef.current;
+    };
+
+    const scheduleLiveNoteDragUpdate = (
         drag: { page: number, startX: number, startY: number, halfStep: number },
         steps: number,
         modifiers: number,
     ) => {
-        if (!score) {
-            return;
-        }
-        const begin = score.beginElementDrag?.bind(score);
-        const update = score.updateElementDrag?.bind(score);
-        const end = score.endElementDrag?.bind(score);
-        if (!begin || !update || !end) {
+        noteDragLiveUpdateRef.current = { drag, steps, modifiers };
+        if (noteDragLiveFrameRef.current !== null || noteDragLiveInFlightRef.current) {
             return;
         }
 
+        noteDragLiveFrameRef.current = requestAnimationFrame(() => {
+            noteDragLiveFrameRef.current = null;
+            const pending = noteDragLiveUpdateRef.current;
+            noteDragLiveUpdateRef.current = null;
+            if (!pending || !score?.updateElementDrag) {
+                return;
+            }
+
+            const task = (async () => {
+                const began = await ensureLiveNoteDragStarted(pending.drag);
+                if (!began || noteDragFinishingRef.current) {
+                    return;
+                }
+                const targetY = pending.drag.startY + pending.steps * pending.drag.halfStep;
+                // Y-only mode keeps the gesture in Note::verticalDrag pitch semantics.
+                await score.updateElementDrag!(pending.drag.page, pending.drag.startX, targetY, pending.modifiers, 2);
+                noteDragRenderedStepsRef.current = pending.steps;
+                // Render only the active page. Pointer tracking stays on window while
+                // the SVG DOM is replaced, so the gesture remains uninterrupted.
+                await renderScore(score, pending.drag.page);
+            })().catch((err) => {
+                console.warn('Live note drag update failed:', err);
+            }).finally(() => {
+                noteDragLiveInFlightRef.current = null;
+                const latest = noteDragLiveUpdateRef.current;
+                if (latest && !noteDragFinishingRef.current) {
+                    scheduleLiveNoteDragUpdate(latest.drag, latest.steps, latest.modifiers);
+                }
+            });
+            noteDragLiveInFlightRef.current = task;
+        });
+    };
+
+    const stopLiveNoteDragUpdates = async () => {
+        if (noteDragLiveFrameRef.current !== null) {
+            cancelAnimationFrame(noteDragLiveFrameRef.current);
+            noteDragLiveFrameRef.current = null;
+        }
+        noteDragLiveUpdateRef.current = null;
+        await noteDragLiveInFlightRef.current;
+    };
+
+    const finishNoteDrag = async (
+        drag: { page: number, startX: number, startY: number, halfStep: number },
+        steps: number,
+        modifiers: number,
+        commit: boolean,
+    ) => {
+        if (!score?.updateElementDrag || !score?.endElementDrag) {
+            return;
+        }
+        noteDragFinishingRef.current = true;
         const targetY = drag.startY + steps * drag.halfStep;
 
         try {
-            const began = await begin(drag.page, drag.startX, drag.startY);
+            await stopLiveNoteDragUpdates();
+            const began = await ensureLiveNoteDragStarted(drag);
             if (!began) {
-                console.warn('Note drag: engine found no draggable element at the start point.');
-                return;
-            }
-            let committed = false;
-            try {
-                // Y-only drag (mode 2) keeps the whole gesture in ChangePitch semantics.
-                await update(drag.page, drag.startX, targetY, modifiers, 2);
-                committed = (await end(true)) !== false;
-            } finally {
-                if (!committed) {
-                    await Promise.resolve(end(false)).catch(() => {});
-                }
-            }
-            if (!committed) {
+                noteDragEngineBeginRef.current = null;
+                noteDragRenderedStepsRef.current = null;
                 return;
             }
 
-            setScoreDirtySinceCheckpoint(true);
-            setScoreDirtySinceXml(true);
+            if (commit && noteDragRenderedStepsRef.current !== steps) {
+                await score.updateElementDrag(drag.page, drag.startX, targetY, modifiers, 2);
+            }
+            const committed = (await score.endElementDrag(commit)) !== false && commit;
+            noteDragEngineBeginRef.current = null;
+            noteDragRenderedStepsRef.current = null;
 
             if (score.relayout) {
                 await Promise.resolve(score.relayout()).catch((err: unknown) => {
@@ -13175,12 +13301,22 @@ ${partsBodyXml}
             const refreshedPage = await refreshPageCount(score, currentPageRef.current);
             await renderScore(score, refreshedPage);
 
+            if (!committed) {
+                return;
+            }
+            setScoreDirtySinceCheckpoint(true);
+            setScoreDirtySinceXml(true);
             const generation = ++selectionOverlayGenerationRef.current;
             scheduleSelectionOverlayRefresh(null, { page: drag.page, x: drag.startX, y: targetY }, generation);
-            // The engine keeps the dragged note selected, so preview it without reselecting.
             void playSelectionPreview('mutation:drag note pitch', undefined, { reselect: false });
         } catch (err) {
             console.error('Note drag failed:', err);
+            await Promise.resolve(score.endElementDrag(false)).catch(() => {});
+            noteDragEngineBeginRef.current = null;
+            noteDragRenderedStepsRef.current = null;
+            await renderScore(score, drag.page).catch(() => false);
+        } finally {
+            noteDragFinishingRef.current = false;
         }
     };
 
@@ -13224,6 +13360,7 @@ ${partsBodyXml}
                     noteBox: candidate.noteBox,
                     halfStep: resolveNoteDragHalfStep(candidate.noteBox),
                 };
+                void ensureLiveNoteDragStarted(noteDragRef.current);
             }
             const noteDrag = noteDragRef.current;
             const current = clientToScorePoint(ev.clientX, ev.clientY);
@@ -13231,6 +13368,7 @@ ${partsBodyXml}
                 return;
             }
             const steps = Math.round((current.y - noteDrag.startY) / noteDrag.halfStep);
+            const modifiers = (ev.shiftKey ? 1 : 0) | (ev.ctrlKey ? 2 : 0) | (ev.altKey ? 4 : 0);
             setNoteDragGhost({
                 x: noteDrag.noteBox.x,
                 y: noteDrag.noteBox.y + steps * noteDrag.halfStep,
@@ -13238,6 +13376,7 @@ ${partsBodyXml}
                 h: noteDrag.noteBox.h,
                 steps,
             });
+            scheduleLiveNoteDragUpdate(noteDrag, steps, modifiers);
             ev.preventDefault();
         };
 
@@ -13264,11 +13403,8 @@ ${partsBodyXml}
                 return;
             }
             const steps = Math.round((endScore.y - noteDrag.startY) / noteDrag.halfStep);
-            if (steps === 0) {
-                return;
-            }
             const modifiers = (ev.shiftKey ? 1 : 0) | (ev.ctrlKey ? 2 : 0) | (ev.altKey ? 4 : 0);
-            void commitNoteDrag(noteDrag, steps, modifiers);
+            void finishNoteDrag(noteDrag, steps, modifiers, steps !== 0);
         };
 
         const onCancel = (ev: PointerEvent) => {
@@ -13277,8 +13413,13 @@ ${partsBodyXml}
             }
             noteDragCleanupRef.current?.();
             noteDragCleanupRef.current = null;
+            const noteDrag = noteDragRef.current;
+            const wasActive = dragActiveRef.current;
             resetScorePointerGesture();
             setNoteDragGhost(null);
+            if (wasActive && noteDrag) {
+                void finishNoteDrag(noteDrag, 0, 0, false);
+            }
         };
 
         // Escape aborts the gesture without committing (roadmap §2.1). No engine call is
@@ -13289,6 +13430,7 @@ ${partsBodyXml}
             }
             noteDragCleanupRef.current?.();
             noteDragCleanupRef.current = null;
+            const noteDrag = noteDragRef.current;
             const wasActive = dragActiveRef.current;
             resetScorePointerGesture();
             setNoteDragGhost(null);
@@ -13296,6 +13438,9 @@ ${partsBodyXml}
                 // Swallow the click fired when the still-held pointer is released.
                 ignoreNextClickRef.current = true;
                 ev.preventDefault();
+            }
+            if (wasActive && noteDrag) {
+                void finishNoteDrag(noteDrag, 0, 0, false);
             }
         };
 
@@ -13370,7 +13515,7 @@ ${partsBodyXml}
         noteDragRef.current = null;
         // Pointer-down on a note starts a repitch drag instead of a lasso selection
         // (additive modifier keeps the lasso; note-input mode places notes on click).
-        noteDragCandidateRef.current = noteDragSupported && interactiveMutationEnabled
+        noteDragCandidateRef.current = noteDragSupported && interactiveMutationEnabled && !noteDragFinishingRef.current
             && !dragAdditiveRef.current && !noteInputActiveRef.current
             ? findNoteDragCandidate(e.target as Element | null)
             : null;
@@ -14202,6 +14347,7 @@ ${partsBodyXml}
                 onSetTimeSignature={handleSetTimeSignature}
                 onSetKeySignature={handleSetKeySignature}
                 onSetClef={handleSetClef}
+                paletteDropEnabled={Boolean(score?.applyDropAtPoint)}
                 onToggleDot={noteInputActive ? handleToggleInputDotState : handleToggleDot}
                 onToggleDoubleDot={noteInputActive ? undefined : handleToggleDoubleDot}
                 onSetDurationType={noteInputActive ? handleSetInputDuration : handleSetDurationType}
@@ -14415,8 +14561,9 @@ ${partsBodyXml}
 
 	            <div
 	                ref={scoreWrapperRef}
-	                className="relative origin-top-left transition-transform duration-200 ease-out bg-white shadow-lg mx-auto"
+	                className={`relative origin-top-left transition-transform duration-200 ease-out bg-white shadow-lg mx-auto ${paletteDropActive ? 'ring-4 ring-blue-400 ring-offset-2' : ''}`}
 	                data-testid="score-wrapper"
+	                data-palette-drop-active={paletteDropActive ? 'true' : 'false'}
 	                style={{
 	                    transform: `scale(${zoom})`,
 	                    width: 'fit-content',
@@ -14441,6 +14588,9 @@ ${partsBodyXml}
                 onMouseMove={isChangeReviewSingleScoreMode ? undefined : handleScoreMouseMove}
                 onMouseUp={isChangeReviewSingleScoreMode ? undefined : handleScoreMouseUp}
                 onContextMenu={isChangeReviewSingleScoreMode ? undefined : handleScoreContextMenu}
+                onDragOver={isChangeReviewSingleScoreMode ? undefined : handlePaletteDragOver}
+                onDragLeave={isChangeReviewSingleScoreMode ? undefined : handlePaletteDragLeave}
+                onDrop={isChangeReviewSingleScoreMode ? undefined : handlePaletteDrop}
             >
 	                <div ref={containerRef} data-testid="svg-container" />
 
@@ -14543,12 +14693,17 @@ ${partsBodyXml}
                                 data-testid={`spanner-grip-${grip.index}`}
                                 aria-label={`Spanner grip ${grip.index + 1}`}
                                 disabled={!grip.draggable}
-                                className={`absolute z-30 h-3 w-3 -translate-x-1/2 -translate-y-1/2 border-2 shadow-sm ${
+                                className={`absolute z-30 h-4 w-4 border-2 shadow-md ring-1 ring-white ${
                                     grip.draggable
-                                        ? 'cursor-move border-blue-800 bg-white hover:bg-blue-100'
-                                        : 'cursor-not-allowed border-gray-500 bg-gray-200 opacity-70'
+                                        ? 'cursor-move border-slate-950 bg-cyan-300 hover:bg-cyan-100'
+                                        : 'cursor-not-allowed border-slate-700 bg-slate-300 opacity-90'
                                 }`}
-                                style={{ left: overlayPoint.x, top: overlayPoint.y }}
+                                style={{
+                                    left: overlayPoint.x,
+                                    top: overlayPoint.y,
+                                    transform: `translate(-50%, -50%) scale(${1 / zoom})`,
+                                    transformOrigin: 'center',
+                                }}
                                 onClick={event => event.stopPropagation()}
                                 onDoubleClick={event => event.stopPropagation()}
                                 onPointerDown={event => handleGripPointerDown(event, grip.index)}

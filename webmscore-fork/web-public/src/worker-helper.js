@@ -747,6 +747,11 @@ class WebMscoreW {
         return this.rpc('endElementDrag', [commit])
     }
 
+    /** Apply a supported palette element at a page-relative engraving point. */
+    applyDropAtPoint(pageNumber, x, y, elementType, subtype) {
+        return this.rpc('applyDropAtPoint', [pageNumber, x, y, elementType, subtype])
+    }
+
     /** Enter grip edit mode for a spanner at a page-relative point. */
     beginGripEdit(pageNumber, x, y) {
         return this.rpc('beginGripEdit', [pageNumber, x, y])

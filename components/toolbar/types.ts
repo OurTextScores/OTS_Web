@@ -36,6 +36,7 @@ export interface ToolbarSectionProps {
     onSelectAll?: () => void;
     onSetAccidental?: (accidentalType: number) => void;
     mutationsEnabled?: boolean;
+    paletteDropEnabled?: boolean;
     selectionActive?: boolean;
     onExportSvg?: () => void;
     onExportPdf?: () => void;

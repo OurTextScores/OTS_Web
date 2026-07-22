@@ -70,6 +70,9 @@ test('double-clicking a slur exposes native grips and Escape exits edit mode', a
 
     await doubleClickSlur(page);
     await expect(page.getByTestId('spanner-grip-2')).toBeVisible();
+    const visibleGripBox = await page.getByTestId('spanner-grip-2').boundingBox();
+    expect(visibleGripBox?.width).toBeGreaterThanOrEqual(16);
+    expect(visibleGripBox?.height).toBeGreaterThanOrEqual(16);
     await expect(page.getByTestId('spanner-grip-0')).toBeDisabled();
     await expect(page.getByTestId('spanner-grip-1')).toBeDisabled();
 

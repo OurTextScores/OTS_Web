@@ -47,12 +47,20 @@ const prepareSingleNoteScore = async (page: Page) => {
 
 test('dragging a note vertically repitches it diatonically', async ({ page }) => {
   const { halfStep, cx, cy } = await prepareSingleNoteScore(page);
+  const initialBox = await page.locator('svg .Note').first().boundingBox();
+  if (!initialBox) throw new Error('Could not measure initial note geometry');
 
   // Drag up two diatonic steps: C4 -> E4.
   await page.mouse.move(cx, cy);
   await page.mouse.down();
   await page.mouse.move(cx, cy - 2 * halfStep, { steps: 8 });
   await expect(page.getByTestId('note-drag-ghost')).toBeVisible();
+  // v2 live drag: the engine-rendered note moves before pointer-up, rather than
+  // leaving all visual feedback to the JS ghost overlay.
+  await expect.poll(async () => {
+    const liveBox = await page.locator('svg .Note').first().boundingBox();
+    return liveBox?.y ?? initialBox.y;
+  }, { timeout: 20_000 }).toBeLessThan(initialBox.y - halfStep);
   await page.mouse.up();
 
   await expect.poll(async () => (await readPitch(page)).step, { timeout: 20_000 }).toBe('E');

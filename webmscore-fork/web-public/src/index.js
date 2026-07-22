@@ -1168,6 +1168,23 @@ class WebMscore {
     }
 
     /**
+     * Apply a supported palette element at a page-relative engraving point.
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @param {0|1|2} elementType 0=clef, 1=dynamic, 2=articulation
+     * @param {number} subtype kind-specific subtype
+     * @returns {Promise<boolean>}
+     */
+    async applyDropAtPoint(pageNumber, x, y, elementType, subtype) {
+        return Module.ccall('applyDropAtPoint',
+            'boolean',
+            ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, pageNumber, x, y, elementType, subtype, this.excerptId]
+        )
+    }
+
+    /**
      * Enter grip edit mode for a spanner at a page-relative point.
      * @returns {Promise<{page:number, grips:Array<{index:number,x:number,y:number,draggable:boolean}>}|null>}
      */
