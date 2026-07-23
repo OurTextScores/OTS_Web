@@ -6,9 +6,12 @@ import { shortcutEntries, dropdownTextClass } from '../constants';
 import { Keyboard, HelpCircle } from 'lucide-react';
 
 export const HelpSection: React.FC<ToolbarSectionProps> = () => {
-    // The embed build serves under basePath /score-editor; a raw <a href> is not
-    // basePath-prefixed by Next (only <Link>/router are), so prefix it explicitly.
-    const helpHref = process.env.NEXT_PUBLIC_BUILD_MODE === 'embed' ? '/score-editor/help' : '/help';
+    // The embed build is a static export (output: 'export', no trailingSlash) under
+    // basePath /score-editor, so the page lands at /score-editor/help.html — the host
+    // serves the .html file directly and 404s the extensionless route. A raw <a href>
+    // is also not basePath-prefixed by Next (only <Link>/router are). The normal
+    // server build serves the App Router route at /help.
+    const helpHref = process.env.NEXT_PUBLIC_BUILD_MODE === 'embed' ? '/score-editor/help.html' : '/help';
     return (
         <>
             <DropdownMenu modal={false}>
