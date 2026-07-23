@@ -73,8 +73,21 @@ const sections: Section[] = [
             { term: 'Inspector', detail: 'Edits properties of the selection: visible, color, placement, horizontal/vertical offset (staff spaces), small, stem direction, and line style. Shows only the properties that apply, reports “Mixed” for a disagreeing multi-selection, and each change is a single undo step.' },
             { term: 'Fretboard editor', detail: 'Part of the Inspector: when a fret diagram is selected it shows a fret grid — set strings/frets, click a cell to toggle a fingering, and cycle the top row for open/muted strings.' },
             { term: 'MusicXML', detail: 'A live MusicXML editor for the score. Edit the XML and Apply, or Reload to pull the latest from the score.' },
-            { term: 'AI Tools', detail: 'The Assistant, NotaGen, Transcoda, Chordify, Harmony, and MMA tools, each on its own tab.' },
+            { term: 'AI Tools', detail: 'A tabbed panel of AI-assisted tools — see the next section for each one.' },
             { term: 'History', detail: 'Local checkpoints and score versions. Save a checkpoint, then Restore, Compare, Rename, or Delete it.' },
+        ],
+    },
+    {
+        id: 'ai-tools',
+        title: 'AI Tools',
+        blurb: 'Each tool lives on its own tab in the AI Tools panel. They call server-side models, so they need those services configured to run.',
+        items: [
+            { term: 'Assistant', detail: 'Describe a change in plain language and the assistant proposes an edit as a reviewable MusicXML patch. You see a diff, can give feedback for another pass, and apply it as one undoable step (auto-checkpointing first).' },
+            { term: 'NotaGen', detail: 'Generative model that composes or continues musical material, which you can bring into the score.' },
+            { term: 'Transcoda', detail: 'Converts the score between formats — importing from and exporting to other encodings via the conversion backend.' },
+            { term: 'Chordify', detail: 'Analyses the harmony and adds chord symbols above the staff.' },
+            { term: 'Harmony', detail: 'Functional-harmony analysis — labels chords with their Roman-numeral / functional role.' },
+            { term: 'MMA', detail: 'Musical MIDI Accompaniment — generates a backing accompaniment from the score’s chords and structure.' },
         ],
     },
     {
