@@ -1,13 +1,17 @@
 import React from 'react';
 import { Button } from '../../ui/Button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../../ui/DropdownMenu';
 import { ToolbarSectionProps } from '../types';
 import { LayoutGrid, MoveHorizontal, MoveVertical, ZoomIn, ZoomOut } from 'lucide-react';
+
+const zoomPresets = [0.25, 0.5, 0.75, 1];
 
 export const ViewSection: React.FC<ToolbarSectionProps> = ({
     onFitWidth,
     onFitHeight,
     onZoomIn,
     onZoomOut,
+    onSetZoom,
     zoomLevel,
     onTogglePalettes,
     palettesOpen,
@@ -50,9 +54,34 @@ export const ViewSection: React.FC<ToolbarSectionProps> = ({
             >
                 <ZoomOut size={14} />
             </Button>
-            <span className="min-w-[2.5rem] rounded bg-white px-1.5 py-0.5 text-center text-[11px] font-bold text-slate-700 shadow-sm">
-                {(zoomLevel * 100).toFixed(0)}%
-            </span>
+            <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                    <button
+                        type="button"
+                        data-testid="zoom-preset-trigger"
+                        title="Set zoom level (remembered per score)"
+                        className="min-w-[2.75rem] rounded bg-white px-1.5 py-0.5 text-center text-[11px] font-bold text-slate-700 shadow-sm hover:bg-slate-50"
+                    >
+                        {(zoomLevel * 100).toFixed(0)}%
+                    </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center">
+                    <DropdownMenuLabel>Zoom</DropdownMenuLabel>
+                    {zoomPresets.map(preset => (
+                        <DropdownMenuItem
+                            key={preset}
+                            data-testid={`zoom-preset-${Math.round(preset * 100)}`}
+                            disabled={!onSetZoom}
+                            onSelect={() => onSetZoom?.(preset)}
+                        >
+                            {Math.round(preset * 100)}%
+                        </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuLabel>Fit</DropdownMenuLabel>
+                    <DropdownMenuItem data-testid="zoom-preset-fit-width" disabled={!onFitWidth} onSelect={() => onFitWidth?.()}>Fit width</DropdownMenuItem>
+                    <DropdownMenuItem data-testid="zoom-preset-fit-height" disabled={!onFitHeight} onSelect={() => onFitHeight?.()}>Fit height</DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
             <Button
                 data-testid="btn-zoom-in"
                 onClick={onZoomIn}

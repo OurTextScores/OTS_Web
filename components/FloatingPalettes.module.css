@@ -1,0 +1,17 @@
+@font-face {
+    font-family: "LelandPalette";
+    src: url("../webmscore-fork/fonts/leland/Leland.woff2") format("woff2");
+    font-display: swap;
+}
+
+.glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "LelandPalette", serif;
+    font-size: 1.6rem;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1;
+    color: #0f172a;
+}

@@ -148,12 +148,11 @@ describe('Toolbar', () => {
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Clef' }));
     expect(screen.getByTestId('clef-symbol-0')).toHaveTextContent('\uE050');
     expect(screen.getByTestId('btn-clef-0')).toHaveTextContent('Treble');
-    const otherClefsHeading = screen.getByText('Other');
     for (const value of [10, 11]) {
-      expect(screen.getByTestId(`btn-clef-${value}`).compareDocumentPosition(otherClefsHeading))
-        .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       expect(screen.getByTestId(`clef-symbol-${value}`)).toHaveTextContent('\uE05C');
     }
+    // "Other" clefs now live behind the full clef palette rather than in the dropdown.
+    expect(screen.getByTestId('btn-open-clef-palette')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('btn-clef-0'));
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Clef' }));
     fireEvent.click(screen.getByTestId('btn-clef-20'));
@@ -393,14 +392,14 @@ describe('Toolbar', () => {
 
     await user.click(screen.getByRole('button', { name: 'Articulations' }));
     expect(screen.getByTestId('articulations-menu').className).toContain('markingsMenu');
-    expect(screen.getByText('Fermatas — Common')).toBeInTheDocument();
-    expect(screen.getByText('Fermatas — Other')).toBeInTheDocument();
-    expect(screen.getByText('Breaths & Caesuras — Common')).toBeInTheDocument();
-    expect(screen.getByText('Breaths & Caesuras — Other')).toBeInTheDocument();
-    expect(screen.getByTestId('fermata-symbol-4')).toHaveTextContent('\uE4C8');
+    expect(screen.getByText('Fermatas')).toBeInTheDocument();
+    expect(screen.getByText('Breaths & Caesuras')).toBeInTheDocument();
+    expect(screen.getByTestId('btn-open-fermata-palette')).toBeInTheDocument();
+    expect(screen.getByTestId('btn-open-breath-palette')).toBeInTheDocument();
+    expect(screen.getByTestId('fermata-symbol-0')).toHaveTextContent('\uE4C0');
     expect(screen.getByTestId('breath-symbol-5')).toHaveTextContent('\uE4D1');
-    await user.click(screen.getByTestId('btn-fermata-4'));
-    expect(onAddFermata).toHaveBeenCalledWith(4);
+    await user.click(screen.getByTestId('btn-fermata-2'));
+    expect(onAddFermata).toHaveBeenCalledWith(2);
 
     await user.click(screen.getByRole('button', { name: 'Articulations' }));
     await user.click(screen.getByTestId('btn-breath-5'));
@@ -488,16 +487,16 @@ describe('Toolbar', () => {
 
     await user.click(screen.getByRole('button', { name: 'Chord' }));
     expect(screen.getByText('Arpeggios')).toBeInTheDocument();
-    expect(screen.getByText('Tremolos — Common')).toBeInTheDocument();
-    expect(screen.getByText('Tremolos — Other')).toBeInTheDocument();
+    expect(screen.getByText('Tremolos')).toBeInTheDocument();
+    expect(screen.getByTestId('btn-open-tremolo-palette')).toBeInTheDocument();
     expect(screen.getByTestId('arpeggio-symbol-1')).toHaveTextContent('\uE634');
-    expect(screen.getByTestId('tremolo-symbol-4')).toHaveTextContent('\uE22A');
+    expect(screen.getByTestId('tremolo-symbol-2')).toHaveTextContent('\uE222');
     await user.click(screen.getByTestId('btn-arpeggio-3'));
     expect(onAddArpeggio).toHaveBeenCalledWith(3);
 
     await user.click(screen.getByRole('button', { name: 'Chord' }));
-    await user.click(screen.getByTestId('btn-tremolo-7'));
-    expect(onAddTremolo).toHaveBeenCalledWith(7);
+    await user.click(screen.getByTestId('btn-tremolo-2'));
+    expect(onAddTremolo).toHaveBeenCalledWith(2);
   });
 
   it('renders and wires semantic markers and jumps', async () => {
@@ -518,20 +517,19 @@ describe('Toolbar', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Repeats & Navigation' }));
-    expect(screen.getByTestId('repeats-navigation-menu').className).toContain('navigationMenu');
-    expect(screen.getByText('Markers — Common')).toBeInTheDocument();
-    expect(screen.getByText('Markers — Other')).toBeInTheDocument();
-    expect(screen.getByText('Jumps — Common')).toBeInTheDocument();
-    expect(screen.getByText('Jumps — Other')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Navigation' }));
+    expect(screen.getByTestId('navigation-menu').className).toContain('navigationMenu');
+    expect(screen.getByText('Markers')).toBeInTheDocument();
+    expect(screen.getByText('Jumps')).toBeInTheDocument();
+    expect(screen.getByTestId('btn-open-markers-palette')).toBeInTheDocument();
+    expect(screen.getByTestId('btn-open-jumps-palette')).toBeInTheDocument();
     expect(screen.getByTestId('marker-symbol-0')).toHaveTextContent('\uE047');
-    expect(screen.getByTestId('marker-symbol-3')).toHaveTextContent('\uE049');
-    await user.click(screen.getByTestId('btn-marker-3'));
-    expect(onAddMarker).toHaveBeenCalledWith(3);
+    await user.click(screen.getByTestId('btn-marker-2'));
+    expect(onAddMarker).toHaveBeenCalledWith(2);
 
-    await user.click(screen.getByRole('button', { name: 'Repeats & Navigation' }));
-    await user.click(screen.getByTestId('btn-jump-10'));
-    expect(onAddJump).toHaveBeenCalledWith(10);
+    await user.click(screen.getByRole('button', { name: 'Navigation' }));
+    await user.click(screen.getByTestId('btn-jump-2'));
+    expect(onAddJump).toHaveBeenCalledWith(2);
   });
 
   it('renders and wires Batch 4 notation, filter, and measure controls', async () => {

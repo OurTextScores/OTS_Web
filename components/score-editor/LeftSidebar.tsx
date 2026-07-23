@@ -1,4 +1,5 @@
 import React from 'react';
+import { PanelLeftOpen, PanelLeftClose } from 'lucide-react';
 import type { CheckpointSummary, ScoreSummary } from '../../lib/checkpoints';
 import type { SourceHistoryBranch, SourceHistoryRevision } from '../../lib/ourtextscores-api-client';
 
@@ -578,13 +579,13 @@ export function LeftSidebar(props: LeftSidebarProps) {
             className={`shrink-0 border-r bg-white text-sm ${collapsed ? 'w-12' : 'w-72 overflow-y-auto'}`}
             data-testid="checkpoint-sidebar"
         >
-            <div className={collapsed ? 'flex items-center justify-center p-2' : 'flex items-center justify-between p-4'}>
+            <div className={collapsed ? 'flex flex-col items-center gap-2 p-2' : 'flex items-center justify-between p-4'}>
                 {!collapsed && (
                     <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                         History
                     </span>
                 )}
-                <div className={collapsed ? '' : 'flex items-center gap-2'}>
+                <div className={collapsed ? 'flex flex-col items-center gap-2' : 'flex items-center gap-2'}>
                     {!collapsed && (
                         <button
                             type="button"
@@ -601,12 +602,16 @@ export function LeftSidebar(props: LeftSidebarProps) {
                         data-testid="btn-checkpoint-toggle"
                         aria-expanded={!collapsed}
                         aria-controls="checkpoint-sidebar-content"
-                        aria-label={collapsed ? 'Show checkpoints' : 'Hide checkpoints'}
+                        aria-label={collapsed ? 'Show history' : 'Hide history'}
+                        title={collapsed ? 'Show history' : 'Hide history'}
                         onClick={onToggleCollapsed}
-                        className="text-xs font-medium text-gray-600 hover:text-gray-900"
+                        className="rounded p-1 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                     >
-                        {collapsed ? '>>' : '<<'}
+                        {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
                     </button>
+                    {collapsed && (
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600" style={{ writingMode: 'vertical-rl' }}>History</span>
+                    )}
                 </div>
             </div>
             {!collapsed && (

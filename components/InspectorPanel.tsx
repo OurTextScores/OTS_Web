@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import type { FretDiagramData, InspectorPropertyName, SelectedElementProperties } from '../lib/webmscore-loader';
 import { FretboardEditor } from './FretboardEditor';
 
@@ -11,6 +12,8 @@ interface InspectorPanelProps {
     onChange: (property: InspectorPropertyName, value: boolean | number | string) => void;
     fretDiagram?: FretDiagramData | null;
     onFretDiagramChange?: (data: FretDiagramData) => void;
+    collapsed?: boolean;
+    onToggleCollapsed?: () => void;
 }
 
 const selectOptions: Partial<Record<InspectorPropertyName, Array<{ label: string; value: string }>>> = {
@@ -52,14 +55,46 @@ const propertyOrder: InspectorPropertyName[] = [
     'lineStyle',
 ];
 
-export function InspectorPanel({ data, loading = false, disabled = false, onChange, fretDiagram, onFretDiagramChange }: InspectorPanelProps) {
+export function InspectorPanel({ data, loading = false, disabled = false, onChange, fretDiagram, onFretDiagramChange, collapsed = false, onToggleCollapsed }: InspectorPanelProps) {
     const properties = data?.properties ?? {};
     const available = propertyOrder.filter(name => properties[name]);
+
+    if (collapsed) {
+        return (
+            <div className="flex w-10 shrink-0 flex-col items-center border-l border-slate-200 bg-white py-3">
+                <button
+                    type="button"
+                    data-testid="inspector-toggle"
+                    onClick={onToggleCollapsed}
+                    title="Open Inspector"
+                    aria-label="Open Inspector"
+                    aria-expanded={false}
+                    className="flex flex-col items-center gap-2 rounded p-1 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                >
+                    <PanelRightOpen size={16} />
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600" style={{ writingMode: 'vertical-rl' }}>Inspector</span>
+                </button>
+            </div>
+        );
+    }
 
     return (
         <aside data-testid="inspector-panel" className="w-72 shrink-0 overflow-y-auto border-l border-slate-200 bg-white">
             <div className="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-700">Inspector</div>
+                <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-700">Inspector</div>
+                    <button
+                        type="button"
+                        data-testid="inspector-toggle"
+                        onClick={onToggleCollapsed}
+                        title="Collapse Inspector"
+                        aria-label="Collapse Inspector"
+                        aria-expanded
+                        className="rounded p-1 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                    >
+                        <PanelRightClose size={16} />
+                    </button>
+                </div>
                 <div data-testid="inspector-selection-type" className="mt-1 truncate text-xs text-slate-500">
                     {loading ? 'Loading…' : data?.selectionCount ? `${data.elementType} · ${data.selectionCount} selected` : 'Select an element'}
                 </div>

@@ -2,8 +2,9 @@ import React from 'react';
 import { Button } from '../../ui/Button';
 import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenu, DropdownMenuLabel } from '../../ui/DropdownMenu';
 import { ToolbarSectionProps } from '../types';
+import { PaletteLink } from '../PaletteLink';
 import { graceNoteOptions } from '../constants';
-import { Music2, PenLine, Speech, Spline, Waves } from 'lucide-react';
+import { Music2, PenLine, Speech, Spline, Waves, Layers } from 'lucide-react';
 import styles from './NotesSection.module.css';
 
 const graceNoteGlyphs: Record<number, string> = {
@@ -95,6 +96,7 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
     onAddGlissando,
     onAddArpeggio,
     onAddTremolo,
+    onOpenPalette,
     onSetNoteheadGroup,
     onSetBeamMode,
     onAddFretDiagram,
@@ -266,20 +268,14 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent data-testid="lines-menu" className="max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto">
-                    <DropdownMenuLabel>Ottava — Common</DropdownMenuLabel>
+                    <DropdownMenuLabel>Ottava</DropdownMenuLabel>
                     {ottavaOptions.filter(option => option.common).map(option => (
                         <DropdownMenuItem key={option.value} data-testid={`btn-ottava-${option.value}`} className="min-h-10 gap-3" disabled={!onAddOttava} onSelect={() => onAddOttava?.(option.value)}>
                             <span data-testid={`ottava-symbol-${option.value}`} className={styles.lineSymbol} aria-hidden="true">{option.symbol}</span>
                             <span>{option.label}</span>
                         </DropdownMenuItem>
                     ))}
-                    <DropdownMenuLabel>Ottava — Other</DropdownMenuLabel>
-                    {ottavaOptions.filter(option => !option.common).map(option => (
-                        <DropdownMenuItem key={option.value} data-testid={`btn-ottava-${option.value}`} className="min-h-10 gap-3" disabled={!onAddOttava} onSelect={() => onAddOttava?.(option.value)}>
-                            <span data-testid={`ottava-symbol-${option.value}`} className={styles.lineSymbol} aria-hidden="true">{option.symbol}</span>
-                            <span>{option.label}</span>
-                        </DropdownMenuItem>
-                    ))}
+                    <PaletteLink category="Ottavas" label="Open Ottava Palette…" testId="btn-open-ottava-palette" onOpenPalette={onOpenPalette} />
                     <DropdownMenuLabel>Trills</DropdownMenuLabel>
                     {trillOptions.map(option => (
                         <DropdownMenuItem key={option.value} data-testid={`btn-trill-${option.value}`} className="min-h-10 gap-3" disabled={!onAddTrill} onSelect={() => onAddTrill?.(option.value)}>
@@ -300,7 +296,7 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
             <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
                     <Button data-testid="dropdown-chord" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive} className="shadow-sm">
-                        <span className={styles.chordTriggerSymbol} aria-hidden="true">{'\uE63C'}</span>
+                        <Layers size={14} className="mr-2" />
                         Chord
                     </Button>
                 </DropdownMenuTrigger>
@@ -312,20 +308,14 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
                             <span>{option.label}</span>
                         </DropdownMenuItem>
                     ))}
-                    <DropdownMenuLabel>Tremolos — Common</DropdownMenuLabel>
+                    <DropdownMenuLabel>Tremolos</DropdownMenuLabel>
                     {tremoloOptions.filter(option => option.common).map(option => (
                         <DropdownMenuItem key={option.value} data-testid={`btn-tremolo-${option.value}`} className="min-h-10 gap-3" disabled={!onAddTremolo} onSelect={() => onAddTremolo?.(option.value)}>
                             <span data-testid={`tremolo-symbol-${option.value}`} className={styles.chordSymbol} aria-hidden="true">{option.symbol}</span>
                             <span>{option.label}</span>
                         </DropdownMenuItem>
                     ))}
-                    <DropdownMenuLabel>Tremolos — Other</DropdownMenuLabel>
-                    {tremoloOptions.filter(option => !option.common).map(option => (
-                        <DropdownMenuItem key={option.value} data-testid={`btn-tremolo-${option.value}`} className="min-h-10 gap-3" disabled={!onAddTremolo} onSelect={() => onAddTremolo?.(option.value)}>
-                            <span data-testid={`tremolo-symbol-${option.value}`} className={styles.chordSymbol} aria-hidden="true">{option.symbol}</span>
-                            <span>{option.label}</span>
-                        </DropdownMenuItem>
-                    ))}
+                    <PaletteLink category="Tremolos" label="Open Tremolo Palette…" testId="btn-open-tremolo-palette" onOpenPalette={onOpenPalette} />
                 </DropdownMenuContent>
             </DropdownMenu>
         </>

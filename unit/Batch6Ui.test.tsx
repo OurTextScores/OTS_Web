@@ -51,11 +51,11 @@ describe('Batch 6 UI', () => {
     expect(screen.getByTestId('palette-category-dynamics')).toBeInTheDocument();
     await user.type(screen.getByTestId('palette-search'), 'staccato');
     expect(screen.queryByTestId('palette-category-clefs')).not.toBeInTheDocument();
-    await user.click(screen.getByTestId('palette-item-2-0'));
+    await user.click(screen.getByTestId('palette-item-articulation-0'));
     expect(onApply).toHaveBeenCalledWith(expect.objectContaining({ label: 'Staccato', elementType: 2 }));
 
     const transfer = { setData: vi.fn(), effectAllowed: '' };
-    fireEvent.dragStart(screen.getByTestId('palette-item-2-0'), { dataTransfer: transfer });
+    fireEvent.dragStart(screen.getByTestId('palette-item-articulation-0'), { dataTransfer: transfer });
     expect(transfer.setData).toHaveBeenCalledWith('application/x-ots-score-palette+json', expect.any(String));
   });
 

@@ -11,6 +11,9 @@ interface FretboardEditorProps {
 
 const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
 
+const CELL = 28; // px — string/fret cell size
+const LABEL = 24; // px — fret-number gutter width
+
 export function FretboardEditor({ data, disabled = false, onChange }: FretboardEditorProps) {
     const resize = (nextStrings: number, nextFrets: number) => {
         const strings = clamp(nextStrings, 4, 12);
@@ -104,43 +107,51 @@ export function FretboardEditor({ data, disabled = false, onChange }: FretboardE
                 </label>
             </div>
             <div className="mt-3 overflow-x-auto pb-1">
-                <div className="inline-grid gap-1" style={{ gridTemplateColumns: `1.5rem repeat(${data.strings}, 1.75rem)` }}>
-                    <span />
-                    {Array.from({ length: data.strings }, (_, string) => {
-                        const marker = data.markers.find(item => item.string === string)?.type ?? 0;
-                        return (
-                            <button
-                                key={`marker-${string}`}
-                                data-testid={`fretboard-marker-${string}`}
-                                type="button"
-                                disabled={disabled}
-                                onClick={() => cycleMarker(string)}
-                                title="Cycle open, muted, and unmarked"
-                                className="h-7 rounded border border-slate-300 bg-white text-xs font-bold hover:bg-blue-50"
-                            >
-                                {marker === 1 ? '○' : marker === 2 ? '×' : '·'}
-                            </button>
-                        );
-                    })}
-                    {Array.from({ length: data.frets }, (_, index) => index + 1).flatMap(fret => [
-                        <span key={`label-${fret}`} className="flex h-7 items-center justify-center text-[10px] text-slate-500">{fret + data.fretOffset}</span>,
-                        ...Array.from({ length: data.strings }, (_, string) => {
-                            const active = data.dots.some(dot => dot.string === string && dot.fret === fret);
+                <div className="inline-block">
+                    {/* Marker row: one cell per string, laid out horizontally across the top. */}
+                    <div className="flex gap-1">
+                        <span style={{ width: LABEL, height: CELL }} className="shrink-0" />
+                        {Array.from({ length: data.strings }, (_, string) => {
+                            const marker = data.markers.find(item => item.string === string)?.type ?? 0;
                             return (
                                 <button
-                                    key={`${string}-${fret}`}
-                                    data-testid={`fretboard-cell-${string}-${fret}`}
+                                    key={`marker-${string}`}
+                                    data-testid={`fretboard-marker-${string}`}
                                     type="button"
                                     disabled={disabled}
-                                    aria-pressed={active}
-                                    onClick={() => toggleDot(string, fret)}
-                                    className={`h-7 rounded-sm border text-sm ${active ? 'border-blue-700 bg-blue-600 text-white' : 'border-slate-300 bg-slate-50 hover:bg-blue-50'}`}
+                                    onClick={() => cycleMarker(string)}
+                                    title="Cycle open, muted, and unmarked"
+                                    style={{ width: CELL, height: CELL }}
+                                    className="flex shrink-0 items-center justify-center rounded border border-slate-300 bg-white text-[15px] font-semibold leading-none text-slate-800 hover:bg-blue-50"
                                 >
-                                    {active ? '●' : ''}
+                                    {marker === 1 ? '○' : marker === 2 ? '✕' : ''}
                                 </button>
                             );
-                        }),
-                    ])}
+                        })}
+                    </div>
+                    {/* One row per fret; strings run left to right, frets top to bottom. */}
+                    {Array.from({ length: data.frets }, (_, index) => index + 1).map(fret => (
+                        <div key={`fret-${fret}`} className="mt-1 flex gap-1">
+                            <span style={{ width: LABEL, height: CELL }} className="flex shrink-0 items-center justify-center text-[10px] text-slate-500">{fret + data.fretOffset}</span>
+                            {Array.from({ length: data.strings }, (_, string) => {
+                                const active = data.dots.some(dot => dot.string === string && dot.fret === fret);
+                                return (
+                                    <button
+                                        key={`${string}-${fret}`}
+                                        data-testid={`fretboard-cell-${string}-${fret}`}
+                                        type="button"
+                                        disabled={disabled}
+                                        aria-pressed={active}
+                                        onClick={() => toggleDot(string, fret)}
+                                        style={{ width: CELL, height: CELL }}
+                                        className={`flex shrink-0 items-center justify-center rounded-sm border leading-none ${active ? 'border-blue-700 bg-blue-600' : 'border-slate-300 bg-slate-50 hover:bg-blue-50'}`}
+                                    >
+                                        <span style={{ width: 14, height: 14 }} className={`inline-block rounded-full ${active ? 'bg-white' : ''}`} />
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    ))}
                 </div>
             </div>
             <p className="mt-2 text-[10px] text-slate-500">Top row cycles unmarked → open → muted. Click a fret cell to toggle a dot.</p>

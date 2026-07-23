@@ -5,6 +5,7 @@ import { ToolbarSectionProps } from '../types';
 import { accidentalOptions } from '../constants';
 import { ArrowDown, ArrowUp, ChevronsDown, ChevronsUp, Hash, ArrowUpDown } from 'lucide-react';
 import { TransposeDialog } from '../TransposeDialog';
+import styles from './PitchSection.module.css';
 
 export const PitchSection: React.FC<ToolbarSectionProps> = ({
     onPitchDown,
@@ -101,8 +102,11 @@ export const PitchSection: React.FC<ToolbarSectionProps> = ({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     {accidentalOptions.map(opt => (
-                        <DropdownMenuItem key={opt.label} data-testid={`btn-acc-${opt.value}`} disabled={mutationDisabled || (!noteInputActive && !selectionActive) || !onSetAccidental} onSelect={() => onSetAccidental?.(opt.value)}>
-                            {opt.label}
+                        <DropdownMenuItem key={opt.value} data-testid={`btn-acc-${opt.value}`} className="min-h-9 gap-3" disabled={mutationDisabled || (!noteInputActive && !selectionActive) || !onSetAccidental} onSelect={() => onSetAccidental?.(opt.value)}>
+                            {opt.symbol
+                                ? <span data-testid={`acc-symbol-${opt.value}`} className={styles.accidentalSymbol} aria-hidden="true">{opt.symbol}</span>
+                                : <span className="inline-flex min-w-[1.5rem] justify-center" aria-hidden="true" />}
+                            <span>{opt.name}</span>
                         </DropdownMenuItem>
                     ))}
                 </DropdownMenuContent>

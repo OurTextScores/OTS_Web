@@ -155,7 +155,7 @@ export const MeasuresSection: React.FC<ToolbarSectionProps> = ({
                 className="shadow-sm"
             >
                 <Trash2 size={14} className="mr-2" />
-                Selected Bars
+                Delete Selected Bars
             </Button>
             <Button
                 data-testid="btn-remove-trailing-empty"
@@ -166,7 +166,7 @@ export const MeasuresSection: React.FC<ToolbarSectionProps> = ({
                 className="shadow-sm"
             >
                 <Trash2 size={14} className="mr-2" />
-                Trailing Empty Bars
+                Delete Trailing Empty Bars
             </Button>
         </>
     );

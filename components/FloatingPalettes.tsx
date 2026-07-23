@@ -1,24 +1,40 @@
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { GripHorizontal, Search, X } from 'lucide-react';
-import { SCORE_PALETTE_DRAG_MIME, scorePaletteItems, type ScorePaletteItem } from './toolbar/palette';
+import { SCORE_PALETTE_DRAG_MIME, scorePaletteItems, type PaletteCategory, type ScorePaletteItem } from './toolbar/palette';
+import styles from './FloatingPalettes.module.css';
 
 interface FloatingPalettesProps {
     disabled?: boolean;
     dragEnabled?: boolean;
     onApply: (item: ScorePaletteItem) => void;
     onClose: () => void;
+    /** When set, the palette opens scoped to a single category (e.g. all Clefs). */
+    category?: PaletteCategory | null;
 }
 
-const categories = ['Clefs', 'Dynamics', 'Articulations'] as const;
+const allCategories = Array.from(new Set(scorePaletteItems.map(item => item.category)));
 
-export function FloatingPalettes({ disabled = false, dragEnabled = false, onApply, onClose }: FloatingPalettesProps) {
+export function FloatingPalettes({ disabled = false, dragEnabled = false, onApply, onClose, category = null }: FloatingPalettesProps) {
     const [query, setQuery] = useState('');
     const [position, setPosition] = useState({ x: 24, y: 110 });
     const dragRef = useRef<{ dx: number; dy: number } | null>(null);
     const normalizedQuery = query.trim().toLowerCase();
+    const categories = category ? [category] : allCategories;
     const visibleItems = useMemo(() => scorePaletteItems.filter(item => item.label.toLowerCase().includes(normalizedQuery)), [normalizedQuery]);
+
+    // Escape closes the palette.
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                event.stopPropagation();
+                onClose();
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [onClose]);
 
     const startMove = (event: React.PointerEvent) => {
         if ((event.target as Element).closest('button')) return;
@@ -49,7 +65,7 @@ export function FloatingPalettes({ disabled = false, dragEnabled = false, onAppl
                 }}
             >
                 <GripHorizontal size={16} aria-hidden="true" />
-                <span className="flex-1">Palettes</span>
+                <span className="flex-1">{category ? `${category} palette` : 'Palettes'}</span>
                 <button type="button" data-testid="btn-close-palettes" onClick={onClose} className="rounded p-0.5 hover:bg-slate-700" aria-label="Close palettes">
                     <X size={15} />
                 </button>
@@ -72,29 +88,34 @@ export function FloatingPalettes({ disabled = false, dragEnabled = false, onAppl
                         <section key={category} data-testid={`palette-category-${category.toLowerCase()}`} className="mb-4 last:mb-0">
                             <h3 className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{category}</h3>
                             <div className="grid grid-cols-4 gap-1">
-                                {items.map(item => (
-                                    <button
-                                        key={`${item.elementType}-${item.subtype}`}
-                                        type="button"
-                                        data-testid={`palette-item-${item.elementType}-${item.subtype}`}
-                                        draggable={dragEnabled}
-                                        disabled={disabled && !dragEnabled}
-                                        title={`${item.label}${dragEnabled ? ' — drag onto score' : ''}`}
-                                        onClick={() => { if (!disabled) onApply(item); }}
-                                        onDragStart={event => {
-                                            if (!dragEnabled) {
-                                                event.preventDefault();
-                                                return;
-                                            }
-                                            event.dataTransfer.effectAllowed = 'copy';
-                                            event.dataTransfer.setData(SCORE_PALETTE_DRAG_MIME, JSON.stringify(item));
-                                            event.dataTransfer.setData('text/plain', item.label);
-                                        }}
-                                        className="flex min-h-12 items-center justify-center rounded border border-slate-200 bg-slate-50 p-1 font-[Leland] text-2xl hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50"
-                                    >
-                                        {item.symbol || item.label.slice(0, 2)}
-                                    </button>
-                                ))}
+                                {items.map(item => {
+                                    const canDrag = dragEnabled && item.elementType !== undefined;
+                                    return (
+                                        <button
+                                            key={`${item.kind}-${item.subtype}`}
+                                            type="button"
+                                            data-testid={`palette-item-${item.kind}-${item.subtype}`}
+                                            draggable={canDrag}
+                                            disabled={disabled && !canDrag}
+                                            title={`${item.label}${canDrag ? ' — click to apply, or drag onto the score' : ' — click to apply'}`}
+                                            onClick={() => { if (!disabled) onApply(item); }}
+                                            onDragStart={event => {
+                                                if (!canDrag) {
+                                                    event.preventDefault();
+                                                    return;
+                                                }
+                                                event.dataTransfer.effectAllowed = 'copy';
+                                                event.dataTransfer.setData(SCORE_PALETTE_DRAG_MIME, JSON.stringify(item));
+                                                event.dataTransfer.setData('text/plain', item.label);
+                                            }}
+                                            className="flex min-h-12 items-center justify-center rounded border border-slate-200 bg-slate-50 p-1 hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50"
+                                        >
+                                            {item.symbol
+                                                ? <span className={styles.glyph}>{item.symbol}</span>
+                                                : <span className="px-0.5 text-center text-[10px] font-medium leading-tight text-slate-700">{item.label}</span>}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </section>
                     );

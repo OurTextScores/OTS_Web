@@ -133,7 +133,7 @@ test('opens, searches, moves, and click-applies the floating palettes', async ({
   expect(after?.x).not.toBe(before?.x);
 
   await page.getByTestId('palette-search').fill('accent');
-  await page.getByTestId('palette-item-2-3').click();
+  await page.getByTestId('palette-item-articulation-3').click();
   await expect.poll(async () => {
     const xml = await readMscx(page);
     return xml.includes('articAccentAbove') || xml.includes('articAccentBelow');

@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '../../ui/Button';
 import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenu, DropdownMenuLabel } from '../../ui/DropdownMenu';
 import { ToolbarSectionProps } from '../types';
+import { PaletteLink } from '../PaletteLink';
 import { dynamicOptions, hairpinOptions, pedalOptions, articulationOptions } from '../constants';
 import { articulationScorePaletteItem, dynamicScorePaletteItem, SCORE_PALETTE_DRAG_MIME } from '../palette';
 import { Pencil, Footprints, Type, CircleDot } from 'lucide-react';
@@ -141,6 +142,7 @@ export const ExpressionSection: React.FC<ToolbarSectionProps> = ({
     onAddArticulation,
     onAddFermata,
     onAddBreath,
+    onOpenPalette,
     mutationsEnabled,
     paletteDropEnabled,
     selectionActive,
@@ -286,34 +288,22 @@ export const ExpressionSection: React.FC<ToolbarSectionProps> = ({
                         </DropdownMenuItem>
                         );
                     })}
-                    <DropdownMenuLabel>Fermatas — Common</DropdownMenuLabel>
+                    <DropdownMenuLabel>Fermatas</DropdownMenuLabel>
                     {fermataOptions.filter(option => option.common).map(option => (
                         <DropdownMenuItem key={option.value} data-testid={`btn-fermata-${option.value}`} className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onAddFermata} onSelect={() => onAddFermata?.(option.value)}>
                             <span data-testid={`fermata-symbol-${option.value}`} className={styles.articulationSymbol} aria-hidden="true">{option.symbol}</span>
                             <span>{option.label}</span>
                         </DropdownMenuItem>
                     ))}
-                    <DropdownMenuLabel>Fermatas — Other</DropdownMenuLabel>
-                    {fermataOptions.filter(option => !option.common).map(option => (
-                        <DropdownMenuItem key={option.value} data-testid={`btn-fermata-${option.value}`} className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onAddFermata} onSelect={() => onAddFermata?.(option.value)}>
-                            <span data-testid={`fermata-symbol-${option.value}`} className={styles.articulationSymbol} aria-hidden="true">{option.symbol}</span>
-                            <span>{option.label}</span>
-                        </DropdownMenuItem>
-                    ))}
-                    <DropdownMenuLabel>Breaths & Caesuras — Common</DropdownMenuLabel>
+                    <PaletteLink category="Fermatas" label="Open Fermata Palette…" testId="btn-open-fermata-palette" onOpenPalette={onOpenPalette} />
+                    <DropdownMenuLabel>Breaths & Caesuras</DropdownMenuLabel>
                     {breathOptions.filter(option => option.common).map(option => (
                         <DropdownMenuItem key={option.value} data-testid={`btn-breath-${option.value}`} className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onAddBreath} onSelect={() => onAddBreath?.(option.value)}>
                             <span data-testid={`breath-symbol-${option.value}`} className={styles.articulationSymbol} aria-hidden="true">{option.symbol}</span>
                             <span>{option.label}</span>
                         </DropdownMenuItem>
                     ))}
-                    <DropdownMenuLabel>Breaths & Caesuras — Other</DropdownMenuLabel>
-                    {breathOptions.filter(option => !option.common).map(option => (
-                        <DropdownMenuItem key={option.value} data-testid={`btn-breath-${option.value}`} className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onAddBreath} onSelect={() => onAddBreath?.(option.value)}>
-                            <span data-testid={`breath-symbol-${option.value}`} className={styles.articulationSymbol} aria-hidden="true">{option.symbol}</span>
-                            <span>{option.label}</span>
-                        </DropdownMenuItem>
-                    ))}
+                    <PaletteLink category="Breaths" label="Open Breath Palette…" testId="btn-open-breath-palette" onOpenPalette={onOpenPalette} />
                 </DropdownMenuContent>
             </DropdownMenu>
         </>

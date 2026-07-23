@@ -3,10 +3,10 @@ import { Button } from '../../ui/Button';
 import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenu, DropdownMenuLabel } from '../../ui/DropdownMenu';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../../ui/Select';
 import { ToolbarSectionProps } from '../types';
-import { keySignatureButtonOptionsDefault, clefButtonOptionsDefault, barlineOptions, repeatCountOptions, voltaOptions } from '../constants';
+import { clefButtonOptionsDefault, barlineOptions, repeatCountOptions, voltaOptions } from '../constants';
 import { clefScorePaletteItem, SCORE_PALETTE_DRAG_MIME } from '../palette';
-import { Guitar, Repeat } from 'lucide-react';
-import { ClefIcon, KeySignatureIcon } from '../CustomIcons';
+import { PaletteLink } from '../PaletteLink';
+import { Guitar, Repeat, Signpost } from 'lucide-react';
 import styles from './ScoreSection.module.css';
 
 const commonClefValues = new Set([0, 20, 10, 11]);
@@ -58,14 +58,14 @@ const clefSymbol = (clefType: number): string => {
     return '\uE050';
 };
 
+const TREBLE_CLEF = String.fromCharCode(0xE050); // SMuFL gClef
+
 export const ScoreSection: React.FC<ToolbarSectionProps> = ({
     instrumentGroups = [],
     parts = [],
     onAddPart,
     onRemovePart,
     onTogglePartVisible,
-    onSetKeySignature,
-    keySignatureOptions,
     onSetClef,
     clefOptions,
     onToggleRepeatStart,
@@ -75,6 +75,7 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
     onAddVolta,
     onAddMarker,
     onAddJump,
+    onOpenPalette,
     exportsEnabled,
     mutationsEnabled,
     paletteDropEnabled,
@@ -133,10 +134,8 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
     const hasInstrumentTemplates = instrumentOptions.length > 0;
     const instrumentIdToAdd = selectedInstrumentId || (hasInstrumentTemplates ? instrumentOptions[0].id : '');
 
-    const keySignatureButtonOptions = keySignatureOptions ?? keySignatureButtonOptionsDefault;
     const clefButtonOptions = clefOptions ?? clefButtonOptionsDefault;
     const commonClefOptions = clefButtonOptions.filter(option => commonClefValues.has(option.value));
-    const otherClefOptions = clefButtonOptions.filter(option => !commonClefValues.has(option.value));
 
     const renderClefOption = (opt: (typeof clefButtonOptions)[number]) => {
         const canClickApply = !mutationDisabled && Boolean(onSetClef);
@@ -252,33 +251,15 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
 
             <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
-                    <Button data-testid="dropdown-key" variant="outline" size="sm" disabled={mutationDisabled || !onSetKeySignature} className="shadow-sm">
-                        <KeySignatureIcon size={14} className="mr-2" />
-                        Key
-                    </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                    <DropdownMenuLabel>Major</DropdownMenuLabel>
-                    {keySignatureButtonOptions.map(opt => (
-                        <DropdownMenuItem key={opt.fifths} data-testid={`btn-keysig-${opt.fifths}`} disabled={mutationDisabled || !onSetKeySignature} onSelect={() => onSetKeySignature?.(opt.fifths)}>
-                            {opt.label}
-                        </DropdownMenuItem>
-                    ))}
-                </DropdownMenuContent>
-            </DropdownMenu>
-
-            <DropdownMenu modal={false}>
-                <DropdownMenuTrigger asChild>
                     <Button data-testid="dropdown-clef" variant="outline" size="sm" disabled={mutationDisabled || (!onSetClef && !paletteDropEnabled)} className="shadow-sm">
-                        <ClefIcon size={14} className="mr-2" />
+                        <span className={styles.triggerGlyph} aria-hidden="true">{TREBLE_CLEF}</span>
                         Clef
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent data-testid="clef-menu" className={styles.clefMenu}>
                     <DropdownMenuLabel>Common</DropdownMenuLabel>
                     {commonClefOptions.map(renderClefOption)}
-                    <DropdownMenuLabel>Other</DropdownMenuLabel>
-                    {otherClefOptions.map(renderClefOption)}
+                    <PaletteLink category="Clefs" label="Open Clef Palette…" testId="btn-open-clef-palette" onOpenPalette={onOpenPalette} />
                 </DropdownMenuContent>
             </DropdownMenu>
 
@@ -286,10 +267,10 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
                 <DropdownMenuTrigger asChild>
                     <Button data-testid="dropdown-repeats" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive} className="shadow-sm">
                         <Repeat size={14} className="mr-2" />
-                        Repeats & Navigation
+                        Repeats
                     </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent data-testid="repeats-navigation-menu" className={styles.navigationMenu}>
+                <DropdownMenuContent data-testid="repeats-menu" className={styles.navigationMenu}>
                     <DropdownMenuLabel>Repeats</DropdownMenuLabel>
                     <DropdownMenuItem data-testid="btn-repeat-start" disabled={mutationDisabled || !selectionActive || !onToggleRepeatStart} onSelect={() => onToggleRepeatStart?.()}>Start Repeat</DropdownMenuItem>
                     <DropdownMenuItem data-testid="btn-repeat-end" disabled={mutationDisabled || !selectionActive || !onToggleRepeatEnd} onSelect={() => onToggleRepeatEnd?.()}>End Repeat</DropdownMenuItem>
@@ -311,32 +292,32 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
                             {opt.label}
                         </DropdownMenuItem>
                     ))}
-                    <DropdownMenuLabel>Markers — Common</DropdownMenuLabel>
+                </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                    <Button data-testid="dropdown-navigation" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive || (!onAddMarker && !onAddJump)} className="shadow-sm">
+                        <Signpost size={14} className="mr-2" />
+                        Navigation
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent data-testid="navigation-menu" className={styles.navigationMenu}>
+                    <DropdownMenuLabel>Markers</DropdownMenuLabel>
                     {markerOptions.filter(option => option.common).map(option => (
                         <DropdownMenuItem key={option.value} data-testid={`btn-marker-${option.value}`} className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onAddMarker} onSelect={() => onAddMarker?.(option.value)}>
                             <span data-testid={`marker-symbol-${option.value}`} className={styles.markerSymbol} aria-hidden="true">{option.symbol}</span>
                             <span>{option.label}</span>
                         </DropdownMenuItem>
                     ))}
-                    <DropdownMenuLabel>Markers — Other</DropdownMenuLabel>
-                    {markerOptions.filter(option => !option.common).map(option => (
-                        <DropdownMenuItem key={option.value} data-testid={`btn-marker-${option.value}`} className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onAddMarker} onSelect={() => onAddMarker?.(option.value)}>
-                            <span data-testid={`marker-symbol-${option.value}`} className={styles.markerSymbol} aria-hidden="true">{option.symbol}</span>
-                            <span>{option.label}</span>
-                        </DropdownMenuItem>
-                    ))}
-                    <DropdownMenuLabel>Jumps — Common</DropdownMenuLabel>
+                    <PaletteLink category="Markers" label="Open Markers Palette…" testId="btn-open-markers-palette" onOpenPalette={onOpenPalette} />
+                    <DropdownMenuLabel>Jumps</DropdownMenuLabel>
                     {jumpOptions.filter(option => option.common).map(option => (
                         <DropdownMenuItem key={option.value} data-testid={`btn-jump-${option.value}`} disabled={mutationDisabled || !selectionActive || !onAddJump} onSelect={() => onAddJump?.(option.value)}>
                             {option.label}
                         </DropdownMenuItem>
                     ))}
-                    <DropdownMenuLabel>Jumps — Other</DropdownMenuLabel>
-                    {jumpOptions.filter(option => !option.common).map(option => (
-                        <DropdownMenuItem key={option.value} data-testid={`btn-jump-${option.value}`} disabled={mutationDisabled || !selectionActive || !onAddJump} onSelect={() => onAddJump?.(option.value)}>
-                            {option.label}
-                        </DropdownMenuItem>
-                    ))}
+                    <PaletteLink category="Jumps" label="Open Jumps Palette…" testId="btn-open-jumps-palette" onOpenPalette={onOpenPalette} />
                 </DropdownMenuContent>
             </DropdownMenu>
         </>

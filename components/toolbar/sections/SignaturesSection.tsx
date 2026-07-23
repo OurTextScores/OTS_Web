@@ -1,15 +1,45 @@
 import React, { useState } from 'react';
 import { Button } from '../../ui/Button';
-import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenu } from '../../ui/DropdownMenu';
+import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenu, DropdownMenuLabel } from '../../ui/DropdownMenu';
 import { ToolbarSectionProps } from '../types';
-import { toolbarInputBaseClass, signatureOptionsDefault } from '../constants';
+import { toolbarInputBaseClass, signatureOptionsDefault, keySignatureButtonOptionsDefault } from '../constants';
 import { Clock, Check } from 'lucide-react';
+import styles from './SignaturesSection.module.css';
+
+const KEY_SHARP = String.fromCharCode(0xE262); // SMuFL accidentalSharp
+const KEY_FLAT = String.fromCharCode(0xE260);  // SMuFL accidentalFlat
+
+// Render a key-signature label (e.g. "F#", "Bb") with its accidental drawn in the
+// notation font: the leading note letter stays as text, trailing #/b become Leland glyphs.
+const renderKeyLabel = (label: string): React.ReactNode => {
+    if (label.length < 2) {
+        return label;
+    }
+    const note = label[0];
+    const accidentals = label.slice(1);
+    return (
+        <span className="inline-flex items-baseline gap-0.5">
+            <span>{note}</span>
+            {accidentals.split('').map((char, index) => {
+                const glyph = char === '#' ? KEY_SHARP : char === 'b' ? KEY_FLAT : char;
+                const isAccidental = char === '#' || char === 'b';
+                return (
+                    <span key={index} className={isAccidental ? styles.keyAccidental : undefined} aria-hidden={isAccidental || undefined}>
+                        {glyph}
+                    </span>
+                );
+            })}
+        </span>
+    );
+};
 
 export const SignaturesSection: React.FC<ToolbarSectionProps> = ({
     onSetTimeSignature,
     onSetTimeSignature44,
     onSetTimeSignature34,
     timeSignatureOptions,
+    onSetKeySignature,
+    keySignatureOptions,
     mutationsEnabled,
 }) => {
     const [customTimeSigNumerator, setCustomTimeSigNumerator] = useState('4');
@@ -26,6 +56,7 @@ export const SignaturesSection: React.FC<ToolbarSectionProps> = ({
         && parsedCustomDenominator > 0;
 
     const signatureOptions = timeSignatureOptions ?? signatureOptionsDefault;
+    const keySignatureButtonOptions = keySignatureOptions ?? keySignatureButtonOptionsDefault;
 
     const resolveTimeSigHandler = (opt: { label: string; numerator: number; denominator: number; timeSigType?: number }) => {
         if (onSetTimeSignature) {
@@ -105,6 +136,24 @@ export const SignaturesSection: React.FC<ToolbarSectionProps> = ({
             >
                 <Check size={14} />
             </Button>
+
+            <div className="h-3 w-px bg-slate-200"></div>
+            <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                    <Button data-testid="dropdown-key" variant="outline" size="sm" disabled={mutationDisabled || !onSetKeySignature} className="shadow-sm">
+                        <span className={styles.triggerGlyph} aria-hidden="true">{KEY_SHARP}</span>
+                        Key
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                    <DropdownMenuLabel>Major</DropdownMenuLabel>
+                    {keySignatureButtonOptions.map(opt => (
+                        <DropdownMenuItem key={opt.fifths} data-testid={`btn-keysig-${opt.fifths}`} disabled={mutationDisabled || !onSetKeySignature} onSelect={() => onSetKeySignature?.(opt.fifths)}>
+                            {renderKeyLabel(opt.label)}
+                        </DropdownMenuItem>
+                    ))}
+                </DropdownMenuContent>
+            </DropdownMenu>
         </>
     );
 };

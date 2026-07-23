@@ -39,3 +39,27 @@
     line-height: 1;
     color: #0f172a;
 }
+
+.triggerGlyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 0.35rem;
+    /* The treble clef glyph is very tall; scale it down so the whole clef fits. */
+    font-family: "LelandScoreToolbar", serif;
+    font-size: 0.7rem;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1;
+    color: inherit;
+}
+
+.keyAccidental {
+    font-family: "LelandScoreToolbar", serif;
+    font-size: 1.15rem;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1;
+    color: #0f172a;
+    vertical-align: -0.15em;
+}

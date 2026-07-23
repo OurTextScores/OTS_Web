@@ -2,6 +2,7 @@
 
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { PanelRightOpen, PanelRightClose } from 'lucide-react';
 import {
     loadWebMscore,
     loadWebMscoreInProcess,
@@ -29,7 +30,7 @@ import { CodeMirrorEditor, type CodeEditorThemeMode } from './CodeMirrorEditor';
 import { Toolbar, type MeasureInsertTarget } from './Toolbar';
 import { InspectorPanel } from './InspectorPanel';
 import { FloatingPalettes } from './FloatingPalettes';
-import { SCORE_PALETTE_DRAG_MIME, parseScorePaletteItem, type ScorePaletteItem } from './toolbar/palette';
+import { SCORE_PALETTE_DRAG_MIME, parseScorePaletteItem, type PaletteCategory, type ScorePaletteItem } from './toolbar/palette';
 import { articulationOptions } from './toolbar/constants';
 import { LeftSidebar, type LeftSidebarTab } from './score-editor/LeftSidebar';
 import {
@@ -1174,7 +1175,11 @@ export default function ScoreEditor() {
     const [selectedElementClasses, setSelectedElementClasses] = useState<string>('');
     const [selectedTextValue, setSelectedTextValue] = useState('');
     const inlineTextContentRef = useRef<HTMLDivElement>(null);
+    // Tracks whether the user has typed in the inline text editor this session, so
+    // async loads of the element's current text don't clobber in-progress edits.
+    const inlineTextEditedRef = useRef(false);
     const [inspectorData, setInspectorData] = useState<SelectedElementProperties | null>(null);
+    const [inspectorOpen, setInspectorOpen] = useState(false);
     const [fretDiagramData, setFretDiagramData] = useState<FretDiagramData | null>(null);
     const [inspectorLoading, setInspectorLoading] = useState(false);
     const [selectedLayoutBreakSubtype, setSelectedLayoutBreakSubtype] = useState<'line'|'page'|null>(null);
@@ -1217,6 +1222,11 @@ export default function ScoreEditor() {
     const [noteInputShadow, setNoteInputShadow] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
     const [paletteDropActive, setPaletteDropActive] = useState(false);
     const [palettesOpen, setPalettesOpen] = useState(false);
+    const [paletteCategory, setPaletteCategory] = useState<PaletteCategory | null>(null);
+    const openPaletteCategory = (category: string) => {
+        setPaletteCategory(category as PaletteCategory);
+        setPalettesOpen(true);
+    };
     const [selectionFilterMask, setSelectionFilterMask] = useState(() => {
         if (typeof window === 'undefined') return DEFAULT_SELECTION_FILTER_MASK;
         const storedValue = window.localStorage.getItem(SELECTION_FILTER_STORAGE_KEY);
@@ -1393,7 +1403,7 @@ export default function ScoreEditor() {
     const [scoreSummariesError, setScoreSummariesError] = useState<string | null>(null);
     const [scoreDirtySinceCheckpoint, setScoreDirtySinceCheckpoint] = useState(false);
     const [scoreDirtySinceXml, setScoreDirtySinceXml] = useState(false);
-    const [xmlSidebarMode, setXmlSidebarMode] = useState<'closed' | 'open' | 'full'>('closed');
+    const [xmlSidebarMode, setXmlSidebarMode] = useState<'closed' | 'open'>('closed');
     const [xmlSidebarWidth, setXmlSidebarWidth] = useState<number>(384); // default 'open' width (w-96)
     const [isResizingSidebar, setIsResizingSidebar] = useState(false);
     const sidebarResizeStartXRef = useRef<number>(0);
@@ -1523,6 +1533,30 @@ export default function ScoreEditor() {
     const [shareLinkCopied, setShareLinkCopied] = useState(false);
     const [progressiveLoadEnabled, setProgressiveLoadEnabled] = useState(true);
     const [scoreId, setScoreId] = useState('');
+    // Remember the zoom level per score (falling back to the last-used default), so
+    // reopening a score restores the view the user last left it at.
+    const zoomStorageKey = (id: string) => `ots_editor_zoom_v1:${id || 'default'}`;
+    const zoomRestoredForRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (typeof window === 'undefined' || zoomRestoredForRef.current === scoreId) {
+            return;
+        }
+        zoomRestoredForRef.current = scoreId;
+        const raw = window.localStorage.getItem(zoomStorageKey(scoreId))
+            ?? window.localStorage.getItem(zoomStorageKey(''));
+        const saved = raw !== null ? Number(raw) : NaN;
+        if (Number.isFinite(saved) && saved > 0) {
+            setZoom(clampZoom(saved));
+        }
+    }, [scoreId]);
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+        const value = String(zoom);
+        window.localStorage.setItem(zoomStorageKey(scoreId), value);
+        window.localStorage.setItem(zoomStorageKey(''), value);
+    }, [zoom, scoreId]);
     const [newScoreDialogOpen, setNewScoreDialogOpen] = useState(false);
     const [newScoreTitle, setNewScoreTitle] = useState('');
     const [newScoreComposer, setNewScoreComposer] = useState('');
@@ -2576,6 +2610,36 @@ export default function ScoreEditor() {
             canceled = true;
         };
     }, [score, selectedElementClasses, textEditorPosition]);
+
+    // Reset the edited flag whenever the inline text editor opens or closes.
+    useEffect(() => {
+        inlineTextEditedRef.current = false;
+    }, [textEditorPosition]);
+
+    // Populate the (uncontrolled) inline editor from the selected element's text.
+    // Runs on open and again if the text loads asynchronously, but never once the
+    // user has started typing, so keystrokes are not reverted by a late load.
+    useEffect(() => {
+        if (!textEditorPosition || inlineTextEditedRef.current) {
+            return;
+        }
+        const node = inlineTextContentRef.current;
+        if (!node) {
+            return;
+        }
+        if (node.textContent !== selectedTextValue) {
+            node.textContent = selectedTextValue;
+        }
+        node.focus();
+        const selection = typeof window !== 'undefined' ? window.getSelection() : null;
+        if (selection && typeof document !== 'undefined') {
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+    }, [textEditorPosition, selectedTextValue]);
 
     const refreshInspector = useCallback(async () => {
         const activeScore = scoreRef.current ?? score;
@@ -10751,11 +10815,16 @@ ${partsBodyXml}
         await refreshInspector();
     };
     const handleSetFretDiagram = async (diagram: FretDiagramData) => {
+        // Keep the fret diagram itself selected across the edit. The default
+        // post-mutation WASM re-select hit-tests the old element point, but editing
+        // the diagram changes its bounding box, so that point can land on a
+        // different element and silently deselect the diagram — which then makes
+        // getSelectedFretDiagram() return nothing and breaks re-adding a fingering.
         await performMutation('edit fretboard diagram', async () => {
             const fn = requireMutation('setSelectedFretDiagram');
             if (!fn) return false;
             return fn(diagram);
-        });
+        }, { skipWasmReselect: true });
         await refreshInspector();
     };
     const handleUndo = () => performMutation('undo', score?.undo ? async () => {
@@ -11335,10 +11404,21 @@ ${partsBodyXml}
     });
 
     const handleApplyFloatingPaletteItem = (item: ScorePaletteItem) => {
-        if (item.elementType === 0) return handleSetClef(item.subtype);
-        if (item.elementType === 1) return handleAddDynamic(item.subtype);
-        const articulation = articulationOptions[item.subtype];
-        if (articulation) return handleAddArticulation(articulation.symbol);
+        switch (item.kind) {
+            case 'clef': return handleSetClef(item.subtype);
+            case 'dynamic': return handleAddDynamic(item.subtype);
+            case 'articulation': {
+                const articulation = articulationOptions[item.subtype];
+                if (articulation) handleAddArticulation(articulation.symbol);
+                return;
+            }
+            case 'ottava': return handleAddOttava(item.subtype);
+            case 'fermata': return handleAddFermata(item.subtype);
+            case 'breath': return handleAddBreath(item.subtype);
+            case 'tremolo': return handleAddTremolo(item.subtype);
+            case 'marker': return handleAddMarker(item.subtype);
+            case 'jump': return handleAddJump(item.subtype);
+        }
     };
 
     const handleAddSlur = () => performMutation('add slur', async () => {
@@ -12854,6 +12934,12 @@ ${partsBodyXml}
 
     const handleZoomOut = () => {
         setZoom(prev => clampZoom(prev - 0.1));
+    };
+
+    // Set an explicit zoom level. This persists per score via the zoom effect above,
+    // so the chosen level becomes the score's remembered default.
+    const handleSetZoom = (value: number) => {
+        setZoom(clampZoom(value));
     };
 
     const parsePxValue = (value: string | null) => {
@@ -14522,8 +14608,8 @@ ${partsBodyXml}
     const xmlApplyEnabled = !xmlControlsDisabled && xmlDirty;
     const xmlReloadEnabled = !xmlControlsDisabled && scoreDirtySinceXml;
     const xmlApplyDisabled = !xmlApplyEnabled;
-    const xmlEditorHeight = xmlSidebarMode === 'full' ? '55vh' : '45vh';
-    const xmlEditorMaxHeight = xmlSidebarMode === 'full' ? '65vh' : '55vh';
+    const xmlEditorHeight = '45vh';
+    const xmlEditorMaxHeight = '55vh';
 
     const MIN_SIDEBAR_WIDTH = 280; // minimum resizable width
     const MAX_SIDEBAR_WIDTH = 800; // maximum resizable width
@@ -14634,6 +14720,7 @@ ${partsBodyXml}
 	                zoomLevel={zoom}
                 onFitWidth={handleFitWidth}
                 onFitHeight={handleFitHeight}
+                onSetZoom={handleSetZoom}
                 onDeleteSelection={handleDeleteSelection}
                 onSelectAll={handleSelectAll}
                 onUndo={handleUndo}
@@ -14730,7 +14817,8 @@ ${partsBodyXml}
                 onImplodeSelection={() => { void runRangeTool('implode selection', 'implodeSelection'); }}
                 onRegroupSelection={() => { void runRangeTool('regroup rhythms', 'regroupSelection'); }}
                 onResequenceRehearsalMarks={() => { void runRangeTool('resequence rehearsal marks', 'resequenceRehearsalMarks'); }}
-                onTogglePalettes={() => setPalettesOpen(open => !open)}
+                onTogglePalettes={() => { setPaletteCategory(null); setPalettesOpen(open => !open); }}
+                onOpenPalette={openPaletteCategory}
                 palettesOpen={palettesOpen}
                 selectionFilterMask={selectionFilterMask}
                 onSetSelectionFilterBit={handleSetSelectionFilterBit}
@@ -14761,12 +14849,13 @@ ${partsBodyXml}
                     dragEnabled={Boolean(interactiveMutationEnabled && score?.applyDropAtPoint)}
                     onApply={handleApplyFloatingPaletteItem}
                     onClose={() => setPalettesOpen(false)}
+                    category={paletteCategory}
                 />
             )}
 
             <div className="flex flex-1 min-h-0">
                 <LeftSidebar
-                    hidden={isEmbedMode || xmlSidebarMode === 'full'}
+                    hidden={isEmbedMode}
                     collapsed={checkpointsCollapsed}
                     onToggleCollapsed={() => setCheckpointsCollapsed((prev) => !prev)}
                     onRefresh={() => {
@@ -14841,7 +14930,7 @@ ${partsBodyXml}
                             changeReviewGutterRef.current.scrollTop = event.currentTarget.scrollTop;
                         }
                     }}
-                    className={`relative z-0 flex-1 overflow-auto bg-gray-50 p-8 ${xmlSidebarMode === 'full' ? 'hidden' : ''}`}
+                    className="relative z-0 flex-1 overflow-auto bg-gray-50 p-8"
                 >
                 {loading && (
                     <div className="flex items-center justify-center h-full">
@@ -15122,6 +15211,10 @@ ${partsBodyXml}
                                 top: textEditorRect.y,
                                 minWidth: Math.max(160, textEditorRect.w),
                                 minHeight: Math.max(30, textEditorRect.h),
+                                // The editor lives inside the zoomed score canvas; counter-scale so
+                                // text editing is always shown at 100% regardless of the score zoom.
+                                transform: `scale(${1 / zoom})`,
+                                transformOrigin: 'top left',
                             }}
                             onClick={event => event.stopPropagation()}
                             onMouseDown={event => event.stopPropagation()}
@@ -15134,7 +15227,10 @@ ${partsBodyXml}
                                 aria-label="Edit score text"
                                 contentEditable
                                 suppressContentEditableWarning
-                                onInput={event => handleSelectedTextChange(event.currentTarget.textContent ?? '')}
+                                onInput={event => {
+                                    inlineTextEditedRef.current = true;
+                                    handleSelectedTextChange(event.currentTarget.textContent ?? '');
+                                }}
                                 onKeyDown={event => {
                                     if (event.key === 'Escape') {
                                         event.preventDefault();
@@ -15145,10 +15241,8 @@ ${partsBodyXml}
                                         closeTextEditor();
                                     }
                                 }}
-                                className="min-h-7 min-w-[150px] px-1 py-0.5 text-sm outline-none"
-                            >
-                                {selectedTextValue}
-                            </div>
+                                className="min-h-7 min-w-[150px] px-1 py-0.5 text-base text-slate-900 outline-none"
+                            />
                             <div className="flex justify-end gap-1 border-t border-slate-200 pt-1">
                                 <button
                                     type="button"
@@ -15299,7 +15393,7 @@ ${partsBodyXml}
                 </aside>
             )}
 
-            {!isEmbedMode && xmlSidebarMode !== 'full' && (
+            {!isEmbedMode && (
                 <InspectorPanel
                     data={inspectorData}
                     loading={inspectorLoading}
@@ -15307,16 +15401,14 @@ ${partsBodyXml}
                     onChange={(property, value) => { void handleSetInspectorProperty(property, value); }}
                     fretDiagram={fretDiagramData}
                     onFretDiagramChange={(diagram) => { void handleSetFretDiagram(diagram); }}
+                    collapsed={!inspectorOpen}
+                    onToggleCollapsed={() => setInspectorOpen(open => !open)}
                 />
             )}
 
             <aside
                 className={`shrink-0 border-l bg-white text-sm ${isEmbedMode ? 'hidden' : 'flex'} ${
-                    xmlSidebarMode === 'closed'
-                        ? 'w-12'
-                        : xmlSidebarMode === 'full'
-                            ? 'flex-1 w-full max-w-full'
-                            : ''
+                    xmlSidebarMode === 'closed' ? 'w-12' : ''
                 }`}
                 style={xmlSidebarMode === 'open' ? { width: `${xmlSidebarWidth}px` } : undefined}
                 data-testid="xml-sidebar"
@@ -15344,7 +15436,7 @@ ${partsBodyXml}
                 {/* Sidebar Content */}
                 <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
                     <div className="sticky top-0 z-10 bg-white">
-                    <div className={xmlSidebarMode === 'closed' ? 'flex items-center justify-center p-2' : 'flex items-center justify-between p-4'}>
+                    <div className={xmlSidebarMode === 'closed' ? 'flex flex-col items-center gap-2 p-2' : 'flex items-center justify-between p-4'}>
                         {xmlSidebarMode !== 'closed' && (
                             <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                                 MusicXML
@@ -15355,20 +15447,18 @@ ${partsBodyXml}
                             data-testid="btn-xml-toggle"
                             aria-expanded={xmlSidebarMode !== 'closed'}
                             aria-controls="xml-sidebar-content"
-                            aria-label={
-                                xmlSidebarMode === 'closed'
-                                    ? 'Open MusicXML sidebar'
-                                    : xmlSidebarMode === 'open'
-                                        ? 'Expand MusicXML sidebar'
-                                        : 'Close MusicXML sidebar'
-                            }
+                            aria-label={xmlSidebarMode === 'closed' ? 'Open MusicXML sidebar' : 'Close MusicXML sidebar'}
+                            title={xmlSidebarMode === 'closed' ? 'Open MusicXML sidebar' : 'Close MusicXML sidebar'}
                             onClick={() => {
-                                setXmlSidebarMode((prev) => (prev === 'closed' ? 'open' : prev === 'open' ? 'full' : 'closed'));
+                                setXmlSidebarMode((prev) => (prev === 'closed' ? 'open' : 'closed'));
                             }}
-                            className="text-xs font-medium text-gray-600 hover:text-blue-600"
+                            className="rounded p-1 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                         >
-                            {xmlSidebarMode === 'closed' ? 'Open Sidebar <<' : xmlSidebarMode === 'open' ? 'Full' : 'Close'}
+                            {xmlSidebarMode === 'closed' ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
                         </button>
+                        {xmlSidebarMode === 'closed' && (
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600" style={{ writingMode: 'vertical-rl' }}>MusicXML</span>
+                        )}
                     </div>
                     {xmlSidebarMode !== 'closed' && (
                         <div className="px-4 pb-3">

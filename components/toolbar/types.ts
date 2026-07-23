@@ -23,6 +23,7 @@ export interface ToolbarSectionProps {
     onZoomOut: () => void;
     onFitWidth?: () => void;
     onFitHeight?: () => void;
+    onSetZoom?: (zoom: number) => void;
     zoomLevel: number;
     onDeleteSelection?: () => void;
     onUndo?: () => void;
@@ -140,6 +141,7 @@ export interface ToolbarSectionProps {
     onRegroupSelection?: () => void;
     onResequenceRehearsalMarks?: () => void;
     onTogglePalettes?: () => void;
+    onOpenPalette?: (category: string) => void;
     palettesOpen?: boolean;
     selectionFilterMask?: number;
     onSetSelectionFilterBit?: (filterBit: number, enabled: boolean) => void;

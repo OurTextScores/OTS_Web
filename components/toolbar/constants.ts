@@ -169,12 +169,12 @@ export const voltaOptions = [
 ];
 
 export const accidentalOptions = [
-    { label: '♯', value: 3 },  // AccidentalType::SHARP
-    { label: '♭', value: 1 },  // AccidentalType::FLAT
-    { label: '♮', value: 2 },  // AccidentalType::NATURAL
-    { label: 'x', value: 4 },  // AccidentalType::SHARP2
-    { label: '♭♭', value: 5 }, // AccidentalType::FLAT2
-    { label: 'Clear', value: 0 }, // AccidentalType::NONE
+    { name: 'Sharp', symbol: '', value: 3 },       // AccidentalType::SHARP (SMuFL accidentalSharp)
+    { name: 'Flat', symbol: '', value: 1 },        // AccidentalType::FLAT (accidentalFlat)
+    { name: 'Natural', symbol: '', value: 2 },     // AccidentalType::NATURAL (accidentalNatural)
+    { name: 'Double sharp', symbol: '', value: 4 },// AccidentalType::SHARP2 (accidentalDoubleSharp)
+    { name: 'Double flat', symbol: '', value: 5 }, // AccidentalType::FLAT2 (accidentalDoubleFlat)
+    { name: 'Clear', symbol: '', value: 0 },             // AccidentalType::NONE
 ];
 
 export const shortcutEntries = [

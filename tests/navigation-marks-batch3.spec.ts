@@ -25,7 +25,7 @@ const loadFourMeasures = async (page: Page) => {
   await expect(page.locator('svg .Note')).toHaveCount(4, { timeout: 20_000 });
 };
 
-const openNavigation = (page: Page) => page.getByTestId('dropdown-repeats').click();
+const openNavigation = (page: Page) => page.getByTestId('dropdown-navigation').click();
 
 const selectWholeNote = async (page: Page, index: number) => {
   const note = page.locator('svg .Note').nth(index);
@@ -47,12 +47,18 @@ test('adds semantic double-segno navigation and expands the repeat playback list
 
   await selectWholeNote(page, 0);
   await openNavigation(page);
-  await page.getByTestId('btn-marker-1').click();
+  // "Serpent segno" (varsegno) now lives in the Markers palette rather than the dropdown.
+  await page.getByTestId('btn-open-markers-palette').click();
+  await page.getByTestId('palette-item-marker-1').click();
+  await page.keyboard.press('Escape');
   await expect.poll(async () => /<Marker>[\s\S]*?<label>varsegno<\/label>/.test(await readMscx(page)), { timeout: 20_000 }).toBe(true);
 
   await selectWholeNote(page, 3);
   await openNavigation(page);
-  await page.getByTestId('btn-jump-8').click();
+  // "Dal Segno Segno" (DSS) now lives in the Jumps palette.
+  await page.getByTestId('btn-open-jumps-palette').click();
+  await page.getByTestId('palette-item-jump-8').click();
+  await page.keyboard.press('Escape');
   await expect.poll(async () => {
     const xml = await readMscx(page);
     return /<Jump>[\s\S]*?<jumpTo>varsegno<\/jumpTo>[\s\S]*?<playUntil>end<\/playUntil>[\s\S]*?<continueAt(?:\/>|><\/continueAt>)/.test(xml);
