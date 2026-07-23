@@ -18,6 +18,7 @@ import {
 } from '../lib/webmscore-loader';
 import {
     deleteCheckpoint,
+    renameCheckpoint,
     getCheckpoint,
     isIndexedDbAvailable,
     listCheckpoints,
@@ -8735,6 +8736,30 @@ ${partsBodyXml}
         }
     };
 
+    const handleRenameCheckpoint = async (checkpoint: CheckpointSummary) => {
+        if (!isIndexedDbAvailable()) {
+            alert('IndexedDB is not available in this browser.');
+            return;
+        }
+        if (typeof window === 'undefined') {
+            return;
+        }
+        const nextTitle = window.prompt('Rename checkpoint', checkpoint.title)?.trim();
+        if (!nextTitle || nextTitle === checkpoint.title) {
+            return;
+        }
+        setCheckpointBusy(true);
+        try {
+            await renameCheckpoint(checkpoint.id, nextTitle);
+            await loadCheckpointList();
+        } catch (err) {
+            console.error('Failed to rename checkpoint', err);
+            alert('Failed to rename checkpoint. See console for details.');
+        } finally {
+            setCheckpointBusy(false);
+        }
+    };
+
     const requestAiText = async (payload: {
         provider: AiProvider;
         apiKey: string;
@@ -14939,6 +14964,7 @@ ${partsBodyXml}
                     checkpointCompareDisabled={checkpointCompareDisabled}
                     onRestoreCheckpoint={(checkpoint) => void handleRestoreCheckpoint(checkpoint)}
                     onCompareCheckpoint={(checkpoint) => void handleCompareCheckpoint(checkpoint)}
+                    onRenameCheckpoint={(checkpoint) => void handleRenameCheckpoint(checkpoint)}
                     onDeleteCheckpoint={(checkpoint) => void handleDeleteCheckpoint(checkpoint)}
                     scoreDirtySinceCheckpoint={scoreDirtySinceCheckpoint}
                     scoreSummariesError={scoreSummariesError}
@@ -15657,21 +15683,6 @@ ${partsBodyXml}
                                         MMA
                                     </button>
                                 </div>
-                                <label className="flex items-center gap-2">
-                                    <span className="text-[11px] uppercase tracking-wide text-gray-500">Theme</span>
-                                    <select
-                                        value={codeEditorTheme}
-                                        onChange={(event) => setCodeEditorTheme(event.target.value as CodeEditorThemeMode)}
-                                        className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700"
-                                        data-testid="select-code-editor-theme"
-                                    >
-                                        {CODE_EDITOR_THEME_OPTIONS.map((option) => (
-                                            <option key={option.value} value={option.value}>
-                                                {option.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
                             </div>
                         </div>
                     )}

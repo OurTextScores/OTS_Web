@@ -67,7 +67,7 @@ export function InspectorPanel({ data, loading = false, disabled = false, onChan
 
     return (
         <aside data-testid="inspector-panel" className="w-72 shrink-0 overflow-y-auto border-l border-slate-200 bg-white">
-            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-3">
+            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white p-4">
                 <div className="flex items-center justify-between">
                     <div className="text-xs font-semibold uppercase tracking-wide text-slate-700">Inspector</div>
                     <button

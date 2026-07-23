@@ -151,6 +151,28 @@ export const deleteCheckpoint = async (id: number): Promise<void> => {
     });
 };
 
+export const renameCheckpoint = async (id: number, title: string): Promise<void> => {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const getRequest = store.get(id);
+        getRequest.onsuccess = () => {
+            const record = getRequest.result as CheckpointRecord | undefined;
+            if (!record) {
+                reject(new Error('Checkpoint not found.'));
+                return;
+            }
+            const putRequest = store.put({ ...record, title });
+            putRequest.onerror = () => reject(putRequest.error ?? new Error('Failed to rename checkpoint.'));
+        };
+        getRequest.onerror = () => reject(getRequest.error ?? new Error('Failed to load checkpoint.'));
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => db.close();
+        tx.onabort = () => db.close();
+    });
+};
+
 export const listScoreSummaries = async (): Promise<ScoreSummary[]> => {
     const db = await openDb();
     return new Promise((resolve, reject) => {

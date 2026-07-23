@@ -62,6 +62,7 @@ type LeftSidebarProps = {
     checkpointCompareDisabled: boolean;
     onRestoreCheckpoint: (checkpoint: CheckpointSummary) => void;
     onCompareCheckpoint: (checkpoint: CheckpointSummary) => void;
+    onRenameCheckpoint: (checkpoint: CheckpointSummary) => void;
     onDeleteCheckpoint: (checkpoint: CheckpointSummary) => void;
     scoreDirtySinceCheckpoint: boolean;
     scoreSummariesError: string | null;
@@ -376,6 +377,7 @@ function CheckpointsTabPanel(props: Omit<LeftSidebarProps, 'hidden' | 'collapsed
         checkpointCompareDisabled,
         onRestoreCheckpoint,
         onCompareCheckpoint,
+        onRenameCheckpoint,
         onDeleteCheckpoint,
         scoreDirtySinceCheckpoint,
         formatTimestamp,
@@ -467,6 +469,15 @@ function CheckpointsTabPanel(props: Omit<LeftSidebarProps, 'hidden' | 'collapsed
                                 className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 Compare
+                            </button>
+                            <button
+                                type="button"
+                                data-testid={`btn-checkpoint-rename-${checkpoint.id}`}
+                                onClick={() => onRenameCheckpoint(checkpoint)}
+                                disabled={checkpointControlsDisabled}
+                                className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Rename
                             </button>
                             <button
                                 type="button"
