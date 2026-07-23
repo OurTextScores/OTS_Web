@@ -42,7 +42,6 @@ const dynamicSymbol = (label: string) => Array.from(label)
 
 const commonDynamicValues = new Set([4, 5, 6, 7, 8, 9, 10, 11, 15, 16, 18]);
 const commonDynamics = dynamicOptions.filter(option => commonDynamicValues.has(option.value));
-const otherDynamics = dynamicOptions.filter(option => !commonDynamicValues.has(option.value));
 const articulationGlyphs: Record<string, string> = {
     articStaccatoAbove: '\uE4A2',
     articTenutoAbove: '\uE4A4',
@@ -162,8 +161,7 @@ export const ExpressionSection: React.FC<ToolbarSectionProps> = ({
                 <DropdownMenuContent data-testid="markings-menu" className={styles.markingsMenu}>
                     <DropdownMenuLabel>Common</DropdownMenuLabel>
                     {commonDynamics.map(opt => renderDynamicOption(opt, mutationDisabled, selectionActive, onAddDynamic, paletteDropEnabled))}
-                    <DropdownMenuLabel>Other</DropdownMenuLabel>
-                    {otherDynamics.map(opt => renderDynamicOption(opt, mutationDisabled, selectionActive, onAddDynamic, paletteDropEnabled))}
+                    <PaletteLink category="Dynamics" label="Open Dynamics Palette…" testId="btn-open-dynamics-palette" onOpenPalette={onOpenPalette} />
                 </DropdownMenuContent>
             </DropdownMenu>
 

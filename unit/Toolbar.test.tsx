@@ -326,16 +326,11 @@ describe('Toolbar', () => {
     await user.click(screen.getByRole('button', { name: 'Dynamics' }));
     expect(screen.getByTestId('markings-menu').className).toContain('markingsMenu');
     expect(screen.getByText('Common')).toBeInTheDocument();
-    expect(screen.getByText('Other')).toBeInTheDocument();
+    expect(screen.getByTestId('btn-open-dynamics-palette')).toBeInTheDocument();
     const pianoSymbol = screen.getByTestId('dynamic-symbol-6');
     expect(pianoSymbol).toHaveTextContent('\uE520');
     expect(screen.getByTestId('btn-dynamic-6')).toHaveTextContent(/^\uE520$/);
     expect(screen.getByTestId('btn-dynamic-18')).toHaveTextContent(/^\uE524\uE522\uE525$/);
-    const otherHeading = screen.getByText('Other');
-    for (const value of [15, 16, 18]) {
-      expect(screen.getByTestId(`btn-dynamic-${value}`).compareDocumentPosition(otherHeading))
-        .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    }
     fireEvent.dragStart(screen.getByTestId('btn-dynamic-18'), {
       dataTransfer: { effectAllowed: 'none', setData },
     });
@@ -536,6 +531,7 @@ describe('Toolbar', () => {
     const user = userEvent.setup();
     const onSetNoteheadGroup = vi.fn();
     const onSetBeamMode = vi.fn();
+    const onOpenPalette = vi.fn();
     const onSetSelectionFilterBit = vi.fn();
     const onAddMeasureRepeat = vi.fn();
     const onSetMultiMeasureRests = vi.fn();
@@ -550,6 +546,7 @@ describe('Toolbar', () => {
         selectionActive
         selectionFilterMask={0xFFFFFF}
         onSetNoteheadGroup={onSetNoteheadGroup}
+        onOpenPalette={onOpenPalette}
         onSetBeamMode={onSetBeamMode}
         onSetSelectionFilterBit={onSetSelectionFilterBit}
         onAddMeasureRepeat={onAddMeasureRepeat}
@@ -558,10 +555,8 @@ describe('Toolbar', () => {
       />,
     );
 
-    await user.click(screen.getByTestId('dropdown-noteheads'));
-    expect(screen.getByTestId('notehead-symbol-9')).toHaveTextContent('\uE0DB');
-    await user.click(screen.getByTestId('btn-notehead-9'));
-    expect(onSetNoteheadGroup).toHaveBeenCalledWith(9);
+    await user.click(screen.getByTestId('btn-open-noteheads-palette'));
+    expect(onOpenPalette).toHaveBeenCalledWith('Noteheads');
 
     await user.click(screen.getByTestId('dropdown-beams'));
     await user.click(screen.getByTestId('btn-beam-3'));

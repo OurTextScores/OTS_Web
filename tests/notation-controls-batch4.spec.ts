@@ -75,8 +75,10 @@ test('applies typed notehead and beam properties with undo and redo', async ({ p
   await loadBatch4Score(page);
 
   await page.locator('svg .Note').nth(0).click();
-  await page.getByTestId('dropdown-noteheads').click();
-  await page.getByTestId('btn-notehead-1').click();
+  // Noteheads now live entirely in the palette.
+  await page.getByTestId('btn-open-noteheads-palette').click();
+  await page.getByTestId('palette-item-notehead-1').click();
+  await page.keyboard.press('Escape');
   await expect.poll(async () => (await readMscx(page)).includes('<head>cross</head>'), { timeout: 20_000 }).toBe(true);
 
   await page.locator('svg .Note').nth(1).click();

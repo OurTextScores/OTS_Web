@@ -57,14 +57,6 @@ const tremoloOptions = [
     { label: 'Two-note 64th tremolo', value: 8, symbol: '\uE223', common: false },
 ] as const;
 
-const noteheadOptions = [
-    { label: 'Normal', value: 0, symbol: '\uE0A4' },
-    { label: 'Cross', value: 1, symbol: '\uE0A9' },
-    { label: 'Diamond', value: 9, symbol: '\uE0DB' },
-    { label: 'Triangle', value: 5, symbol: '\uE0BE' },
-    { label: 'Slash', value: 15, symbol: '\uE101' },
-] as const;
-
 const beamOptions = [
     { label: 'Auto beam', value: 0 },
     { label: 'Begin beam / break left', value: 2 },
@@ -180,22 +172,18 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
                 </DropdownMenuContent>
             </DropdownMenu>
 
-            <DropdownMenu modal={false}>
-                <DropdownMenuTrigger asChild>
-                    <Button data-testid="dropdown-noteheads" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive} className="shadow-sm">
-                        <span className={styles.noteheadSymbol} aria-hidden="true">{'\uE0A4'}</span>
-                        Noteheads
-                    </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                    {noteheadOptions.map(option => (
-                        <DropdownMenuItem key={option.value} data-testid={`btn-notehead-${option.value}`} className="min-h-10 gap-3" disabled={!onSetNoteheadGroup} onSelect={() => onSetNoteheadGroup?.(option.value)}>
-                            <span data-testid={`notehead-symbol-${option.value}`} className={styles.noteheadSymbol} aria-hidden="true">{option.symbol}</span>
-                            <span>{option.label}</span>
-                        </DropdownMenuItem>
-                    ))}
-                </DropdownMenuContent>
-            </DropdownMenu>
+            <Button
+                data-testid="btn-open-noteheads-palette"
+                variant="outline"
+                size="sm"
+                disabled={mutationDisabled || !selectionActive || !onOpenPalette}
+                onClick={() => onOpenPalette?.('Noteheads')}
+                className="shadow-sm"
+                title="Open the Noteheads palette"
+            >
+                <span className={styles.noteheadSymbol} aria-hidden="true">{'\uE0A4'}</span>
+                Noteheads
+            </Button>
 
             <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
