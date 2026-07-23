@@ -1180,6 +1180,9 @@ export default function ScoreEditor() {
     const inlineTextEditedRef = useRef(false);
     const [inspectorData, setInspectorData] = useState<SelectedElementProperties | null>(null);
     const [inspectorOpen, setInspectorOpen] = useState(false);
+    // Master toggle to hide every side panel (History, Inspector, MusicXML),
+    // including their collapsed rails, to maximise the score area.
+    const [panelsVisible, setPanelsVisible] = useState(true);
     const [fretDiagramData, setFretDiagramData] = useState<FretDiagramData | null>(null);
     const [inspectorLoading, setInspectorLoading] = useState(false);
     const [selectedLayoutBreakSubtype, setSelectedLayoutBreakSubtype] = useState<'line'|'page'|null>(null);
@@ -14820,6 +14823,8 @@ ${partsBodyXml}
                 onTogglePalettes={() => { setPaletteCategory(null); setPalettesOpen(open => !open); }}
                 onOpenPalette={openPaletteCategory}
                 palettesOpen={palettesOpen}
+                onTogglePanels={() => setPanelsVisible(visible => !visible)}
+                panelsVisible={panelsVisible}
                 selectionFilterMask={selectionFilterMask}
                 onSetSelectionFilterBit={handleSetSelectionFilterBit}
                 onAddMeasureRepeat={handleAddMeasureRepeat}
@@ -14855,7 +14860,7 @@ ${partsBodyXml}
 
             <div className="flex flex-1 min-h-0">
                 <LeftSidebar
-                    hidden={isEmbedMode}
+                    hidden={isEmbedMode || !panelsVisible}
                     collapsed={checkpointsCollapsed}
                     onToggleCollapsed={() => setCheckpointsCollapsed((prev) => !prev)}
                     onRefresh={() => {
@@ -15393,7 +15398,7 @@ ${partsBodyXml}
                 </aside>
             )}
 
-            {!isEmbedMode && (
+            {!isEmbedMode && panelsVisible && (
                 <InspectorPanel
                     data={inspectorData}
                     loading={inspectorLoading}
@@ -15407,7 +15412,7 @@ ${partsBodyXml}
             )}
 
             <aside
-                className={`shrink-0 border-l bg-white text-sm ${isEmbedMode ? 'hidden' : 'flex'} ${
+                className={`shrink-0 border-l bg-white text-sm ${isEmbedMode || !panelsVisible ? 'hidden' : 'flex'} ${
                     xmlSidebarMode === 'closed' ? 'w-12' : ''
                 }`}
                 style={xmlSidebarMode === 'open' ? { width: `${xmlSidebarWidth}px` } : undefined}

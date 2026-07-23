@@ -143,6 +143,8 @@ export interface ToolbarSectionProps {
     onTogglePalettes?: () => void;
     onOpenPalette?: (category: string) => void;
     palettesOpen?: boolean;
+    onTogglePanels?: () => void;
+    panelsVisible?: boolean;
     selectionFilterMask?: number;
     onSetSelectionFilterBit?: (filterBit: number, enabled: boolean) => void;
     onAddMeasureRepeat?: (numMeasures: number) => void;

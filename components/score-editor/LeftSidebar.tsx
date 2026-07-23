@@ -1,5 +1,5 @@
 import React from 'react';
-import { PanelLeftOpen, PanelLeftClose } from 'lucide-react';
+import { PanelRightOpen, PanelRightClose } from 'lucide-react';
 import type { CheckpointSummary, ScoreSummary } from '../../lib/checkpoints';
 import type { SourceHistoryBranch, SourceHistoryRevision } from '../../lib/ourtextscores-api-client';
 
@@ -576,7 +576,8 @@ export function LeftSidebar(props: LeftSidebarProps) {
 
     return (
         <aside
-            className={`shrink-0 border-r bg-white text-sm ${collapsed ? 'w-12' : 'w-72 overflow-y-auto'}`}
+            style={{ order: 3 }}
+            className={`shrink-0 border-l bg-white text-sm ${collapsed ? 'w-12' : 'w-72 overflow-y-auto'}`}
             data-testid="checkpoint-sidebar"
         >
             <div className={collapsed ? 'flex flex-col items-center gap-2 p-2' : 'flex items-center justify-between p-4'}>
@@ -607,7 +608,7 @@ export function LeftSidebar(props: LeftSidebarProps) {
                         onClick={onToggleCollapsed}
                         className="rounded p-1 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                     >
-                        {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+                        {collapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
                     </button>
                     {collapsed && (
                         <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600" style={{ writingMode: 'vertical-rl' }}>History</span>

@@ -2,7 +2,7 @@ import React from 'react';
 import { Button } from '../../ui/Button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../../ui/DropdownMenu';
 import { ToolbarSectionProps } from '../types';
-import { LayoutGrid, MoveHorizontal, MoveVertical, ZoomIn, ZoomOut } from 'lucide-react';
+import { LayoutGrid, MoveHorizontal, MoveVertical, ZoomIn, ZoomOut, PanelRight } from 'lucide-react';
 
 const zoomPresets = [0.25, 0.5, 0.75, 1];
 
@@ -15,6 +15,8 @@ export const ViewSection: React.FC<ToolbarSectionProps> = ({
     zoomLevel,
     onTogglePalettes,
     palettesOpen,
+    onTogglePanels,
+    panelsVisible = true,
 }) => {
     return (
         <>
@@ -105,6 +107,19 @@ export const ViewSection: React.FC<ToolbarSectionProps> = ({
                 aria-pressed={Boolean(palettesOpen)}
             >
                 <LayoutGrid size={14} />
+            </Button>
+            <Button
+                data-testid="btn-toggle-panels"
+                onClick={onTogglePanels}
+                disabled={!onTogglePanels}
+                variant={panelsVisible ? 'outline' : 'primary'}
+                size="xs"
+                className="shadow-sm"
+                title={panelsVisible ? 'Hide side panels' : 'Show side panels'}
+                aria-label={panelsVisible ? 'Hide side panels' : 'Show side panels'}
+                aria-pressed={!panelsVisible}
+            >
+                <PanelRight size={14} />
             </Button>
         </>
     );
