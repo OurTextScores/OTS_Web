@@ -1407,11 +1407,13 @@ export default function ScoreEditor() {
     const [scoreDirtySinceCheckpoint, setScoreDirtySinceCheckpoint] = useState(false);
     const [scoreDirtySinceXml, setScoreDirtySinceXml] = useState(false);
     const [xmlSidebarMode, setXmlSidebarMode] = useState<'closed' | 'open'>('closed');
+    // The MusicXML editor is its own right-side sidebar, separate from the AI tools.
+    const [musicXmlOpen, setMusicXmlOpen] = useState(false);
     const [xmlSidebarWidth, setXmlSidebarWidth] = useState<number>(384); // default 'open' width (w-96)
     const [isResizingSidebar, setIsResizingSidebar] = useState(false);
     const sidebarResizeStartXRef = useRef<number>(0);
     const sidebarResizeStartWidthRef = useRef<number>(0);
-    const [xmlSidebarTab, setXmlSidebarTab] = useState<'xml' | 'assistant' | 'notagen' | 'transcoda' | 'harmony' | 'functional' | 'mma'>('xml');
+    const [xmlSidebarTab, setXmlSidebarTab] = useState<'xml' | 'assistant' | 'notagen' | 'transcoda' | 'harmony' | 'functional' | 'mma'>('assistant');
     const [codeEditorTheme, setCodeEditorTheme] = useState<CodeEditorThemeMode>('light');
     const [xmlText, setXmlText] = useState('');
     const [xmlDirty, setXmlDirty] = useState(false);
@@ -15411,6 +15413,97 @@ ${partsBodyXml}
                 />
             )}
 
+            {!isEmbedMode && panelsVisible && (
+                <aside
+                    className={`flex shrink-0 border-l bg-white text-sm ${musicXmlOpen ? '' : 'w-12'}`}
+                    style={musicXmlOpen ? { width: 384 } : undefined}
+                    data-testid="musicxml-sidebar"
+                >
+                    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                        <div className={musicXmlOpen ? 'flex items-center justify-between p-4' : 'flex flex-col items-center gap-2 p-2'}>
+                            {musicXmlOpen && (
+                                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">MusicXML</span>
+                            )}
+                            <button
+                                type="button"
+                                data-testid="btn-musicxml-toggle"
+                                aria-expanded={musicXmlOpen}
+                                aria-label={musicXmlOpen ? 'Close MusicXML sidebar' : 'Open MusicXML sidebar'}
+                                title={musicXmlOpen ? 'Close MusicXML sidebar' : 'Open MusicXML sidebar'}
+                                onClick={() => setMusicXmlOpen(open => !open)}
+                                className="rounded p-1 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                            >
+                                {musicXmlOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+                            </button>
+                            {!musicXmlOpen && (
+                                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600" style={{ writingMode: 'vertical-rl' }}>MusicXML</span>
+                            )}
+                        </div>
+                        {musicXmlOpen && (
+                            <div className="flex flex-1 flex-col overflow-y-auto px-4 pb-4">
+                                <div className="flex items-center justify-end pb-2">
+                                    <label className="flex items-center gap-2">
+                                        <span className="text-[11px] uppercase tracking-wide text-gray-500">Theme</span>
+                                        <select
+                                            value={codeEditorTheme}
+                                            onChange={(event) => setCodeEditorTheme(event.target.value as CodeEditorThemeMode)}
+                                            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700"
+                                            data-testid="select-musicxml-theme"
+                                        >
+                                            {CODE_EDITOR_THEME_OPTIONS.map((option) => (
+                                                <option key={option.value} value={option.value}>{option.label}</option>
+                                            ))}
+                                        </select>
+                                    </label>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        data-testid="btn-xml-apply"
+                                        onClick={handleApplyXmlEdits}
+                                        disabled={xmlApplyDisabled}
+                                        title="Applying edits will auto-checkpoint if the score has unsaved changes."
+                                        className={`flex-1 rounded border px-3 py-1 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
+                                            xmlApplyEnabled ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700' : 'border-gray-300 bg-white text-gray-700'
+                                        }`}
+                                    >
+                                        Apply edits
+                                    </button>
+                                    <button
+                                        type="button"
+                                        data-testid="btn-xml-reload"
+                                        onClick={handleRefreshXml}
+                                        disabled={!xmlReloadEnabled}
+                                        title={xmlReloadEnabled ? 'The score has changed, reload to update XML. Any XML changes will be lost on update.' : undefined}
+                                        className={`flex-1 rounded border px-3 py-1 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
+                                            xmlReloadEnabled ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700' : 'border-gray-300 bg-white text-gray-700'
+                                        }`}
+                                    >
+                                        Reload
+                                    </button>
+                                </div>
+                                <div className="mt-2">
+                                    <CodeMirrorEditor
+                                        testId="xml-editor"
+                                        value={xmlText}
+                                        onChange={(nextValue) => {
+                                            setXmlText(nextValue);
+                                            setXmlDirty(true);
+                                        }}
+                                        readOnly={xmlControlsDisabled}
+                                        placeholderText={score ? 'MusicXML will appear here.' : 'Load a score to view MusicXML.'}
+                                        language="xml"
+                                        height={xmlEditorHeight}
+                                        maxHeight={xmlEditorMaxHeight}
+                                        themeMode={codeEditorTheme}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </aside>
+            )}
+
             <aside
                 className={`shrink-0 border-l bg-white text-sm ${isEmbedMode || !panelsVisible ? 'hidden' : 'flex'} ${
                     xmlSidebarMode === 'closed' ? 'w-12' : ''
@@ -15444,7 +15537,7 @@ ${partsBodyXml}
                     <div className={xmlSidebarMode === 'closed' ? 'flex flex-col items-center gap-2 p-2' : 'flex items-center justify-between p-4'}>
                         {xmlSidebarMode !== 'closed' && (
                             <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                MusicXML
+                                AI Tools
                             </span>
                         )}
                         <button
@@ -15452,8 +15545,8 @@ ${partsBodyXml}
                             data-testid="btn-xml-toggle"
                             aria-expanded={xmlSidebarMode !== 'closed'}
                             aria-controls="xml-sidebar-content"
-                            aria-label={xmlSidebarMode === 'closed' ? 'Open MusicXML sidebar' : 'Close MusicXML sidebar'}
-                            title={xmlSidebarMode === 'closed' ? 'Open MusicXML sidebar' : 'Close MusicXML sidebar'}
+                            aria-label={xmlSidebarMode === 'closed' ? 'Open AI Tools sidebar' : 'Close AI Tools sidebar'}
+                            title={xmlSidebarMode === 'closed' ? 'Open AI Tools sidebar' : 'Close AI Tools sidebar'}
                             onClick={() => {
                                 setXmlSidebarMode((prev) => (prev === 'closed' ? 'open' : 'closed'));
                             }}
@@ -15462,7 +15555,7 @@ ${partsBodyXml}
                             {xmlSidebarMode === 'closed' ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
                         </button>
                         {xmlSidebarMode === 'closed' && (
-                            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600" style={{ writingMode: 'vertical-rl' }}>MusicXML</span>
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600" style={{ writingMode: 'vertical-rl' }}>AI Tools</span>
                         )}
                     </div>
                     {xmlSidebarMode !== 'closed' && (
@@ -15479,18 +15572,6 @@ ${partsBodyXml}
                             </div>
                             <div className="mt-3 flex flex-wrap items-center justify-between gap-y-2 text-xs font-medium text-gray-600">
                                 <div className="flex flex-wrap gap-2">
-                                    <button
-                                        type="button"
-                                        data-testid="tab-xml"
-                                        onClick={() => setXmlSidebarTab('xml')}
-                                        className={`rounded border px-2 py-1 ${
-                                            xmlSidebarTab === 'xml'
-                                                ? 'border-gray-400 bg-gray-100 text-gray-900'
-                                                : 'border-transparent text-gray-500 hover:text-gray-700'
-                                        }`}
-                                    >
-                                        XML
-                                    </button>
                                     {aiEnabled && (
                                         <button
                                             type="button"
@@ -15589,60 +15670,6 @@ ${partsBodyXml}
                 </div>
                 {xmlSidebarMode !== 'closed' && (
                     <div id="xml-sidebar-content" className="flex-1 overflow-y-auto pb-4 px-4">
-                        {xmlSidebarTab === 'xml' && (
-                            <>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    <button
-                                        type="button"
-                                        data-testid="btn-xml-apply"
-                                        onClick={handleApplyXmlEdits}
-                                        disabled={xmlApplyDisabled}
-                                        title="Applying edits will auto-checkpoint if the score has unsaved changes."
-                                        className={`flex-1 rounded border px-3 py-1 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
-                                            xmlApplyEnabled
-                                                ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
-                                                : 'border-gray-300 bg-white text-gray-700'
-                                        }`}
-                                    >
-                                        Apply edits
-                                    </button>
-                                    <button
-                                        type="button"
-                                        data-testid="btn-xml-reload"
-                                        onClick={handleRefreshXml}
-                                        disabled={!xmlReloadEnabled}
-                                        title={
-                                            xmlReloadEnabled
-                                                ? 'The score has changed, reload to update XML. Any XML changes will be lost on update.'
-                                                : undefined
-                                        }
-                                        className={`flex-1 rounded border px-3 py-1 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
-                                            xmlReloadEnabled
-                                                ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
-                                                : 'border-gray-300 bg-white text-gray-700'
-                                        }`}
-                                    >
-                                        Reload
-                                    </button>
-                                </div>
-                                <div className="mt-2">
-                                    <CodeMirrorEditor
-                                        testId="xml-editor"
-                                        value={xmlText}
-                                        onChange={(nextValue) => {
-                                            setXmlText(nextValue);
-                                            setXmlDirty(true);
-                                        }}
-                                        readOnly={xmlControlsDisabled}
-                                        placeholderText={score ? 'MusicXML will appear here.' : 'Load a score to view MusicXML.'}
-                                        language="xml"
-                                        height={xmlEditorHeight}
-                                        maxHeight={xmlEditorMaxHeight}
-                                        themeMode={codeEditorTheme}
-                                    />
-                                </div>
-                            </>
-                        )}
                         {xmlSidebarTab === 'assistant' && aiEnabled && (
                             <AiAssistantPanel
                                 controller={aiAssistantController}
