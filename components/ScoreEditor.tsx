@@ -11418,11 +11418,31 @@ ${partsBodyXml}
                 return;
             }
             case 'ottava': return handleAddOttava(item.subtype);
+            case 'trill': return handleAddTrill(item.subtype);
+            case 'glissando': return handleAddGlissando(item.subtype);
+            case 'arpeggio': return handleAddArpeggio(item.subtype);
             case 'fermata': return handleAddFermata(item.subtype);
             case 'breath': return handleAddBreath(item.subtype);
             case 'tremolo': return handleAddTremolo(item.subtype);
             case 'marker': return handleAddMarker(item.subtype);
             case 'jump': return handleAddJump(item.subtype);
+            case 'notehead': return handleSetNoteheadGroup(item.subtype);
+            case 'beam': return handleSetBeamMode(item.subtype);
+            case 'accidental': return handleSetAccidental(item.subtype);
+            case 'gracenote': return handleAddGraceNote(item.subtype);
+            case 'hairpin': return handleAddHairpin(item.subtype);
+            case 'pedal': return handleAddPedal(item.subtype);
+            case 'keysig': return handleSetKeySignature(item.subtype);
+            case 'timesig': {
+                const [numerator, denominator, timeSigType] = item.args ?? [];
+                if (numerator && denominator) handleSetTimeSignature(numerator, denominator, timeSigType);
+                return;
+            }
+            case 'barline': return handleSetBarLineType(item.subtype);
+            case 'volta': return handleAddVolta(item.subtype);
+            case 'repeat-start': return handleToggleRepeatStart();
+            case 'repeat-end': return handleToggleRepeatEnd();
+            case 'repeat-count': return handleSetRepeatCount(item.subtype);
         }
     };
 

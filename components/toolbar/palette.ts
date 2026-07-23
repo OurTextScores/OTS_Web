@@ -1,27 +1,70 @@
-import { articulationOptions, clefButtonOptionsDefault, dynamicOptions } from './constants';
+import {
+    articulationOptions,
+    clefButtonOptionsDefault,
+    dynamicOptions,
+    hairpinOptions,
+    pedalOptions,
+    repeatCountOptions,
+    barlineOptions,
+    voltaOptions,
+    accidentalOptions,
+    graceNoteOptions,
+    keySignatureButtonOptionsDefault,
+    signatureOptionsDefault,
+} from './constants';
 
 export const SCORE_PALETTE_DRAG_MIME = 'application/x-ots-score-palette+json';
 
 export type PaletteCategory =
     | 'Clefs'
+    | 'Key Signatures'
+    | 'Time Signatures'
+    | 'Accidentals'
+    | 'Grace Notes'
     | 'Dynamics'
+    | 'Hairpins'
+    | 'Pedals'
     | 'Articulations'
-    | 'Ottavas'
     | 'Fermatas'
     | 'Breaths'
+    | 'Ottavas'
+    | 'Trills'
+    | 'Glissandos'
+    | 'Arpeggios'
     | 'Tremolos'
+    | 'Noteheads'
+    | 'Beams'
+    | 'Barlines'
+    | 'Voltas'
+    | 'Repeats'
     | 'Markers'
     | 'Jumps';
 
 // Discriminates which editor action a palette item performs when applied.
 export type PaletteKind =
     | 'clef'
+    | 'keysig'
+    | 'timesig'
+    | 'accidental'
+    | 'gracenote'
     | 'dynamic'
+    | 'hairpin'
+    | 'pedal'
     | 'articulation'
-    | 'ottava'
     | 'fermata'
     | 'breath'
+    | 'ottava'
+    | 'trill'
+    | 'glissando'
+    | 'arpeggio'
     | 'tremolo'
+    | 'notehead'
+    | 'beam'
+    | 'barline'
+    | 'volta'
+    | 'repeat-start'
+    | 'repeat-end'
+    | 'repeat-count'
     | 'marker'
     | 'jump';
 
@@ -31,12 +74,26 @@ export type ScorePaletteItem = {
     category: PaletteCategory;
     kind: PaletteKind;
     subtype: number;
+    // Extra positional args for actions that need more than a single value (e.g. time signatures).
+    args?: number[];
     // Present only for kinds that support drag-and-drop onto the score
     // (the engine's applyDropAtPoint currently covers clefs/dynamics/articulations).
     elementType?: 0 | 1 | 2;
 };
 
-// SMuFL glyph for a clef type (mirrors the dropdown's clef rendering).
+type OptionInput = { label: string; value: number; symbol?: string; args?: number[] };
+
+const makePaletteItems = (category: PaletteCategory, kind: PaletteKind, options: ReadonlyArray<OptionInput>): ScorePaletteItem[] =>
+    options.map(option => ({
+        label: option.label,
+        symbol: option.symbol ?? '',
+        category,
+        kind,
+        subtype: option.value,
+        ...(option.args ? { args: option.args } : {}),
+    }));
+
+// --- Clefs -----------------------------------------------------------------
 const clefPaletteGlyph = (clefType: number): string => {
     const codepoints: Record<number, number> = {
         0: 0xE050, 1: 0xE051, 2: 0xE052, 3: 0xE053, 4: 0xE054,
@@ -51,8 +108,7 @@ const clefPaletteGlyph = (clefType: number): string => {
     return String.fromCharCode(0xE050);
 };
 
-// Every clef, generated from the shared clef list, for the full Clef palette.
-const clefPaletteItems: ScorePaletteItem[] = clefButtonOptionsDefault.map(option => ({
+const clefItems: ScorePaletteItem[] = clefButtonOptionsDefault.map(option => ({
     label: `${option.label} clef`,
     symbol: clefPaletteGlyph(option.value),
     category: 'Clefs',
@@ -61,46 +117,57 @@ const clefPaletteItems: ScorePaletteItem[] = clefButtonOptionsDefault.map(option
     elementType: 0,
 }));
 
-const dynamicPaletteItems: ScorePaletteItem[] = [
-    { label: 'Piano dynamic', symbol: '', subtype: 6 },
-    { label: 'Mezzo piano dynamic', symbol: '', subtype: 7 },
-    { label: 'Mezzo forte dynamic', symbol: '', subtype: 8 },
-    { label: 'Forte dynamic', symbol: '', subtype: 9 },
-    { label: 'Pianissimo dynamic', symbol: '', subtype: 5 },
-    { label: 'Fortissimo dynamic', symbol: '', subtype: 10 },
-    { label: 'Sforzando dynamic', symbol: '', subtype: 18 },
-].map(item => ({ ...item, category: 'Dynamics', kind: 'dynamic', elementType: 1 }));
-
-const articulationPaletteItems: ScorePaletteItem[] = [
-    { label: 'Staccato', symbol: '', subtype: 0 },
-    { label: 'Tenuto', symbol: '', subtype: 1 },
-    { label: 'Marcato', symbol: '', subtype: 2 },
-    { label: 'Accent', symbol: '', subtype: 3 },
-].map(item => ({ ...item, category: 'Articulations', kind: 'articulation', elementType: 2 }));
-
-// Click-to-apply categories (no drag/drop support in the engine yet).
-const makePaletteItems = (
-    category: PaletteCategory,
-    kind: PaletteKind,
-    options: ReadonlyArray<{ label: string; value: number; symbol?: string }>,
-): ScorePaletteItem[] => options.map(option => ({
-    label: option.label,
-    symbol: option.symbol ?? '',
-    category,
-    kind,
+// --- Dynamics --------------------------------------------------------------
+const dynamicGlyphs: Record<string, string> = {
+    p: '', m: '', f: '', r: '', s: '', z: '', n: '',
+};
+const dynamicSymbolFor = (label: string) => Array.from(label).map(character => dynamicGlyphs[character] ?? character).join('');
+const dynamicItems: ScorePaletteItem[] = dynamicOptions.map(option => ({
+    label: `${option.label} dynamic`,
+    symbol: dynamicSymbolFor(option.label),
+    category: 'Dynamics',
+    kind: 'dynamic',
     subtype: option.value,
+    elementType: 1,
 }));
 
-const ottavaPaletteItems = makePaletteItems('Ottavas', 'ottava', [
-    { label: '8va', value: 0, symbol: '' },
-    { label: '8vb', value: 1, symbol: '' },
-    { label: '15ma', value: 2, symbol: '' },
-    { label: '15mb', value: 3, symbol: '' },
-    { label: '22ma', value: 4, symbol: '' },
-    { label: '22mb', value: 5, symbol: '' },
-]);
+// --- Articulations ---------------------------------------------------------
+const articulationGlyphs: Record<string, string> = {
+    articStaccatoAbove: '', articTenutoAbove: '', articMarcatoAbove: '', articAccentAbove: '',
+};
+const articulationItems: ScorePaletteItem[] = articulationOptions.map((option, index) => ({
+    label: option.label,
+    symbol: articulationGlyphs[option.symbol] ?? '',
+    category: 'Articulations',
+    kind: 'articulation',
+    subtype: index,
+    elementType: 2,
+}));
 
-const fermataPaletteItems = makePaletteItems('Fermatas', 'fermata', [
+// --- Everything else -------------------------------------------------------
+const keySignatureItems = makePaletteItems('Key Signatures', 'keysig', keySignatureButtonOptionsDefault.map(option => ({
+    label: `${option.label} major`, value: option.fifths,
+})));
+
+const timeSignatureItems: ScorePaletteItem[] = signatureOptionsDefault.map(option => ({
+    label: option.label,
+    symbol: '',
+    category: 'Time Signatures',
+    kind: 'timesig',
+    subtype: option.numerator,
+    args: [option.numerator, option.denominator, option.timeSigType],
+}));
+
+const accidentalItems = makePaletteItems('Accidentals', 'accidental',
+    accidentalOptions.filter(option => option.value !== 0).map(option => ({ label: option.name, value: option.value, symbol: option.symbol })));
+
+const graceNoteItems = makePaletteItems('Grace Notes', 'gracenote', graceNoteOptions.map(option => ({ label: option.label, value: option.value })));
+
+const hairpinItems = makePaletteItems('Hairpins', 'hairpin', hairpinOptions.map(option => ({ label: option.label, value: option.value })));
+
+const pedalItems = makePaletteItems('Pedals', 'pedal', pedalOptions.map(option => ({ label: option.label, value: option.value })));
+
+const fermataItems = makePaletteItems('Fermatas', 'fermata', [
     { label: 'Fermata', value: 0, symbol: '' },
     { label: 'Short fermata', value: 1, symbol: '' },
     { label: 'Long fermata', value: 2, symbol: '' },
@@ -108,7 +175,7 @@ const fermataPaletteItems = makePaletteItems('Fermatas', 'fermata', [
     { label: 'Very long fermata', value: 4, symbol: '' },
 ]);
 
-const breathPaletteItems = makePaletteItems('Breaths', 'breath', [
+const breathItems = makePaletteItems('Breaths', 'breath', [
     { label: 'Breath mark', value: 0, symbol: '' },
     { label: 'Caesura', value: 5, symbol: '' },
     { label: 'Tick breath mark', value: 1, symbol: '' },
@@ -120,7 +187,35 @@ const breathPaletteItems = makePaletteItems('Breaths', 'breath', [
     { label: 'Chant caesura', value: 8, symbol: '' },
 ]);
 
-const tremoloPaletteItems = makePaletteItems('Tremolos', 'tremolo', [
+const ottavaItems = makePaletteItems('Ottavas', 'ottava', [
+    { label: '8va', value: 0, symbol: '' },
+    { label: '8vb', value: 1, symbol: '' },
+    { label: '15ma', value: 2, symbol: '' },
+    { label: '15mb', value: 3, symbol: '' },
+    { label: '22ma', value: 4, symbol: '' },
+    { label: '22mb', value: 5, symbol: '' },
+]);
+
+const trillItems = makePaletteItems('Trills', 'trill', [
+    { label: 'Trill line', value: 0 },
+    { label: 'Up-prall line', value: 1 },
+    { label: 'Down-prall line', value: 2 },
+    { label: 'Prall-prall line', value: 3 },
+]);
+
+const glissandoItems = makePaletteItems('Glissandos', 'glissando', [
+    { label: 'Straight glissando', value: 0, symbol: '' },
+    { label: 'Wavy glissando', value: 1, symbol: '' },
+]);
+
+const arpeggioItems = makePaletteItems('Arpeggios', 'arpeggio', [
+    { label: 'Arpeggio', value: 0, symbol: '' },
+    { label: 'Arpeggio up', value: 1, symbol: '' },
+    { label: 'Arpeggio down', value: 2, symbol: '' },
+    { label: 'Arpeggio bracket', value: 3, symbol: '' },
+]);
+
+const tremoloItems = makePaletteItems('Tremolos', 'tremolo', [
     { label: 'Eighth-note tremolo', value: 0, symbol: '' },
     { label: '16th-note tremolo', value: 1, symbol: '' },
     { label: '32nd-note tremolo', value: 2, symbol: '' },
@@ -132,7 +227,34 @@ const tremoloPaletteItems = makePaletteItems('Tremolos', 'tremolo', [
     { label: 'Two-note 64th tremolo', value: 8, symbol: '' },
 ]);
 
-const markerPaletteItems = makePaletteItems('Markers', 'marker', [
+const noteheadItems = makePaletteItems('Noteheads', 'notehead', [
+    { label: 'Normal', value: 0, symbol: '' },
+    { label: 'Cross', value: 1, symbol: '' },
+    { label: 'Diamond', value: 9, symbol: '' },
+    { label: 'Triangle', value: 5, symbol: '' },
+    { label: 'Slash', value: 15, symbol: '' },
+]);
+
+const beamItems = makePaletteItems('Beams', 'beam', [
+    { label: 'Auto beam', value: 0 },
+    { label: 'Begin beam / break left', value: 2 },
+    { label: 'Join beams', value: 6 },
+    { label: 'No beam', value: 1 },
+    { label: 'Break secondary beam at eighth', value: 3 },
+    { label: 'Break secondary beam at 16th', value: 4 },
+]);
+
+const barlineItems = makePaletteItems('Barlines', 'barline', barlineOptions.map(option => ({ label: `${option.label} barline`, value: option.value })));
+
+const voltaItems = makePaletteItems('Voltas', 'volta', voltaOptions.map(option => ({ label: option.label, value: option.ending })));
+
+const repeatItems: ScorePaletteItem[] = [
+    { label: 'Start repeat', symbol: '', category: 'Repeats', kind: 'repeat-start', subtype: 0 },
+    { label: 'End repeat', symbol: '', category: 'Repeats', kind: 'repeat-end', subtype: 0 },
+    ...makePaletteItems('Repeats', 'repeat-count', repeatCountOptions.map(option => ({ label: `Repeat ${option.label}`, value: option.count }))),
+];
+
+const markerItems = makePaletteItems('Markers', 'marker', [
     { label: 'Segno', value: 0, symbol: '' },
     { label: 'Coda', value: 2, symbol: '' },
     { label: 'Fine', value: 5, symbol: 'Fine' },
@@ -142,7 +264,7 @@ const markerPaletteItems = makePaletteItems('Markers', 'marker', [
     { label: 'To Coda symbol', value: 7, symbol: '' },
 ]);
 
-const jumpPaletteItems = makePaletteItems('Jumps', 'jump', [
+const jumpItems = makePaletteItems('Jumps', 'jump', [
     { label: 'D.C.', value: 0 },
     { label: 'D.C. al Fine', value: 1 },
     { label: 'D.C. al Coda', value: 2 },
@@ -159,16 +281,31 @@ const jumpPaletteItems = makePaletteItems('Jumps', 'jump', [
     { label: 'Da Double Coda', value: 13 },
 ]);
 
+// Order controls how categories appear in the full palette.
 export const scorePaletteItems: ScorePaletteItem[] = [
-    ...clefPaletteItems,
-    ...dynamicPaletteItems,
-    ...articulationPaletteItems,
-    ...ottavaPaletteItems,
-    ...fermataPaletteItems,
-    ...breathPaletteItems,
-    ...tremoloPaletteItems,
-    ...markerPaletteItems,
-    ...jumpPaletteItems,
+    ...clefItems,
+    ...keySignatureItems,
+    ...timeSignatureItems,
+    ...accidentalItems,
+    ...graceNoteItems,
+    ...dynamicItems,
+    ...hairpinItems,
+    ...pedalItems,
+    ...articulationItems,
+    ...fermataItems,
+    ...breathItems,
+    ...ottavaItems,
+    ...trillItems,
+    ...glissandoItems,
+    ...arpeggioItems,
+    ...tremoloItems,
+    ...noteheadItems,
+    ...beamItems,
+    ...barlineItems,
+    ...voltaItems,
+    ...repeatItems,
+    ...markerItems,
+    ...jumpItems,
 ];
 
 export const dynamicScorePaletteItem = (label: string, symbol: string, subtype: number): ScorePaletteItem => ({
