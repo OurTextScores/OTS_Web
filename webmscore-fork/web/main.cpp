@@ -1,6 +1,7 @@
 #include <emscripten/emscripten.h>
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <set>
@@ -629,6 +630,254 @@ static bool _setSelectedText(uintptr_t score_ptr, const char* plainText, int exc
     score->startCmd();
     const String xmlText = engraving::TextBase::plainToXmlText(_plainTextToString(plainText));
     textItem->undoChangeProperty(engraving::Pid::TEXT, xmlText);
+    score->endCmd();
+    return true;
+}
+
+static std::vector<engraving::EngravingItem*> selectedInspectorTargets(MainScore& score)
+{
+    std::vector<engraving::EngravingItem*> targets;
+    std::set<engraving::EngravingItem*> seen;
+    auto append = [&targets, &seen](engraving::EngravingItem* item) {
+        if (!item) {
+            return;
+        }
+        if (item->isSpannerSegment()) {
+            item = toSpannerSegment(item)->spanner();
+        }
+        if (item && seen.insert(item).second) {
+            targets.push_back(item);
+        }
+    };
+
+    append(score->selection().element());
+    for (auto* item : score->selection().elements()) {
+        append(item);
+    }
+    return targets;
+}
+
+static QJsonObject inspectorProperty(const QJsonValue& value, bool mixed, int applicableCount)
+{
+    QJsonObject property;
+    property.insert(QStringLiteral("value"), mixed ? QJsonValue() : value);
+    property.insert(QStringLiteral("mixed"), mixed);
+    property.insert(QStringLiteral("applicableCount"), applicableCount);
+    return property;
+}
+
+static WasmRes _getSelectedElementProperties(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    const auto targets = selectedInspectorTargets(score);
+    QJsonObject result;
+    result.insert(QStringLiteral("selectionCount"), static_cast<int>(targets.size()));
+    if (targets.empty()) {
+        result.insert(QStringLiteral("elementType"), QString());
+        result.insert(QStringLiteral("properties"), QJsonObject());
+        return WasmRes(QJsonDocument(result).toJson(QJsonDocument::Compact));
+    }
+
+    const QString firstType = QString::fromUtf8(targets.front()->typeName());
+    bool mixedTypes = false;
+    for (auto* target : targets) {
+        if (QString::fromUtf8(target->typeName()) != firstType) {
+            mixedTypes = true;
+            break;
+        }
+    }
+    result.insert(QStringLiteral("elementType"), mixedTypes ? QStringLiteral("Mixed") : firstType);
+
+    QJsonObject properties;
+    auto addBool = [&properties, &targets](const char* name, engraving::Pid pid) {
+        bool first = false;
+        bool haveFirst = false;
+        bool mixed = false;
+        int count = 0;
+        for (auto* target : targets) {
+            const auto value = target->getProperty(pid);
+            if (!value.isValid()) continue;
+            const bool current = value.toBool();
+            if (!haveFirst) {
+                first = current;
+                haveFirst = true;
+            } else if (current != first) {
+                mixed = true;
+            }
+            ++count;
+        }
+        if (count > 0) properties.insert(QString::fromUtf8(name), inspectorProperty(first, mixed, count));
+    };
+    auto addEnum = [&properties, &targets](const char* name, engraving::Pid pid, const std::vector<const char*>& labels) {
+        int first = 0;
+        bool haveFirst = false;
+        bool mixed = false;
+        int count = 0;
+        for (auto* target : targets) {
+            const auto value = target->getProperty(pid);
+            if (!value.isValid()) continue;
+            const int current = value.toInt();
+            if (current < 0 || current >= static_cast<int>(labels.size())) continue;
+            if (!haveFirst) {
+                first = current;
+                haveFirst = true;
+            } else if (current != first) {
+                mixed = true;
+            }
+            ++count;
+        }
+        if (count > 0) properties.insert(QString::fromUtf8(name), inspectorProperty(QString::fromUtf8(labels[first]), mixed, count));
+    };
+
+    addBool("visible", engraving::Pid::VISIBLE);
+    addBool("small", engraving::Pid::SMALL);
+
+    std::string firstColor;
+    bool haveColor = false;
+    bool mixedColor = false;
+    int colorCount = 0;
+    double firstX = 0.0;
+    double firstY = 0.0;
+    bool haveOffset = false;
+    bool mixedX = false;
+    bool mixedY = false;
+    int offsetCount = 0;
+    for (auto* target : targets) {
+        const auto colorValue = target->getProperty(engraving::Pid::COLOR);
+        if (colorValue.isValid()) {
+            const std::string color = colorValue.value<mu::draw::Color>().toString();
+            if (!haveColor) {
+                firstColor = color;
+                haveColor = true;
+            } else if (color != firstColor) {
+                mixedColor = true;
+            }
+            ++colorCount;
+        }
+        const auto offsetValue = target->getProperty(engraving::Pid::OFFSET);
+        if (offsetValue.isValid()) {
+            const engraving::PointF offset = offsetValue.value<engraving::PointF>();
+            const double spatium = target->spatium();
+            const double x = spatium > 0.0 ? offset.x() / spatium : 0.0;
+            const double y = spatium > 0.0 ? offset.y() / spatium : 0.0;
+            if (!haveOffset) {
+                firstX = x;
+                firstY = y;
+                haveOffset = true;
+            } else {
+                mixedX = mixedX || std::abs(x - firstX) > 0.0001;
+                mixedY = mixedY || std::abs(y - firstY) > 0.0001;
+            }
+            ++offsetCount;
+        }
+    }
+    if (colorCount > 0) properties.insert(QStringLiteral("color"), inspectorProperty(QString::fromStdString(firstColor), mixedColor, colorCount));
+    if (offsetCount > 0) {
+        properties.insert(QStringLiteral("offsetX"), inspectorProperty(firstX, mixedX, offsetCount));
+        properties.insert(QStringLiteral("offsetY"), inspectorProperty(firstY, mixedY, offsetCount));
+    }
+
+    addEnum("placement", engraving::Pid::PLACEMENT, { "above", "below" });
+    addEnum("stemDirection", engraving::Pid::STEM_DIRECTION, { "auto", "up", "down" });
+    addEnum("lineStyle", engraving::Pid::LINE_STYLE, { "solid", "dashed", "dotted" });
+    result.insert(QStringLiteral("properties"), properties);
+    return WasmRes(QJsonDocument(result).toJson(QJsonDocument::Compact));
+}
+
+static bool parseInspectorBool(const char* value, bool& parsed)
+{
+    if (value && std::strcmp(value, "true") == 0) {
+        parsed = true;
+        return true;
+    }
+    if (value && std::strcmp(value, "false") == 0) {
+        parsed = false;
+        return true;
+    }
+    return false;
+}
+
+static bool _setSelectedElementProperty(uintptr_t score_ptr, const char* propertyName, const char* serializedValue, int excerptId)
+{
+    if (!propertyName || !serializedValue) {
+        return false;
+    }
+    MainScore score(score_ptr, excerptId);
+    const auto targets = selectedInspectorTargets(score);
+    if (targets.empty()) {
+        LOGW() << "setSelectedElementProperty: no selected elements";
+        return false;
+    }
+
+    const std::string name(propertyName);
+    const std::string value(serializedValue);
+    engraving::Pid pid = engraving::Pid::END;
+    std::optional<engraving::PropertyValue> propertyValue;
+    bool boolValue = false;
+    if (name == "visible" && parseInspectorBool(serializedValue, boolValue)) {
+        pid = engraving::Pid::VISIBLE;
+        propertyValue = boolValue;
+    } else if (name == "small" && parseInspectorBool(serializedValue, boolValue)) {
+        pid = engraving::Pid::SMALL;
+        propertyValue = boolValue;
+    } else if (name == "color") {
+        const mu::draw::Color color = mu::draw::Color::fromString(value);
+        if (!color.isValid()) return false;
+        pid = engraving::Pid::COLOR;
+        propertyValue = engraving::PropertyValue::fromValue(color);
+    } else if (name == "placement" && (value == "above" || value == "below")) {
+        pid = engraving::Pid::PLACEMENT;
+        propertyValue = value == "above" ? engraving::PlacementV::ABOVE : engraving::PlacementV::BELOW;
+    } else if (name == "stemDirection" && (value == "auto" || value == "up" || value == "down")) {
+        pid = engraving::Pid::STEM_DIRECTION;
+        propertyValue = value == "up" ? engraving::DirectionV::UP : value == "down" ? engraving::DirectionV::DOWN : engraving::DirectionV::AUTO;
+    } else if (name == "lineStyle" && (value == "solid" || value == "dashed" || value == "dotted")) {
+        pid = engraving::Pid::LINE_STYLE;
+        propertyValue = value == "dashed" ? engraving::LineType::DASHED : value == "dotted" ? engraving::LineType::DOTTED : engraving::LineType::SOLID;
+    } else if (name != "offsetX" && name != "offsetY") {
+        LOGW() << "setSelectedElementProperty: unsupported property " << propertyName;
+        return false;
+    }
+
+    double numericValue = 0.0;
+    if (name == "offsetX" || name == "offsetY") {
+        bool ok = false;
+        numericValue = QString::fromUtf8(serializedValue).toDouble(&ok);
+        if (!ok || !std::isfinite(numericValue) || numericValue < -20.0 || numericValue > 20.0) {
+            return false;
+        }
+        pid = engraving::Pid::OFFSET;
+    }
+
+    std::vector<std::pair<engraving::EngravingItem*, engraving::PropertyValue> > changes;
+    std::set<engraving::EngravingItem*> changedTargets;
+    for (auto* originalTarget : targets) {
+        auto* target = originalTarget;
+        if (pid == engraving::Pid::STEM_DIRECTION && target->isNote()) {
+            target = toNote(target)->chord();
+        }
+        if (!target || !changedTargets.insert(target).second) continue;
+        const auto current = target->getProperty(pid);
+        if (!current.isValid()) continue;
+        engraving::PropertyValue next = propertyValue.value_or(current);
+        if (pid == engraving::Pid::OFFSET) {
+            engraving::PointF offset = current.value<engraving::PointF>();
+            const double scoreValue = numericValue * target->spatium();
+            name == "offsetX" ? offset.setX(scoreValue) : offset.setY(scoreValue);
+            next = engraving::PropertyValue::fromValue(offset);
+        }
+        if (current != next) {
+            changes.emplace_back(target, next);
+        }
+    }
+    if (changes.empty()) {
+        return false;
+    }
+
+    score->startCmd();
+    for (const auto& change : changes) {
+        change.first->undoChangeProperty(pid, change.second, engraving::PropertyFlags::UNSTYLED);
+    }
     score->endCmd();
     return true;
 }
@@ -6417,6 +6666,16 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool setSelectedText(uintptr_t score_ptr, const char* plainText, int excerptId = -1) {
         return _setSelectedText(score_ptr, plainText, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    WasmResBytes getSelectedElementProperties(uintptr_t score_ptr, int excerptId = -1) {
+        return _getSelectedElementProperties(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setSelectedElementProperty(uintptr_t score_ptr, const char* propertyName, const char* value, int excerptId = -1) {
+        return _setSelectedElementProperty(score_ptr, propertyName, value, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

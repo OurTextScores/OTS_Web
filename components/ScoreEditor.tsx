@@ -10,6 +10,8 @@ import {
     InputFileFormat,
     Positions,
     type LayoutProgressState,
+    type InspectorPropertyName,
+    type SelectedElementProperties,
     type WebMscoreInstance,
 } from '../lib/webmscore-loader';
 import {
@@ -24,6 +26,7 @@ import {
 } from '../lib/checkpoints';
 import { CodeMirrorEditor, type CodeEditorThemeMode } from './CodeMirrorEditor';
 import { Toolbar, type MeasureInsertTarget } from './Toolbar';
+import { InspectorPanel } from './InspectorPanel';
 import { SCORE_PALETTE_DRAG_MIME, parseScorePaletteItem } from './toolbar/palette';
 import { LeftSidebar, type LeftSidebarTab } from './score-editor/LeftSidebar';
 import {
@@ -564,6 +567,8 @@ type MutationMethods = Pick<
     | 'setComposerText'
     | 'setLyricistText'
     | 'setSelectedText'
+    | 'getSelectedElementProperties'
+    | 'setSelectedElementProperty'
     | 'appendPart'
     | 'appendPartByMusicXmlId'
     | 'removePart'
@@ -1157,6 +1162,9 @@ export default function ScoreEditor() {
     const [hasBackendHighlighting, setHasBackendHighlighting] = useState(false);
     const [selectedElementClasses, setSelectedElementClasses] = useState<string>('');
     const [selectedTextValue, setSelectedTextValue] = useState('');
+    const inlineTextContentRef = useRef<HTMLDivElement>(null);
+    const [inspectorData, setInspectorData] = useState<SelectedElementProperties | null>(null);
+    const [inspectorLoading, setInspectorLoading] = useState(false);
     const [selectedLayoutBreakSubtype, setSelectedLayoutBreakSubtype] = useState<'line'|'page'|null>(null);
     const [textEditorPosition, setTextEditorPosition] = useState<{ x: number; y: number } | null>(null);
     const [dragSelectionRect, setDragSelectionRect] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
@@ -2555,6 +2563,33 @@ export default function ScoreEditor() {
             canceled = true;
         };
     }, [score, selectedElementClasses, textEditorPosition]);
+
+    const refreshInspector = useCallback(async () => {
+        const activeScore = scoreRef.current ?? score;
+        if (!activeScore?.getSelectedElementProperties) {
+            setInspectorData(null);
+            return;
+        }
+        setInspectorLoading(true);
+        try {
+            const properties = await Promise.resolve(activeScore.getSelectedElementProperties());
+            setInspectorData(properties);
+        } catch (err) {
+            console.warn('Failed to load Inspector properties:', err);
+            setInspectorData(null);
+        } finally {
+            setInspectorLoading(false);
+        }
+    }, [score]);
+
+    useEffect(() => {
+        if (!score || (!selectedElement && selectionBoxes.length === 0 && !selectedPoint)) {
+            setInspectorData(null);
+            setInspectorLoading(false);
+            return;
+        }
+        void refreshInspector();
+    }, [refreshInspector, score, selectedElement, selectedElementClasses, selectedPoint, selectionBoxes.length]);
 
     const formatBytes = (bytes: number) => {
         if (!Number.isFinite(bytes)) {
@@ -10677,14 +10712,24 @@ ${partsBodyXml}
     const handleSelectedTextChange = (value: string) => {
         setSelectedTextValue(value);
     };
-    const handleApplySelectedText = () => performMutation('set selected text', async () => {
+    const applySelectedTextValue = (value: string) => performMutation('set selected text', async () => {
         await ensureSelectionInWasm();
         const fn = requireMutation('setSelectedText');
         if (!fn) {
             return false;
         }
-        return fn(selectedTextValue);
+        return fn(value);
     });
+    const handleApplySelectedText = () => applySelectedTextValue(selectedTextValue);
+    const handleSetInspectorProperty = async (propertyName: InspectorPropertyName, value: boolean | number | string) => {
+        await performMutation(`set ${propertyName}`, async () => {
+            await ensureSelectionInWasm();
+            const fn = requireMutation('setSelectedElementProperty');
+            if (!fn) return false;
+            return fn(propertyName, value);
+        });
+        await refreshInspector();
+    };
     const handleUndo = () => performMutation('undo', score?.undo ? async () => {
         const result = await score.undo?.();
         if (score.multiMeasureRestsEnabled) {
@@ -12974,6 +13019,14 @@ ${partsBodyXml}
 
     const handleScoreDoubleClick = (event: React.MouseEvent) => {
         const target = event.target as Element | null;
+        let textTarget = target;
+        while (textTarget && textTarget !== containerRef.current) {
+            if (isSvgTextElement(textTarget)) {
+                void openTextEditorFromEvent(event);
+                return;
+            }
+            textTarget = textTarget.parentElement;
+        }
         const point = clientToEngravingPoint(event.clientX, event.clientY, target);
         if (!point) {
             return;
@@ -14309,7 +14362,7 @@ ${partsBodyXml}
         }
     };
 
-    const openTextEditorFromEvent = (e: React.MouseEvent) => {
+    async function openTextEditorFromEvent(e: React.MouseEvent) {
         if (!containerRef.current || !score) {
             return;
         }
@@ -14332,12 +14385,47 @@ ${partsBodyXml}
         }
 
         e.preventDefault();
-        handleScoreClick(e);
-        setTextEditorPosition({ x: e.clientX, y: e.clientY });
-    };
+        const rect = element.getBoundingClientRect();
+        const containerRect = containerRef.current.getBoundingClientRect();
+        const x = (rect.left - containerRect.left) / zoom;
+        const y = (rect.top - containerRect.top) / zoom;
+        const w = rect.width / zoom;
+        const h = rect.height / zoom;
+        const pageIndex = resolvePageIndex(element);
+        const engravingPoint = clientToEngravingPoint(e.clientX, e.clientY, element);
+        if (engravingPoint && score.selectElementAtPoint) {
+            const selected = await score.selectElementAtPoint(pageIndex, engravingPoint.x, engravingPoint.y);
+            if (selected === false) {
+                return;
+            }
+        }
+        const selectableElements = Array.from(containerRef.current.querySelectorAll(ELEMENT_SELECTION_SELECTOR));
+        const elementIndex = selectableElements.indexOf(element);
+        const box: SelectionBox = {
+            index: elementIndex >= 0 ? elementIndex : null,
+            page: pageIndex,
+            x,
+            y,
+            w,
+            h,
+            centerX: x + w / 2,
+            centerY: y + h / 2,
+            classes: normalizeElementClasses(element, element.getAttribute('class') ?? ''),
+        };
+        setSelectionBoxes([box]);
+        setSelectedElement({ x, y, w, h });
+        setSelectedIndex(box.index);
+        setSelectedPoint({ page: pageIndex, x: box.centerX, y: box.centerY });
+        setSelectedElementClasses(box.classes ?? '');
+        setHasBackendHighlighting(false);
+        const scorePoint = clientToScorePoint(e.clientX, e.clientY);
+        if (scorePoint) {
+            setTextEditorPosition({ x: scorePoint.x, y: scorePoint.y });
+        }
+    }
 
     const handleScoreContextMenu = (e: React.MouseEvent) => {
-        openTextEditorFromEvent(e);
+        void openTextEditorFromEvent(e);
     };
 
     const closeTextEditor = () => {
@@ -14363,6 +14451,9 @@ ${partsBodyXml}
                 h: selectionBoxes[0].h,
             }
             : null;
+    const textEditorRect = textEditorPosition
+        ? primarySelectionRect ?? { x: textEditorPosition.x, y: textEditorPosition.y, w: 220, h: 30 }
+        : null;
     const textSelectionActive = hasTextElementClass(selectedElementClasses) || Boolean(textEditorPosition);
     const selectedTextControlDisabled = !interactiveMutationEnabled || !score?.setSelectedText;
     const checkpointControlsDisabled = checkpointBusy || checkpointLoading;
@@ -14946,40 +15037,57 @@ ${partsBodyXml}
                             }}
                         />
                     ))}
-                    {textEditorPosition && (
+                    {textEditorRect && (
                         <div
-                            className="fixed z-50 flex flex-col gap-2 rounded border bg-white p-3 shadow-lg"
-                            style={{ left: textEditorPosition.x, top: textEditorPosition.y }}
+                            data-testid="inline-text-editor"
+                            className="absolute z-50 flex flex-col gap-1 rounded border-2 border-blue-600 bg-white p-1 shadow-lg"
+                            style={{
+                                left: textEditorRect.x,
+                                top: textEditorRect.y,
+                                minWidth: Math.max(160, textEditorRect.w),
+                                minHeight: Math.max(30, textEditorRect.h),
+                            }}
                             onClick={event => event.stopPropagation()}
                             onMouseDown={event => event.stopPropagation()}
                             onPointerDown={event => event.stopPropagation()}
                         >
-                            <label className="text-xs uppercase tracking-wide text-gray-500">
-                                Text content
-                            </label>
-                            <input
-                                data-testid="ctxmenu-text-input"
-                                type="text"
-                                value={selectedTextValue}
-                                onChange={(event) => handleSelectedTextChange(event.target.value)}
-                                onClick={(event) => event.stopPropagation()}
-                                className="min-w-[200px] rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
-                            />
-                            <div className="flex gap-2">
+                            <div
+                                ref={inlineTextContentRef}
+                                data-testid="inline-text-content"
+                                role="textbox"
+                                aria-label="Edit score text"
+                                contentEditable
+                                suppressContentEditableWarning
+                                onInput={event => handleSelectedTextChange(event.currentTarget.textContent ?? '')}
+                                onKeyDown={event => {
+                                    if (event.key === 'Escape') {
+                                        event.preventDefault();
+                                        closeTextEditor();
+                                    } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                                        event.preventDefault();
+                                        void applySelectedTextValue(event.currentTarget.textContent ?? '');
+                                        closeTextEditor();
+                                    }
+                                }}
+                                className="min-h-7 min-w-[150px] px-1 py-0.5 text-sm outline-none"
+                            >
+                                {selectedTextValue}
+                            </div>
+                            <div className="flex justify-end gap-1 border-t border-slate-200 pt-1">
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        handleApplySelectedText();
+                                        void applySelectedTextValue(inlineTextContentRef.current?.textContent ?? selectedTextValue);
                                         closeTextEditor();
                                     }}
-                                    className="flex-1 rounded border border-gray-300 px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                                    className="rounded bg-blue-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-blue-700"
                                 >
                                     Save
                                 </button>
                                 <button
                                     type="button"
                                     onClick={closeTextEditor}
-                                    className="flex-1 rounded border border-gray-300 px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                                    className="rounded border border-gray-300 px-2 py-0.5 text-xs font-medium text-gray-700 hover:bg-gray-100"
                                 >
                                     Cancel
                                 </button>
@@ -15113,6 +15221,15 @@ ${partsBodyXml}
                         })}
                     </div>
                 </aside>
+            )}
+
+            {!isEmbedMode && xmlSidebarMode !== 'full' && (
+                <InspectorPanel
+                    data={inspectorData}
+                    loading={inspectorLoading}
+                    disabled={!interactiveMutationEnabled || !score?.setSelectedElementProperty}
+                    onChange={(property, value) => { void handleSetInspectorProperty(property, value); }}
+                />
             )}
 
             <aside

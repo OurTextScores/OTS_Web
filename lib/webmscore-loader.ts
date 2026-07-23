@@ -45,6 +45,28 @@ export interface GripEditInfo {
     }>;
 }
 
+export type InspectorPropertyName =
+    | 'visible'
+    | 'color'
+    | 'placement'
+    | 'offsetX'
+    | 'offsetY'
+    | 'small'
+    | 'stemDirection'
+    | 'lineStyle';
+
+export interface InspectorPropertyState {
+    value: boolean | number | string | null;
+    mixed: boolean;
+    applicableCount: number;
+}
+
+export interface SelectedElementProperties {
+    selectionCount: number;
+    elementType: string;
+    properties: Partial<Record<InspectorPropertyName, InspectorPropertyState>>;
+}
+
 export interface Score {
     destroy: (soft?: boolean) => void;
     saveSvg: (pageNumber?: number, drawPageBackground?: boolean, highlightSelection?: boolean) => Promise<string>;
@@ -209,6 +231,8 @@ export interface Score {
     setComposerText?: (text: string) => Promise<unknown> | unknown;
     setLyricistText?: (text: string) => Promise<unknown> | unknown;
     setSelectedText?: (text: string) => Promise<unknown> | unknown;
+    getSelectedElementProperties?: () => Promise<SelectedElementProperties> | SelectedElementProperties;
+    setSelectedElementProperty?: (propertyName: InspectorPropertyName, value: boolean | number | string) => Promise<boolean> | boolean;
     appendPart?: (instrumentId: string) => Promise<unknown> | unknown;
     appendPartByMusicXmlId?: (instrumentMusicXmlId: string) => Promise<unknown> | unknown;
     removePart?: (partIndex: number) => Promise<unknown> | unknown;

@@ -310,6 +310,22 @@ class WebMscore {
         }
     }
 
+    async getSelectedElementProperties() {
+        const dataptr = Module.ccall('getSelectedElementProperties', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
+        return JSON.parse(WasmRes.readText(dataptr))
+    }
+
+    async setSelectedElementProperty(propertyName, value) {
+        const nameptr = getStrPtr(String(propertyName))
+        const valueptr = getStrPtr(String(value))
+        try {
+            return Module.ccall('setSelectedElementProperty', 'boolean', ['number', 'number', 'number', 'number'], [this.scoreptr, nameptr, valueptr, this.excerptId])
+        } finally {
+            freePtr(nameptr)
+            freePtr(valueptr)
+        }
+    }
+
     /**
      * Append a new part using an instrument template id
      * @param {string} instrumentId

@@ -261,6 +261,14 @@ class WebMscoreW {
         return this.rpc('setSelectedText', [text])
     }
 
+    getSelectedElementProperties() {
+        return this.rpc('getSelectedElementProperties')
+    }
+
+    setSelectedElementProperty(propertyName, value) {
+        return this.rpc('setSelectedElementProperty', [propertyName, value])
+    }
+
     /**
      * Append a new part using an instrument template id
      * @param {string} instrumentId
