@@ -4,11 +4,18 @@
     font-display: swap;
 }
 
+/* Bravura has full SMuFL coverage; used as a fallback for glyphs Leland lacks. */
+@font-face {
+    font-family: "BravuraPalette";
+    src: url("../webmscore-fork/fonts/bravura/Bravura.woff2") format("woff2");
+    font-display: swap;
+}
+
 .glyph {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-family: "LelandPalette", serif;
+    font-family: "LelandPalette", "BravuraPalette", serif;
     font-size: 1.6rem;
     font-style: normal;
     font-weight: 400;

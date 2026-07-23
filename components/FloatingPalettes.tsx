@@ -45,8 +45,8 @@ export function FloatingPalettes({ disabled = false, dragEnabled = false, onAppl
     return (
         <aside
             data-testid="floating-palettes"
-            className="fixed z-[120] flex max-h-[70vh] w-80 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl"
-            style={{ left: position.x, top: position.y }}
+            className="fixed z-[120] flex w-80 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl"
+            style={{ left: position.x, top: position.y, maxHeight: '70vh' }}
         >
             <div
                 data-testid="floating-palettes-handle"
