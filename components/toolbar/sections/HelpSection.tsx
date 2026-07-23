@@ -6,6 +6,9 @@ import { shortcutEntries, dropdownTextClass } from '../constants';
 import { Keyboard, HelpCircle } from 'lucide-react';
 
 export const HelpSection: React.FC<ToolbarSectionProps> = () => {
+    // The embed build serves under basePath /score-editor; a raw <a href> is not
+    // basePath-prefixed by Next (only <Link>/router are), so prefix it explicitly.
+    const helpHref = process.env.NEXT_PUBLIC_BUILD_MODE === 'embed' ? '/score-editor/help' : '/help';
     return (
         <>
             <DropdownMenu modal={false}>
@@ -35,7 +38,7 @@ export const HelpSection: React.FC<ToolbarSectionProps> = () => {
                 size="sm"
                 className="shadow-sm"
             >
-                <a href="/help" target="_blank" rel="noopener noreferrer" title="Open the editor help page">
+                <a href={helpHref} target="_blank" rel="noopener noreferrer" title="Open the editor help page">
                     <HelpCircle size={14} className="mr-2" />
                     Help
                 </a>
