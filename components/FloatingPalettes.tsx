@@ -80,7 +80,7 @@ export function FloatingPalettes({ disabled = false, dragEnabled = false, onAppl
                     className="min-w-0 flex-1 text-sm outline-none"
                 />
             </label>
-            <div className="overflow-y-auto px-3 pb-3">
+            <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
                 {categories.map(category => {
                     const items = visibleItems.filter(item => item.category === category);
                     if (!items.length) return null;
