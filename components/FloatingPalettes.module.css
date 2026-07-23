@@ -24,3 +24,19 @@
     line-height: 1;
     color: #0f172a;
 }
+
+/* Text directions (jumps: D.C., D.S. al Coda…) shown in the notation text font. */
+.textGlyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    max-height: 2.4rem;
+    overflow: hidden;
+    padding: 0 0.15rem;
+    font-family: "LelandPalette", "BravuraPalette", serif;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.05;
+    text-align: center;
+    color: #0f172a;
+}

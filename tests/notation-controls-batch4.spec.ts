@@ -126,8 +126,15 @@ test('creates semantic measure-repeat groups without replacing non-empty measure
   await expect(rests).toHaveCount(4, { timeout: 20_000 });
   await rests.first().click();
 
-  await page.getByTestId('dropdown-measure-repeat').click();
-  await page.getByTestId('btn-measure-repeat-2').click();
+  // The measure-repeat toolbar control was retired; drive the engine directly.
+  const added = await page.evaluate(async () => {
+    const score = (window as unknown as {
+      __webmscore?: { addMeasureRepeat?: (count: number) => Promise<boolean> };
+    }).__webmscore;
+    if (!score?.addMeasureRepeat) throw new Error('window.__webmscore.addMeasureRepeat is unavailable');
+    return score.addMeasureRepeat(2);
+  });
+  expect(added).toBe(true);
   await expect.poll(async () => /<MeasureRepeat>[\s\S]*?<subtype>2<\/subtype>/.test(await readMscx(page)), { timeout: 20_000 }).toBe(true);
 
   await page.keyboard.press('Control+z');
@@ -150,19 +157,23 @@ test('creates semantic measure-repeat groups without replacing non-empty measure
 
 test('toggles multi-measure rests as an undoable score style', async ({ page }) => {
   await loadBatch4Score(page);
-  const toggle = page.getByTestId('btn-multi-measure-rests');
-  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-  await toggle.click();
+  // The multi-measure-rest toolbar toggle was retired; drive the engine directly.
+  const setMultiMeasureRests = (enabled: boolean) => page.evaluate(async (value) => {
+    const score = (window as unknown as {
+      __webmscore?: { setMultiMeasureRests?: (on: boolean) => Promise<boolean> };
+    }).__webmscore;
+    if (!score?.setMultiMeasureRests) throw new Error('window.__webmscore.setMultiMeasureRests is unavailable');
+    return score.setMultiMeasureRests(value);
+  }, enabled);
 
+  await expect.poll(() => multiMeasureRestsEnabled(page), { timeout: 20_000 }).toBe(false);
+  expect(await setMultiMeasureRests(true)).toBe(true);
   await expect.poll(() => multiMeasureRestsEnabled(page), { timeout: 20_000 }).toBe(true);
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
 
   await page.keyboard.press('Control+z');
   await expect.poll(() => multiMeasureRestsEnabled(page), { timeout: 20_000 }).toBe(false);
-  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await page.keyboard.press('Control+y');
   await expect.poll(() => multiMeasureRestsEnabled(page), { timeout: 20_000 }).toBe(true);
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
 
   await reloadCurrentMscz(page);
   await expect.poll(() => multiMeasureRestsEnabled(page), { timeout: 20_000 }).toBe(true);

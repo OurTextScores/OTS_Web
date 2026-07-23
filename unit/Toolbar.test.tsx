@@ -527,14 +527,12 @@ describe('Toolbar', () => {
     expect(onAddJump).toHaveBeenCalledWith(2);
   });
 
-  it('renders and wires Batch 4 notation, filter, and measure controls', async () => {
+  it('renders and wires Batch 4 notation and filter controls', async () => {
     const user = userEvent.setup();
     const onSetNoteheadGroup = vi.fn();
     const onSetBeamMode = vi.fn();
     const onOpenPalette = vi.fn();
     const onSetSelectionFilterBit = vi.fn();
-    const onAddMeasureRepeat = vi.fn();
-    const onSetMultiMeasureRests = vi.fn();
 
     render(
       <Toolbar
@@ -549,9 +547,6 @@ describe('Toolbar', () => {
         onOpenPalette={onOpenPalette}
         onSetBeamMode={onSetBeamMode}
         onSetSelectionFilterBit={onSetSelectionFilterBit}
-        onAddMeasureRepeat={onAddMeasureRepeat}
-        multiMeasureRestsEnabled={false}
-        onSetMultiMeasureRests={onSetMultiMeasureRests}
       />,
     );
 
@@ -564,13 +559,6 @@ describe('Toolbar', () => {
     await user.click(screen.getByTestId('dropdown-selection-filter'));
     await user.click(screen.getByTestId(`selection-filter-${1 << 23}`));
     expect(onSetSelectionFilterBit).toHaveBeenCalledWith(1 << 23, false);
-
-    await user.click(screen.getByTestId('dropdown-measure-repeat'));
-    await user.click(screen.getByTestId('btn-measure-repeat-2'));
-    expect(onAddMeasureRepeat).toHaveBeenCalledWith(2);
-
-    await user.click(screen.getByTestId('btn-multi-measure-rests'));
-    expect(onSetMultiMeasureRests).toHaveBeenCalledWith(true);
   });
 
   it('lists the slur keyboard shortcut', async () => {

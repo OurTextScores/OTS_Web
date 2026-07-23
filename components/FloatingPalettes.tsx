@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { GripHorizontal, Search, X } from 'lucide-react';
 import { SCORE_PALETTE_DRAG_MIME, scorePaletteItems, type PaletteCategory, type ScorePaletteItem } from './toolbar/palette';
 import { BeamIcon } from './toolbar/BeamIcon';
+import { VoltaIcon } from './toolbar/VoltaIcon';
 import styles from './FloatingPalettes.module.css';
 
 interface FloatingPalettesProps {
@@ -118,9 +119,13 @@ export function FloatingPalettes({ disabled = false, dragEnabled = false, onAppl
                                         >
                                             {item.kind === 'beam'
                                                 ? <BeamIcon value={item.subtype} className="text-slate-800" />
-                                                : item.symbol
-                                                    ? <span className={styles.glyph}>{item.symbol}</span>
-                                                    : <span className="px-0.5 text-center text-[10px] font-medium leading-tight text-slate-700">{item.label}</span>}
+                                                : item.kind === 'volta'
+                                                    ? <VoltaIcon value={item.subtype} className="text-slate-800" />
+                                                    : item.kind === 'jump'
+                                                        ? <span className={styles.textGlyph}>{item.label}</span>
+                                                        : item.symbol
+                                                            ? <span className={styles.glyph}>{item.symbol}</span>
+                                                            : <span className="px-0.5 text-center text-[10px] font-medium leading-tight text-slate-700">{item.label}</span>}
                                         </button>
                                     );
                                 })}

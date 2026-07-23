@@ -4,8 +4,9 @@ import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMen
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../../ui/Select';
 import { ToolbarSectionProps } from '../types';
 import { clefButtonOptionsDefault, barlineOptions, repeatCountOptions, voltaOptions } from '../constants';
-import { clefScorePaletteItem, SCORE_PALETTE_DRAG_MIME } from '../palette';
+import { clefScorePaletteItem, barlineGlyph, SCORE_PALETTE_DRAG_MIME } from '../palette';
 import { PaletteLink } from '../PaletteLink';
+import { VoltaIcon } from '../VoltaIcon';
 import { Guitar, Repeat, Signpost } from 'lucide-react';
 import styles from './ScoreSection.module.css';
 
@@ -59,6 +60,8 @@ const clefSymbol = (clefType: number): string => {
 };
 
 const TREBLE_CLEF = String.fromCharCode(0xE050); // SMuFL gClef
+const REPEAT_START_GLYPH = String.fromCharCode(0xE040); // SMuFL repeatLeft
+const REPEAT_END_GLYPH = String.fromCharCode(0xE041);   // SMuFL repeatRight
 
 export const ScoreSection: React.FC<ToolbarSectionProps> = ({
     instrumentGroups = [],
@@ -272,8 +275,14 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent data-testid="repeats-menu" className={styles.navigationMenu}>
                     <DropdownMenuLabel>Repeats</DropdownMenuLabel>
-                    <DropdownMenuItem data-testid="btn-repeat-start" disabled={mutationDisabled || !selectionActive || !onToggleRepeatStart} onSelect={() => onToggleRepeatStart?.()}>Start Repeat</DropdownMenuItem>
-                    <DropdownMenuItem data-testid="btn-repeat-end" disabled={mutationDisabled || !selectionActive || !onToggleRepeatEnd} onSelect={() => onToggleRepeatEnd?.()}>End Repeat</DropdownMenuItem>
+                    <DropdownMenuItem data-testid="btn-repeat-start" className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onToggleRepeatStart} onSelect={() => onToggleRepeatStart?.()}>
+                        <span className={styles.markerSymbol} aria-hidden="true">{REPEAT_START_GLYPH}</span>
+                        <span>Start Repeat</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem data-testid="btn-repeat-end" className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onToggleRepeatEnd} onSelect={() => onToggleRepeatEnd?.()}>
+                        <span className={styles.markerSymbol} aria-hidden="true">{REPEAT_END_GLYPH}</span>
+                        <span>End Repeat</span>
+                    </DropdownMenuItem>
                     <DropdownMenuLabel>Repeat Count</DropdownMenuLabel>
                     {repeatCountOptions.map(opt => (
                         <DropdownMenuItem key={opt.count} data-testid={`btn-repeat-count-${opt.count}`} disabled={mutationDisabled || !selectionActive || !onSetRepeatCount} onSelect={() => onSetRepeatCount?.(opt.count)}>
@@ -282,14 +291,16 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
                     ))}
                     <DropdownMenuLabel>Barlines</DropdownMenuLabel>
                     {barlineOptions.map(opt => (
-                        <DropdownMenuItem key={opt.value} data-testid={`btn-barline-${opt.value}`} disabled={mutationDisabled || !selectionActive || !onSetBarLineType} onSelect={() => onSetBarLineType?.(opt.value)}>
-                            {opt.label}
+                        <DropdownMenuItem key={opt.value} data-testid={`btn-barline-${opt.value}`} className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onSetBarLineType} onSelect={() => onSetBarLineType?.(opt.value)}>
+                            <span className={styles.markerSymbol} aria-hidden="true">{barlineGlyph(opt.value)}</span>
+                            <span>{opt.label}</span>
                         </DropdownMenuItem>
                     ))}
                     <DropdownMenuLabel>Voltas</DropdownMenuLabel>
                     {voltaOptions.map(opt => (
-                        <DropdownMenuItem key={opt.ending} data-testid={`btn-volta-${opt.ending}`} disabled={mutationDisabled || !selectionActive || !onAddVolta} onSelect={() => onAddVolta?.(opt.ending)}>
-                            {opt.label}
+                        <DropdownMenuItem key={opt.ending} data-testid={`btn-volta-${opt.ending}`} className="min-h-10 gap-3" disabled={mutationDisabled || !selectionActive || !onAddVolta} onSelect={() => onAddVolta?.(opt.ending)}>
+                            <VoltaIcon value={opt.ending} className="text-slate-800" />
+                            <span>{opt.label}</span>
                         </DropdownMenuItem>
                     ))}
                 </DropdownMenuContent>
@@ -314,7 +325,7 @@ export const ScoreSection: React.FC<ToolbarSectionProps> = ({
                     <DropdownMenuLabel>Jumps</DropdownMenuLabel>
                     {jumpOptions.filter(option => option.common).map(option => (
                         <DropdownMenuItem key={option.value} data-testid={`btn-jump-${option.value}`} disabled={mutationDisabled || !selectionActive || !onAddJump} onSelect={() => onAddJump?.(option.value)}>
-                            {option.label}
+                            <span className={styles.jumpLabel}>{option.label}</span>
                         </DropdownMenuItem>
                     ))}
                     <PaletteLink category="Jumps" label="Open Jumps Palette…" testId="btn-open-jumps-palette" onOpenPalette={onOpenPalette} />

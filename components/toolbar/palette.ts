@@ -145,13 +145,23 @@ const articulationItems: ScorePaletteItem[] = articulationOptions.map((option, i
 }));
 
 // --- Everything else -------------------------------------------------------
+// Render the key's tonic with its accidental in the Leland notation font
+// (e.g. "F#" → F + sharp glyph), mirroring the Key dropdown.
+const KEYSIG_SHARP = String.fromCharCode(0xE262); // accidentalSharp
+const KEYSIG_FLAT = String.fromCharCode(0xE260);  // accidentalFlat
+const keySigGlyph = (label: string): string => label.replace(/#/g, KEYSIG_SHARP).replace(/b/g, KEYSIG_FLAT);
 const keySignatureItems = makePaletteItems('Key Signatures', 'keysig', keySignatureButtonOptionsDefault.map(option => ({
-    label: `${option.label} major`, value: option.fifths,
+    label: `${option.label} major`, value: option.fifths, symbol: keySigGlyph(option.label),
 })));
 
+// Common time (C) and cut time (¢) get their SMuFL glyphs; other meters stay numeric.
+const timeSignatureGlyphs: Record<number, string> = {
+    1: '', // timeSigCommon
+    2: '', // timeSigCutCommon
+};
 const timeSignatureItems: ScorePaletteItem[] = signatureOptionsDefault.map(option => ({
     label: option.label,
-    symbol: '',
+    symbol: timeSignatureGlyphs[option.timeSigType] ?? '',
     category: 'Time Signatures',
     kind: 'timesig',
     subtype: option.numerator,
@@ -161,9 +171,24 @@ const timeSignatureItems: ScorePaletteItem[] = signatureOptionsDefault.map(optio
 const accidentalItems = makePaletteItems('Accidentals', 'accidental',
     accidentalOptions.filter(option => option.value !== 0).map(option => ({ label: option.name, value: option.value, symbol: option.symbol })));
 
-const graceNoteItems = makePaletteItems('Grace Notes', 'gracenote', graceNoteOptions.map(option => ({ label: option.label, value: option.value })));
+// Slashed/plain grace-note heads for acciaccatura/appoggiatura; metronome note
+// glyphs stand in for the duration-typed grace notes.
+const graceNoteGlyphs: Record<number, string> = {
+    1: '',  // graceNoteAcciaccaturaStemUp
+    2: '',  // graceNoteAppoggiaturaStemUp
+    8: '',  // metNote16thUp
+    16: '', // metNote32ndUp
+    32: '', // metNote8thUp
+    64: '', // metNote16thUp
+    128: '', // metNote32ndUp
+};
+const graceNoteItems = makePaletteItems('Grace Notes', 'gracenote', graceNoteOptions.map(option => ({ label: option.label, value: option.value, symbol: graceNoteGlyphs[option.value] })));
 
-const hairpinItems = makePaletteItems('Hairpins', 'hairpin', hairpinOptions.map(option => ({ label: option.label, value: option.value })));
+const hairpinGlyphs: Record<number, string> = {
+    0: '', // dynamicCrescendoHairpin
+    1: '', // dynamicDiminuendoHairpin
+};
+const hairpinItems = makePaletteItems('Hairpins', 'hairpin', hairpinOptions.map(option => ({ label: option.label, value: option.value, symbol: hairpinGlyphs[option.value] })));
 
 const pedalItems = makePaletteItems('Pedals', 'pedal', pedalOptions.map(option => ({ label: option.label, value: option.value })));
 
@@ -244,13 +269,26 @@ const beamItems = makePaletteItems('Beams', 'beam', [
     { label: 'Break secondary beam at 16th', value: 4 },
 ]);
 
-const barlineItems = makePaletteItems('Barlines', 'barline', barlineOptions.map(option => ({ label: `${option.label} barline`, value: option.value })));
+// SMuFL barline glyphs keyed by BarLineType.
+const barlineGlyphCodes: Record<number, number> = {
+    1: 0xE030,    // barlineSingle
+    2: 0xE031,    // barlineDouble
+    32: 0xE032,   // barlineFinal
+    512: 0xE034,  // barlineHeavy
+    1024: 0xE035, // barlineHeavyHeavy
+    16: 0xE036,   // barlineDashed
+    128: 0xE037,  // barlineDotted
+    256: 0xE033,  // barlineReverseFinal
+};
+export const barlineGlyph = (value: number): string =>
+    (barlineGlyphCodes[value] ? String.fromCharCode(barlineGlyphCodes[value]) : '');
+const barlineItems = makePaletteItems('Barlines', 'barline', barlineOptions.map(option => ({ label: `${option.label} barline`, value: option.value, symbol: barlineGlyph(option.value) })));
 
 const voltaItems = makePaletteItems('Voltas', 'volta', voltaOptions.map(option => ({ label: option.label, value: option.ending })));
 
 const repeatItems: ScorePaletteItem[] = [
-    { label: 'Start repeat', symbol: '', category: 'Repeats', kind: 'repeat-start', subtype: 0 },
-    { label: 'End repeat', symbol: '', category: 'Repeats', kind: 'repeat-end', subtype: 0 },
+    { label: 'Start repeat', symbol: String.fromCharCode(0xE040), category: 'Repeats', kind: 'repeat-start', subtype: 0 },
+    { label: 'End repeat', symbol: String.fromCharCode(0xE041), category: 'Repeats', kind: 'repeat-end', subtype: 0 },
     ...makePaletteItems('Repeats', 'repeat-count', repeatCountOptions.map(option => ({ label: `Repeat ${option.label}`, value: option.count }))),
 ];
 
