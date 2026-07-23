@@ -73,6 +73,18 @@ const beamOptions = [
     { label: 'Break secondary beam at 16th', value: 4 },
 ] as const;
 
+const fretDiagramOptions = [
+    { label: 'Blank', pattern: '......' },
+    { label: 'C', pattern: 'X32010' },
+    { label: 'G', pattern: '320003' },
+    { label: 'D', pattern: 'XX0232' },
+    { label: 'A', pattern: 'X02220' },
+    { label: 'E', pattern: '022100' },
+    { label: 'Am', pattern: 'X02210' },
+    { label: 'Em', pattern: '022000' },
+    { label: 'Dm', pattern: 'XX0231' },
+] as const;
+
 export const NotesSection: React.FC<ToolbarSectionProps> = ({
     onAddGraceNote,
     onSetVoice,
@@ -85,6 +97,7 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
     onAddTremolo,
     onSetNoteheadGroup,
     onSetBeamMode,
+    onAddFretDiagram,
     onToggleNoteInput,
     noteInputActive,
     noteInputMethod,
@@ -143,6 +156,23 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
                             onSelect={() => onSetNoteInputMethod?.(option.value)}
                         >
                             {option.label}
+                        </DropdownMenuItem>
+                    ))}
+                </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                    <Button data-testid="dropdown-fretboards" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive || !onAddFretDiagram} className="shadow-sm">
+                        Fretboards
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent data-testid="fretboards-menu" className="max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto">
+                    <DropdownMenuLabel>Common</DropdownMenuLabel>
+                    {fretDiagramOptions.map(option => (
+                        <DropdownMenuItem key={option.label} data-testid={`btn-fretboard-${option.label.toLowerCase()}`} onSelect={() => onAddFretDiagram?.(option.pattern)}>
+                            <span className="mr-3 min-w-8 font-semibold">{option.label}</span>
+                            <span className="font-mono text-xs text-slate-500">{option.pattern.replaceAll('.', '–')}</span>
                         </DropdownMenuItem>
                     ))}
                 </DropdownMenuContent>

@@ -82,6 +82,8 @@
 #include "engraving/libmscore/arpeggio.h"
 #include "engraving/libmscore/breath.h"
 #include "engraving/libmscore/fermata.h"
+#include "engraving/libmscore/fret.h"
+#include "engraving/libmscore/ambitus.h"
 #include "engraving/libmscore/tremolo.h"
 #include "engraving/libmscore/barline.h"
 #include "engraving/libmscore/figuredbass.h"
@@ -6070,6 +6072,323 @@ bool _addRehearsalMark(uintptr_t score_ptr, int excerptId)
     return true;
 }
 
+static engraving::FretDiagram* selectedFretDiagram(MainScore& score)
+{
+    engraving::FretDiagram* selected = nullptr;
+    for (auto* item : selectedInspectorTargets(score)) {
+        if (item->isFretDiagram()) {
+            if (selected) return nullptr;
+            selected = toFretDiagram(item);
+        }
+    }
+    if (selected) return selected;
+
+    auto* chordRest = score->selection().cr();
+    if (!chordRest) chordRest = score->selection().firstChordRest();
+    if (!chordRest || !chordRest->segment()) return nullptr;
+    const auto track = engraving::trackZeroVoice(chordRest->track());
+    for (auto* annotation : chordRest->segment()->annotations()) {
+        if (annotation && annotation->isFretDiagram() && annotation->track() == track) {
+            if (selected) return nullptr;
+            selected = toFretDiagram(annotation);
+        }
+    }
+    return selected;
+}
+
+static QJsonObject fretDiagramJson(const engraving::FretDiagram& diagram)
+{
+    QJsonObject result;
+    result.insert(QStringLiteral("strings"), diagram.strings());
+    result.insert(QStringLiteral("frets"), diagram.frets());
+    result.insert(QStringLiteral("fretOffset"), diagram.fretOffset());
+    result.insert(QStringLiteral("showNut"), diagram.showNut());
+
+    QJsonArray dots;
+    for (const auto& [string, stringDots] : diagram.dots()) {
+        for (const auto& dot : stringDots) {
+            if (!dot.exists()) continue;
+            QJsonObject item;
+            item.insert(QStringLiteral("string"), string);
+            item.insert(QStringLiteral("fret"), dot.fret);
+            item.insert(QStringLiteral("type"), static_cast<int>(dot.dtype));
+            dots.append(item);
+        }
+    }
+    result.insert(QStringLiteral("dots"), dots);
+
+    QJsonArray markers;
+    for (const auto& [string, marker] : diagram.markers()) {
+        if (!marker.exists()) continue;
+        QJsonObject item;
+        item.insert(QStringLiteral("string"), string);
+        item.insert(QStringLiteral("type"), static_cast<int>(marker.mtype));
+        markers.append(item);
+    }
+    result.insert(QStringLiteral("markers"), markers);
+
+    QJsonArray barres;
+    for (const auto& [fret, barre] : diagram.barres()) {
+        if (!barre.exists()) continue;
+        QJsonObject item;
+        item.insert(QStringLiteral("fret"), fret);
+        item.insert(QStringLiteral("startString"), barre.startString);
+        item.insert(QStringLiteral("endString"), barre.endString);
+        barres.append(item);
+    }
+    result.insert(QStringLiteral("barres"), barres);
+    return result;
+}
+
+static WasmRes _getSelectedFretDiagram(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    auto* diagram = selectedFretDiagram(score);
+    if (!diagram) {
+        return WasmRes(QByteArray("null"));
+    }
+    return WasmRes(QJsonDocument(fretDiagramJson(*diagram)).toJson(QJsonDocument::Compact));
+}
+
+static bool jsonInt(const QJsonObject& object, const char* name, int minimum, int maximum, int& result)
+{
+    const auto value = object.value(QString::fromUtf8(name));
+    if (!value.isDouble()) return false;
+    const double numeric = value.toDouble();
+    if (!std::isfinite(numeric) || std::floor(numeric) != numeric || numeric < minimum || numeric > maximum) return false;
+    result = static_cast<int>(numeric);
+    return true;
+}
+
+static bool _setSelectedFretDiagram(uintptr_t score_ptr, const char* serializedDiagram, int excerptId)
+{
+    if (!serializedDiagram) return false;
+    MainScore score(score_ptr, excerptId);
+    auto* diagram = selectedFretDiagram(score);
+    if (!diagram) return false;
+
+    QJsonParseError parseError;
+    const auto document = QJsonDocument::fromJson(QByteArray(serializedDiagram), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) return false;
+    const auto object = document.object();
+    int strings = 0;
+    int frets = 0;
+    int fretOffset = 0;
+    if (!jsonInt(object, "strings", 4, 12, strings)
+        || !jsonInt(object, "frets", 1, 12, frets)
+        || !jsonInt(object, "fretOffset", 0, 20, fretOffset)
+        || !object.value(QStringLiteral("showNut")).isBool()
+        || !object.value(QStringLiteral("dots")).isArray()
+        || !object.value(QStringLiteral("markers")).isArray()
+        || !object.value(QStringLiteral("barres")).isArray()) {
+        return false;
+    }
+    const bool showNut = object.value(QStringLiteral("showNut")).toBool();
+
+    struct DotInput { int string; int fret; int type; };
+    struct MarkerInput { int string; int type; };
+    struct BarreInput { int fret; int startString; };
+    std::vector<DotInput> dots;
+    std::vector<MarkerInput> markers;
+    std::vector<BarreInput> barres;
+    std::set<std::pair<int, int> > occupiedDots;
+    std::set<int> occupiedMarkers;
+    for (const auto& value : object.value(QStringLiteral("dots")).toArray()) {
+        if (!value.isObject() || dots.size() >= 96) return false;
+        const auto item = value.toObject();
+        DotInput dot {};
+        if (!jsonInt(item, "string", 0, strings - 1, dot.string)
+            || !jsonInt(item, "fret", 1, frets, dot.fret)
+            || !jsonInt(item, "type", 0, 3, dot.type)
+            || !occupiedDots.insert({ dot.string, dot.fret }).second) return false;
+        dots.push_back(dot);
+    }
+    for (const auto& value : object.value(QStringLiteral("markers")).toArray()) {
+        if (!value.isObject() || markers.size() >= 12) return false;
+        const auto item = value.toObject();
+        MarkerInput marker {};
+        if (!jsonInt(item, "string", 0, strings - 1, marker.string)
+            || !jsonInt(item, "type", 1, 2, marker.type)
+            || !occupiedMarkers.insert(marker.string).second) return false;
+        markers.push_back(marker);
+    }
+    for (const auto& value : object.value(QStringLiteral("barres")).toArray()) {
+        if (!value.isObject() || barres.size() >= 12) return false;
+        const auto item = value.toObject();
+        BarreInput barre {};
+        int endString = 0;
+        if (!jsonInt(item, "fret", 1, frets, barre.fret)
+            || !jsonInt(item, "startString", 0, strings - 1, barre.startString)
+            || !jsonInt(item, "endString", -1, strings - 1, endString)
+            || endString != -1) return false;
+        barres.push_back(barre);
+    }
+
+    score->startCmd();
+    if (diagram->strings() != strings) diagram->undoChangeProperty(engraving::Pid::FRET_STRINGS, strings, engraving::PropertyFlags::UNSTYLED);
+    if (diagram->frets() != frets) diagram->undoChangeProperty(engraving::Pid::FRET_FRETS, frets, engraving::PropertyFlags::UNSTYLED);
+    if (diagram->fretOffset() != fretOffset) diagram->undoChangeProperty(engraving::Pid::FRET_OFFSET, fretOffset, engraving::PropertyFlags::UNSTYLED);
+    if (diagram->showNut() != showNut) diagram->undoChangeProperty(engraving::Pid::FRET_NUT, showNut, engraving::PropertyFlags::UNSTYLED);
+    diagram->undoFretClear();
+    for (const auto& dot : dots) {
+        diagram->undoSetFretDot(dot.string, dot.fret, true, static_cast<engraving::FretDotType>(dot.type));
+    }
+    for (const auto& marker : markers) {
+        diagram->undoSetFretMarker(marker.string, static_cast<engraving::FretMarkerType>(marker.type));
+    }
+    for (const auto& barre : barres) {
+        diagram->undoSetFretBarre(barre.startString, barre.fret, false);
+    }
+    score->endCmd();
+    return true;
+}
+
+static bool _addFretDiagram(uintptr_t score_ptr, const char* pattern, int excerptId)
+{
+    if (!pattern) return false;
+    const std::string value(pattern);
+    if (value.size() < 4 || value.size() > 12) return false;
+    int maximumFret = 0;
+    for (const char c : value) {
+        if (c != 'X' && c != '0' && c != '.' && (c < '1' || c > '9')) return false;
+        if (c >= '1' && c <= '9') maximumFret = std::max(maximumFret, c - '0');
+    }
+
+    MainScore score(score_ptr, excerptId);
+    auto* chordRest = score->selection().cr();
+    if (!chordRest) chordRest = score->selection().firstChordRest();
+    if (!chordRest || !chordRest->segment()) return false;
+    auto* segment = chordRest->segment();
+    const auto track = engraving::trackZeroVoice(chordRest->track());
+    for (auto* annotation : segment->annotations()) {
+        if (annotation && annotation->isFretDiagram() && annotation->track() == track) return false;
+    }
+
+    auto* diagram = engraving::Factory::createFretDiagram(segment);
+    if (!diagram) return false;
+    diagram->setParent(segment);
+    diagram->setTrack(chordRest->track());
+    diagram->init(nullptr, chordRest->isChord() ? toChord(chordRest) : nullptr);
+    diagram->setStrings(static_cast<int>(value.size()));
+    diagram->setFrets(std::max(4, maximumFret));
+    diagram->setPropertyFlags(engraving::Pid::FRET_STRINGS, engraving::PropertyFlags::UNSTYLED);
+    diagram->setPropertyFlags(engraving::Pid::FRET_FRETS, engraving::PropertyFlags::UNSTYLED);
+    for (size_t string = 0; string < value.size(); ++string) {
+        const char c = value[string];
+        if (c == 'X') diagram->setMarker(static_cast<int>(string), engraving::FretMarkerType::CROSS);
+        else if (c == '0') diagram->setMarker(static_cast<int>(string), engraving::FretMarkerType::CIRCLE);
+        else if (c >= '1' && c <= '9') diagram->setDot(static_cast<int>(string), c - '0', true);
+    }
+
+    score->startCmd();
+    score->undoAddElement(diagram);
+    score->endCmd();
+    score->select(diagram, engraving::SelectType::SINGLE, diagram->staffIdx());
+    return true;
+}
+
+static bool _addAmbitus(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    auto* chordRest = score->selection().cr();
+    if (!chordRest) chordRest = score->selection().firstChordRest();
+    if (!chordRest || !chordRest->measure()) return false;
+    auto* measure = chordRest->measure();
+    const auto track = engraving::trackZeroVoice(chordRest->track());
+
+    score->startCmd();
+    auto* segment = measure->getSegment(engraving::SegmentType::Ambitus, measure->tick());
+    if (!segment || segment->element(track)) {
+        score->endCmd(true);
+        return false;
+    }
+    auto* ambitus = engraving::Factory::createAmbitus(segment);
+    if (!ambitus) {
+        score->endCmd(true);
+        return false;
+    }
+    ambitus->setParent(segment);
+    ambitus->setTrack(track);
+    score->undoAddElement(ambitus);
+    score->endCmd();
+    score->select(ambitus, engraving::SelectType::SINGLE, ambitus->staffIdx());
+    return true;
+}
+
+static bool _explodeSelection(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (!score->selection().isRange()) return false;
+    score->startCmd();
+    score->cmdExplode();
+    score->endCmd();
+    return true;
+}
+
+static bool _implodeSelection(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (!score->selection().isRange()) return false;
+    score->startCmd();
+    score->cmdImplode();
+    score->endCmd();
+    return true;
+}
+
+static bool _regroupSelection(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (!score->selection().isRange()) return false;
+    score->cmdResetNoteAndRestGroupings();
+    return true;
+}
+
+static bool _resequenceRehearsalMarks(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (!score->selection().isRange()) return false;
+    std::vector<engraving::RehearsalMark*> rehearsalMarks;
+    for (auto* segment = score->selection().startSegment(); segment && segment != score->selection().endSegment(); segment = segment->next1()) {
+        for (auto* annotation : segment->annotations()) {
+            if (annotation && annotation->isRehearsalMark()) rehearsalMarks.push_back(toRehearsalMark(annotation));
+        }
+    }
+    if (rehearsalMarks.size() < 2) return false;
+
+    // MusicXML imports can leave an empty formatting tag in xmlText (for example
+    // "<b></b>A"), which prevents Score::nextRehearsalMarkText() from detecting
+    // an otherwise ordinary alphabetic sequence. Sequence from visible text so
+    // the tool behaves consistently for native and imported scores.
+    auto nextText = [](engraving::RehearsalMark* previous, engraving::RehearsalMark* current) {
+        const String previousText = previous->plainText().trimmed();
+        const String fallback = current->plainText().trimmed();
+        if (previousText.size() == 1 && previousText.at(0).isLetter()) {
+            if (previousText == "Z") return String(u"AA");
+            if (previousText == "z") return String(u"aa");
+            return String(Char::fromAscii(previousText.at(0).toAscii() + 1));
+        }
+        if (previousText.size() == 2 && previousText.at(0).isLetter() && previousText.at(1).isLetter()
+            && previousText.at(0) == previousText.at(1) && previousText.toUpper() != "ZZ") {
+            const String c = Char::fromAscii(previousText.at(0).toAscii() + 1);
+            return c + c;
+        }
+        bool ok = false;
+        int number = previousText.toInt(&ok);
+        if (!ok) return fallback;
+        if (number == previous->segment()->measure()->no() + 1) number = current->segment()->measure()->no() + 1;
+        else ++number;
+        return String::number(number);
+    };
+
+    score->startCmd();
+    for (size_t index = 1; index < rehearsalMarks.size(); ++index) {
+        auto* current = rehearsalMarks[index];
+        current->undoChangeProperty(engraving::Pid::TEXT, nextText(rehearsalMarks[index - 1], current));
+    }
+    score->endCmd();
+    return true;
+}
+
 bool _addTempoText(uintptr_t score_ptr, double bpm, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
@@ -7232,6 +7551,46 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool addRehearsalMark(uintptr_t score_ptr, int excerptId = -1) {
         return _addRehearsalMark(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addFretDiagram(uintptr_t score_ptr, const char* pattern, int excerptId = -1) {
+        return _addFretDiagram(score_ptr, pattern, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    WasmResBytes getSelectedFretDiagram(uintptr_t score_ptr, int excerptId = -1) {
+        return _getSelectedFretDiagram(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setSelectedFretDiagram(uintptr_t score_ptr, const char* serializedDiagram, int excerptId = -1) {
+        return _setSelectedFretDiagram(score_ptr, serializedDiagram, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addAmbitus(uintptr_t score_ptr, int excerptId = -1) {
+        return _addAmbitus(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool explodeSelection(uintptr_t score_ptr, int excerptId = -1) {
+        return _explodeSelection(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool implodeSelection(uintptr_t score_ptr, int excerptId = -1) {
+        return _implodeSelection(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool regroupSelection(uintptr_t score_ptr, int excerptId = -1) {
+        return _regroupSelection(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool resequenceRehearsalMarks(uintptr_t score_ptr, int excerptId = -1) {
+        return _resequenceRehearsalMarks(score_ptr, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

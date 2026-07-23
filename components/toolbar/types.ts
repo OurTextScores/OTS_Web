@@ -133,6 +133,14 @@ export interface ToolbarSectionProps {
     onAddJump?: (jumpType: number) => void;
     onSetNoteheadGroup?: (noteheadGroup: number) => void;
     onSetBeamMode?: (beamMode: number) => void;
+    onAddFretDiagram?: (pattern: string) => void;
+    onAddAmbitus?: () => void;
+    onExplodeSelection?: () => void;
+    onImplodeSelection?: () => void;
+    onRegroupSelection?: () => void;
+    onResequenceRehearsalMarks?: () => void;
+    onTogglePalettes?: () => void;
+    palettesOpen?: boolean;
     selectionFilterMask?: number;
     onSetSelectionFilterBit?: (filterBit: number, enabled: boolean) => void;
     onAddMeasureRepeat?: (numMeasures: number) => void;

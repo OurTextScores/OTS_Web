@@ -269,6 +269,38 @@ class WebMscoreW {
         return this.rpc('setSelectedElementProperty', [propertyName, value])
     }
 
+    addFretDiagram(pattern) {
+        return this.rpc('addFretDiagram', [pattern])
+    }
+
+    getSelectedFretDiagram() {
+        return this.rpc('getSelectedFretDiagram')
+    }
+
+    setSelectedFretDiagram(diagram) {
+        return this.rpc('setSelectedFretDiagram', [diagram])
+    }
+
+    addAmbitus() {
+        return this.rpc('addAmbitus')
+    }
+
+    explodeSelection() {
+        return this.rpc('explodeSelection')
+    }
+
+    implodeSelection() {
+        return this.rpc('implodeSelection')
+    }
+
+    regroupSelection() {
+        return this.rpc('regroupSelection')
+    }
+
+    resequenceRehearsalMarks() {
+        return this.rpc('resequenceRehearsalMarks')
+    }
+
     /**
      * Append a new part using an instrument template id
      * @param {string} instrumentId

@@ -1,13 +1,16 @@
 'use client';
 
 import React from 'react';
-import type { InspectorPropertyName, SelectedElementProperties } from '../lib/webmscore-loader';
+import type { FretDiagramData, InspectorPropertyName, SelectedElementProperties } from '../lib/webmscore-loader';
+import { FretboardEditor } from './FretboardEditor';
 
 interface InspectorPanelProps {
     data: SelectedElementProperties | null;
     loading?: boolean;
     disabled?: boolean;
     onChange: (property: InspectorPropertyName, value: boolean | number | string) => void;
+    fretDiagram?: FretDiagramData | null;
+    onFretDiagramChange?: (data: FretDiagramData) => void;
 }
 
 const selectOptions: Partial<Record<InspectorPropertyName, Array<{ label: string; value: string }>>> = {
@@ -49,7 +52,7 @@ const propertyOrder: InspectorPropertyName[] = [
     'lineStyle',
 ];
 
-export function InspectorPanel({ data, loading = false, disabled = false, onChange }: InspectorPanelProps) {
+export function InspectorPanel({ data, loading = false, disabled = false, onChange, fretDiagram, onFretDiagramChange }: InspectorPanelProps) {
     const properties = data?.properties ?? {};
     const available = propertyOrder.filter(name => properties[name]);
 
@@ -146,6 +149,9 @@ export function InspectorPanel({ data, loading = false, disabled = false, onChan
                     );
                 })}
             </div>
+            {fretDiagram && onFretDiagramChange && (
+                <FretboardEditor data={fretDiagram} disabled={disabled} onChange={onFretDiagramChange} />
+            )}
         </aside>
     );
 }

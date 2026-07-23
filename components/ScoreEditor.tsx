@@ -12,6 +12,7 @@ import {
     type LayoutProgressState,
     type InspectorPropertyName,
     type SelectedElementProperties,
+    type FretDiagramData,
     type WebMscoreInstance,
 } from '../lib/webmscore-loader';
 import {
@@ -27,7 +28,9 @@ import {
 import { CodeMirrorEditor, type CodeEditorThemeMode } from './CodeMirrorEditor';
 import { Toolbar, type MeasureInsertTarget } from './Toolbar';
 import { InspectorPanel } from './InspectorPanel';
-import { SCORE_PALETTE_DRAG_MIME, parseScorePaletteItem } from './toolbar/palette';
+import { FloatingPalettes } from './FloatingPalettes';
+import { SCORE_PALETTE_DRAG_MIME, parseScorePaletteItem, type ScorePaletteItem } from './toolbar/palette';
+import { articulationOptions } from './toolbar/constants';
 import { LeftSidebar, type LeftSidebarTab } from './score-editor/LeftSidebar';
 import {
     AI_PROVIDER_CONFIGS,
@@ -569,6 +572,14 @@ type MutationMethods = Pick<
     | 'setSelectedText'
     | 'getSelectedElementProperties'
     | 'setSelectedElementProperty'
+    | 'addFretDiagram'
+    | 'getSelectedFretDiagram'
+    | 'setSelectedFretDiagram'
+    | 'addAmbitus'
+    | 'explodeSelection'
+    | 'implodeSelection'
+    | 'regroupSelection'
+    | 'resequenceRehearsalMarks'
     | 'appendPart'
     | 'appendPartByMusicXmlId'
     | 'removePart'
@@ -1164,6 +1175,7 @@ export default function ScoreEditor() {
     const [selectedTextValue, setSelectedTextValue] = useState('');
     const inlineTextContentRef = useRef<HTMLDivElement>(null);
     const [inspectorData, setInspectorData] = useState<SelectedElementProperties | null>(null);
+    const [fretDiagramData, setFretDiagramData] = useState<FretDiagramData | null>(null);
     const [inspectorLoading, setInspectorLoading] = useState(false);
     const [selectedLayoutBreakSubtype, setSelectedLayoutBreakSubtype] = useState<'line'|'page'|null>(null);
     const [textEditorPosition, setTextEditorPosition] = useState<{ x: number; y: number } | null>(null);
@@ -1204,6 +1216,7 @@ export default function ScoreEditor() {
     const [noteInputMethod, setNoteInputMethod] = useState(1);
     const [noteInputShadow, setNoteInputShadow] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
     const [paletteDropActive, setPaletteDropActive] = useState(false);
+    const [palettesOpen, setPalettesOpen] = useState(false);
     const [selectionFilterMask, setSelectionFilterMask] = useState(() => {
         if (typeof window === 'undefined') return DEFAULT_SELECTION_FILTER_MASK;
         const storedValue = window.localStorage.getItem(SELECTION_FILTER_STORAGE_KEY);
@@ -2568,15 +2581,21 @@ export default function ScoreEditor() {
         const activeScore = scoreRef.current ?? score;
         if (!activeScore?.getSelectedElementProperties) {
             setInspectorData(null);
+            setFretDiagramData(null);
             return;
         }
         setInspectorLoading(true);
         try {
             const properties = await Promise.resolve(activeScore.getSelectedElementProperties());
             setInspectorData(properties);
+            const fretboard = activeScore.getSelectedFretDiagram
+                ? await Promise.resolve(activeScore.getSelectedFretDiagram())
+                : null;
+            setFretDiagramData(fretboard);
         } catch (err) {
             console.warn('Failed to load Inspector properties:', err);
             setInspectorData(null);
+            setFretDiagramData(null);
         } finally {
             setInspectorLoading(false);
         }
@@ -2585,6 +2604,7 @@ export default function ScoreEditor() {
     useEffect(() => {
         if (!score || (!selectedElement && selectionBoxes.length === 0 && !selectedPoint)) {
             setInspectorData(null);
+            setFretDiagramData(null);
             setInspectorLoading(false);
             return;
         }
@@ -10730,6 +10750,14 @@ ${partsBodyXml}
         });
         await refreshInspector();
     };
+    const handleSetFretDiagram = async (diagram: FretDiagramData) => {
+        await performMutation('edit fretboard diagram', async () => {
+            const fn = requireMutation('setSelectedFretDiagram');
+            if (!fn) return false;
+            return fn(diagram);
+        });
+        await refreshInspector();
+    };
     const handleUndo = () => performMutation('undo', score?.undo ? async () => {
         const result = await score.undo?.();
         if (score.multiMeasureRestsEnabled) {
@@ -11281,6 +11309,37 @@ ${partsBodyXml}
         if (!fn) return;
         return fn(articulationSymbolName);
     });
+
+    const handleAddFretDiagram = async (pattern: string) => {
+        await performMutation('add fretboard diagram', async () => {
+            await ensureSelectionInWasm();
+            const fn = requireMutation('addFretDiagram');
+            if (!fn) return false;
+            return fn(pattern);
+        }, { skipWasmReselect: true, skipSelectionFallback: true });
+        await refreshInspector();
+    };
+
+    const handleAddAmbitus = () => performMutation('add ambitus', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addAmbitus');
+        if (!fn) return false;
+        return fn();
+    }, { skipWasmReselect: true, skipSelectionFallback: true });
+
+    const runRangeTool = (label: string, method: 'explodeSelection' | 'implodeSelection' | 'regroupSelection' | 'resequenceRehearsalMarks') => performMutation(label, async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation(method);
+        if (!fn) return false;
+        return fn();
+    });
+
+    const handleApplyFloatingPaletteItem = (item: ScorePaletteItem) => {
+        if (item.elementType === 0) return handleSetClef(item.subtype);
+        if (item.elementType === 1) return handleAddDynamic(item.subtype);
+        const articulation = articulationOptions[item.subtype];
+        if (articulation) return handleAddArticulation(articulation.symbol);
+    };
 
     const handleAddSlur = () => performMutation('add slur', async () => {
         await ensureSelectionInWasm();
@@ -14665,6 +14724,14 @@ ${partsBodyXml}
                 onAddJump={handleAddJump}
                 onSetNoteheadGroup={handleSetNoteheadGroup}
                 onSetBeamMode={handleSetBeamMode}
+                onAddFretDiagram={handleAddFretDiagram}
+                onAddAmbitus={handleAddAmbitus}
+                onExplodeSelection={() => { void runRangeTool('explode selection', 'explodeSelection'); }}
+                onImplodeSelection={() => { void runRangeTool('implode selection', 'implodeSelection'); }}
+                onRegroupSelection={() => { void runRangeTool('regroup rhythms', 'regroupSelection'); }}
+                onResequenceRehearsalMarks={() => { void runRangeTool('resequence rehearsal marks', 'resequenceRehearsalMarks'); }}
+                onTogglePalettes={() => setPalettesOpen(open => !open)}
+                palettesOpen={palettesOpen}
                 selectionFilterMask={selectionFilterMask}
                 onSetSelectionFilterBit={handleSetSelectionFilterBit}
                 onAddMeasureRepeat={handleAddMeasureRepeat}
@@ -14686,6 +14753,15 @@ ${partsBodyXml}
                 selectedTextDisabled={selectedTextControlDisabled}
             />
             </div>
+            )}
+
+            {!isEmbedMode && palettesOpen && (
+                <FloatingPalettes
+                    disabled={!interactiveMutationEnabled || (!selectedElement && selectionBoxes.length === 0 && !selectedPoint)}
+                    dragEnabled={Boolean(interactiveMutationEnabled && score?.applyDropAtPoint)}
+                    onApply={handleApplyFloatingPaletteItem}
+                    onClose={() => setPalettesOpen(false)}
+                />
             )}
 
             <div className="flex flex-1 min-h-0">
@@ -15229,6 +15305,8 @@ ${partsBodyXml}
                     loading={inspectorLoading}
                     disabled={!interactiveMutationEnabled || !score?.setSelectedElementProperty}
                     onChange={(property, value) => { void handleSetInspectorProperty(property, value); }}
+                    fretDiagram={fretDiagramData}
+                    onFretDiagramChange={(diagram) => { void handleSetFretDiagram(diagram); }}
                 />
             )}
 

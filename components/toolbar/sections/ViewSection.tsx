@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '../../ui/Button';
 import { ToolbarSectionProps } from '../types';
-import { MoveHorizontal, MoveVertical, ZoomIn, ZoomOut } from 'lucide-react';
+import { LayoutGrid, MoveHorizontal, MoveVertical, ZoomIn, ZoomOut } from 'lucide-react';
 
 export const ViewSection: React.FC<ToolbarSectionProps> = ({
     onFitWidth,
@@ -9,6 +9,8 @@ export const ViewSection: React.FC<ToolbarSectionProps> = ({
     onZoomIn,
     onZoomOut,
     zoomLevel,
+    onTogglePalettes,
+    palettesOpen,
 }) => {
     return (
         <>
@@ -61,6 +63,19 @@ export const ViewSection: React.FC<ToolbarSectionProps> = ({
                 aria-label="Zoom In"
             >
                 <ZoomIn size={14} />
+            </Button>
+            <Button
+                data-testid="btn-toggle-palettes"
+                onClick={onTogglePalettes}
+                disabled={!onTogglePalettes}
+                variant={palettesOpen ? 'primary' : 'outline'}
+                size="xs"
+                className="shadow-sm"
+                title="Show floating palettes"
+                aria-label="Show floating palettes"
+                aria-pressed={Boolean(palettesOpen)}
+            >
+                <LayoutGrid size={14} />
             </Button>
         </>
     );

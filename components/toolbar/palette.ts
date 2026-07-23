@@ -5,22 +5,33 @@ export const SCORE_PALETTE_DRAG_MIME = 'application/x-ots-score-palette+json';
 export type ScorePaletteItem = {
     label: string;
     symbol: string;
+    category: 'Clefs' | 'Dynamics' | 'Articulations';
     elementType: 0 | 1 | 2;
     subtype: number;
 };
 
 export const scorePaletteItems: ScorePaletteItem[] = [
-    { label: 'Treble clef', symbol: '\uE050', elementType: 0, subtype: 0 },
-    { label: 'Bass clef', symbol: '\uE062', elementType: 0, subtype: 20 },
-    { label: 'Piano dynamic', symbol: '\uE520', elementType: 1, subtype: 6 },
-    { label: 'Forte dynamic', symbol: '\uE522', elementType: 1, subtype: 9 },
-    { label: 'Staccato', symbol: '\uE4A2', elementType: 2, subtype: 0 },
-    { label: 'Accent', symbol: '\uE4A0', elementType: 2, subtype: 3 },
+    { label: 'Treble clef', symbol: '\uE050', category: 'Clefs', elementType: 0, subtype: 0 },
+    { label: 'Bass clef', symbol: '\uE062', category: 'Clefs', elementType: 0, subtype: 20 },
+    { label: 'Alto clef', symbol: '\uE05C', category: 'Clefs', elementType: 0, subtype: 10 },
+    { label: 'Tenor clef', symbol: '\uE05C', category: 'Clefs', elementType: 0, subtype: 11 },
+    { label: 'Piano dynamic', symbol: '\uE520', category: 'Dynamics', elementType: 1, subtype: 6 },
+    { label: 'Mezzo piano dynamic', symbol: '\uE521\uE520', category: 'Dynamics', elementType: 1, subtype: 7 },
+    { label: 'Mezzo forte dynamic', symbol: '\uE521\uE522', category: 'Dynamics', elementType: 1, subtype: 8 },
+    { label: 'Forte dynamic', symbol: '\uE522', category: 'Dynamics', elementType: 1, subtype: 9 },
+    { label: 'Pianissimo dynamic', symbol: '\uE520\uE520', category: 'Dynamics', elementType: 1, subtype: 5 },
+    { label: 'Fortissimo dynamic', symbol: '\uE522\uE522', category: 'Dynamics', elementType: 1, subtype: 10 },
+    { label: 'Sforzando dynamic', symbol: '\uE524\uE522\uE525', category: 'Dynamics', elementType: 1, subtype: 18 },
+    { label: 'Staccato', symbol: '\uE4A2', category: 'Articulations', elementType: 2, subtype: 0 },
+    { label: 'Tenuto', symbol: '\uE4A4', category: 'Articulations', elementType: 2, subtype: 1 },
+    { label: 'Marcato', symbol: '\uE4AC', category: 'Articulations', elementType: 2, subtype: 2 },
+    { label: 'Accent', symbol: '\uE4A0', category: 'Articulations', elementType: 2, subtype: 3 },
 ];
 
 export const dynamicScorePaletteItem = (label: string, symbol: string, subtype: number): ScorePaletteItem => ({
     label: `${label} dynamic`,
     symbol,
+    category: 'Dynamics',
     elementType: 1,
     subtype,
 });
@@ -28,6 +39,7 @@ export const dynamicScorePaletteItem = (label: string, symbol: string, subtype: 
 export const clefScorePaletteItem = (label: string, subtype: number): ScorePaletteItem => ({
     label: `${label} clef`,
     symbol: '',
+    category: 'Clefs',
     elementType: 0,
     subtype,
 });
@@ -35,6 +47,7 @@ export const clefScorePaletteItem = (label: string, subtype: number): ScorePalet
 export const articulationScorePaletteItem = (label: string, subtype: number): ScorePaletteItem => ({
     label,
     symbol: '',
+    category: 'Articulations',
     elementType: 2,
     subtype,
 });

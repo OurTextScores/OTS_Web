@@ -67,6 +67,16 @@ export interface SelectedElementProperties {
     properties: Partial<Record<InspectorPropertyName, InspectorPropertyState>>;
 }
 
+export interface FretDiagramData {
+    strings: number;
+    frets: number;
+    fretOffset: number;
+    showNut: boolean;
+    dots: Array<{ string: number; fret: number; type: number }>;
+    markers: Array<{ string: number; type: number }>;
+    barres: Array<{ fret: number; startString: number; endString: number }>;
+}
+
 export interface Score {
     destroy: (soft?: boolean) => void;
     saveSvg: (pageNumber?: number, drawPageBackground?: boolean, highlightSelection?: boolean) => Promise<string>;
@@ -233,6 +243,14 @@ export interface Score {
     setSelectedText?: (text: string) => Promise<unknown> | unknown;
     getSelectedElementProperties?: () => Promise<SelectedElementProperties> | SelectedElementProperties;
     setSelectedElementProperty?: (propertyName: InspectorPropertyName, value: boolean | number | string) => Promise<boolean> | boolean;
+    addFretDiagram?: (pattern: string) => Promise<boolean> | boolean;
+    getSelectedFretDiagram?: () => Promise<FretDiagramData | null> | FretDiagramData | null;
+    setSelectedFretDiagram?: (diagram: FretDiagramData) => Promise<boolean> | boolean;
+    addAmbitus?: () => Promise<boolean> | boolean;
+    explodeSelection?: () => Promise<boolean> | boolean;
+    implodeSelection?: () => Promise<boolean> | boolean;
+    regroupSelection?: () => Promise<boolean> | boolean;
+    resequenceRehearsalMarks?: () => Promise<boolean> | boolean;
     appendPart?: (instrumentId: string) => Promise<unknown> | unknown;
     appendPartByMusicXmlId?: (instrumentMusicXmlId: string) => Promise<unknown> | unknown;
     removePart?: (partIndex: number) => Promise<unknown> | unknown;

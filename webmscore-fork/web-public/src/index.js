@@ -326,6 +326,49 @@ class WebMscore {
         }
     }
 
+    async addFretDiagram(pattern) {
+        const patternptr = getStrPtr(String(pattern))
+        try {
+            return Module.ccall('addFretDiagram', 'boolean', ['number', 'number', 'number'], [this.scoreptr, patternptr, this.excerptId])
+        } finally {
+            freePtr(patternptr)
+        }
+    }
+
+    async getSelectedFretDiagram() {
+        const dataptr = Module.ccall('getSelectedFretDiagram', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
+        return JSON.parse(WasmRes.readText(dataptr))
+    }
+
+    async setSelectedFretDiagram(diagram) {
+        const dataptr = getStrPtr(JSON.stringify(diagram))
+        try {
+            return Module.ccall('setSelectedFretDiagram', 'boolean', ['number', 'number', 'number'], [this.scoreptr, dataptr, this.excerptId])
+        } finally {
+            freePtr(dataptr)
+        }
+    }
+
+    async addAmbitus() {
+        return Module.ccall('addAmbitus', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    async explodeSelection() {
+        return Module.ccall('explodeSelection', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    async implodeSelection() {
+        return Module.ccall('implodeSelection', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    async regroupSelection() {
+        return Module.ccall('regroupSelection', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    async resequenceRehearsalMarks() {
+        return Module.ccall('resequenceRehearsalMarks', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
     /**
      * Append a new part using an instrument template id
      * @param {string} instrumentId
