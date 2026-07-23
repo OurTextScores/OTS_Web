@@ -16,3 +16,12 @@ webmscore-fork/*
 !webmscore-fork/web-public/**
 !webmscore-fork/share/instruments/
 !webmscore-fork/share/instruments/**
+# Notation fonts bundled into CSS via webpack url() imports (palettes, note-value glyphs).
+!webmscore-fork/fonts/
+webmscore-fork/fonts/*
+!webmscore-fork/fonts/leland/
+webmscore-fork/fonts/leland/*
+!webmscore-fork/fonts/leland/Leland.woff2
+!webmscore-fork/fonts/bravura/
+webmscore-fork/fonts/bravura/*
+!webmscore-fork/fonts/bravura/Bravura.woff2
