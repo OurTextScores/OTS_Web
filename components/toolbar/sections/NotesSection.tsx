@@ -3,6 +3,7 @@ import { Button } from '../../ui/Button';
 import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenu, DropdownMenuLabel } from '../../ui/DropdownMenu';
 import { ToolbarSectionProps } from '../types';
 import { PaletteLink } from '../PaletteLink';
+import { BeamIcon } from '../BeamIcon';
 import { graceNoteOptions } from '../constants';
 import { Music2, PenLine, Speech, Spline, Waves, Layers } from 'lucide-react';
 import styles from './NotesSection.module.css';
@@ -172,19 +173,6 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
                 </DropdownMenuContent>
             </DropdownMenu>
 
-            <Button
-                data-testid="btn-open-noteheads-palette"
-                variant="outline"
-                size="sm"
-                disabled={mutationDisabled || !selectionActive || !onOpenPalette}
-                onClick={() => onOpenPalette?.('Noteheads')}
-                className="shadow-sm"
-                title="Open the Noteheads palette"
-            >
-                <span className={styles.noteheadSymbol} aria-hidden="true">{'\uE0A4'}</span>
-                Noteheads
-            </Button>
-
             <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
                     <Button data-testid="dropdown-beams" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive} className="shadow-sm">
@@ -193,8 +181,9 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     {beamOptions.map(option => (
-                        <DropdownMenuItem key={option.value} data-testid={`btn-beam-${option.value}`} disabled={!onSetBeamMode} onSelect={() => onSetBeamMode?.(option.value)}>
-                            {option.label}
+                        <DropdownMenuItem key={option.value} data-testid={`btn-beam-${option.value}`} className="min-h-10 gap-3" disabled={!onSetBeamMode} onSelect={() => onSetBeamMode?.(option.value)}>
+                            <BeamIcon value={option.value} className="shrink-0 text-slate-800" />
+                            <span>{option.label}</span>
                         </DropdownMenuItem>
                     ))}
                 </DropdownMenuContent>

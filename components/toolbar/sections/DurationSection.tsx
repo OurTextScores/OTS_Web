@@ -4,6 +4,17 @@ import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMen
 import { ToolbarSectionProps } from '../types';
 import { durationOptions, tupletOptions } from '../constants';
 import { ArrowLeftToLine, ArrowRightToLine, Timer } from 'lucide-react';
+import styles from './DurationSection.module.css';
+
+// SMuFL metronome note glyphs keyed by DurationType value.
+const durationGlyphs: Record<number, string> = {
+    2: String.fromCharCode(0xE1D2), // whole
+    3: String.fromCharCode(0xE1D3), // half
+    4: String.fromCharCode(0xE1D5), // quarter
+    5: String.fromCharCode(0xE1D7), // eighth
+    6: String.fromCharCode(0xE1D9), // 16th
+    7: String.fromCharCode(0xE1DB), // 32nd
+};
 
 export const DurationSection: React.FC<ToolbarSectionProps> = ({
     onDurationShorter,
@@ -56,8 +67,9 @@ export const DurationSection: React.FC<ToolbarSectionProps> = ({
                 <DropdownMenuContent>
                     <DropdownMenuLabel>Duration</DropdownMenuLabel>
                     {durationOptions.map(opt => (
-                        <DropdownMenuItem key={opt.value} data-testid={opt.testId} disabled={durationControlDisabled || !onSetDurationType} title={`Shortcut: press ${opt.shortcut} for ${opt.label}`} onSelect={() => onSetDurationType?.(opt.value)}>
-                            {opt.label}
+                        <DropdownMenuItem key={opt.value} data-testid={opt.testId} className="min-h-10 gap-3" disabled={durationControlDisabled || !onSetDurationType} title={`Shortcut: press ${opt.shortcut} for ${opt.label}`} onSelect={() => onSetDurationType?.(opt.value)}>
+                            <span data-testid={`duration-symbol-${opt.value}`} className={styles.durationSymbol} aria-hidden="true">{durationGlyphs[opt.value]}</span>
+                            <span>{opt.label}</span>
                         </DropdownMenuItem>
                     ))}
                     <DropdownMenuLabel>Dots</DropdownMenuLabel>

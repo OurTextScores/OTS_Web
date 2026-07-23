@@ -555,8 +555,7 @@ describe('Toolbar', () => {
       />,
     );
 
-    await user.click(screen.getByTestId('btn-open-noteheads-palette'));
-    expect(onOpenPalette).toHaveBeenCalledWith('Noteheads');
+    // Noteheads now live only in the floating palette (no toolbar button).
 
     await user.click(screen.getByTestId('dropdown-beams'));
     await user.click(screen.getByTestId('btn-beam-3'));
