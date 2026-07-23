@@ -51,6 +51,7 @@ test('creates and edits a persistent fretboard diagram and adds an ambitus', asy
 
   const diagram = page.locator('svg .FretDiagram').first();
   await diagram.waitFor({ timeout: 20_000, state: 'attached' });
+  await page.getByTestId('expand-panel-inspector').click();
   await expect(page.getByTestId('fretboard-editor')).toBeVisible({ timeout: 20_000 });
   await page.getByTestId('fretboard-cell-5-4').click();
   await expect.poll(async () => {

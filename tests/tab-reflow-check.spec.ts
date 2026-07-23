@@ -5,7 +5,7 @@ test.use({ viewport: { width: 700, height: 900 } });
 test('sidebar tabs reflow instead of extending offscreen', async ({ page }) => {
   await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
   await page.waitForSelector('svg .Note', { timeout: 60_000 });
-  await page.getByTestId('btn-xml-toggle').click();
+  await page.getByTestId('expand-panel-ai-tools').click();
 
   const tabIds = ['tab-ai', 'tab-notagen', 'tab-transcoda', 'tab-harmony', 'tab-functional-harmony', 'tab-mma'];
   const viewportWidth = page.viewportSize()?.width ?? 0;

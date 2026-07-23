@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { PanelRightClose } from 'lucide-react';
 import type { FretDiagramData, InspectorPropertyName, SelectedElementProperties } from '../lib/webmscore-loader';
 import { FretboardEditor } from './FretboardEditor';
 
@@ -59,23 +59,10 @@ export function InspectorPanel({ data, loading = false, disabled = false, onChan
     const properties = data?.properties ?? {};
     const available = propertyOrder.filter(name => properties[name]);
 
+    // When collapsed, the panel renders nothing; its tab lives in the shared
+    // collapsed-panel strip (see ScoreEditor) so all rails share one column.
     if (collapsed) {
-        return (
-            <div className="flex w-10 shrink-0 flex-col items-center border-l border-slate-200 bg-white py-3">
-                <button
-                    type="button"
-                    data-testid="inspector-toggle"
-                    onClick={onToggleCollapsed}
-                    title="Open Inspector"
-                    aria-label="Open Inspector"
-                    aria-expanded={false}
-                    className="flex flex-col items-center gap-2 rounded p-1 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                >
-                    <PanelRightOpen size={16} />
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600" style={{ writingMode: 'vertical-rl' }}>Inspector</span>
-                </button>
-            </div>
-        );
+        return null;
     }
 
     return (

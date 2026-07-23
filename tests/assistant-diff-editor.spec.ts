@@ -217,7 +217,7 @@ const openAssistantProposalCompare = async (
   await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
   await page.waitForSelector('svg .Note', { timeout: 60_000 });
 
-  await page.getByTestId('btn-xml-toggle').click();
+  await page.getByTestId('expand-panel-ai-tools').click();
   await page.getByTestId('tab-ai').click();
   await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
   await page.getByPlaceholder('Paste your key').fill('test-key');
@@ -341,7 +341,7 @@ test.describe('Assistant diff editor flow', () => {
 
     await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
     await page.waitForSelector('svg .Note', { timeout: 60_000 });
-    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('expand-panel-ai-tools').click();
     await page.getByTestId('tab-ai').click();
     await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
     await page.getByPlaceholder('Paste your key').fill('test-key');
@@ -419,7 +419,7 @@ test.describe('Assistant diff editor flow', () => {
 
     await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
     await page.waitForSelector('svg .Note', { timeout: 60_000 });
-    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('expand-panel-ai-tools').click();
     await page.getByTestId('tab-ai').click();
     await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
     await page.getByPlaceholder('Paste your key').fill('test-key');
@@ -442,7 +442,7 @@ test.describe('Assistant diff editor flow', () => {
     await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
     await page.waitForSelector('svg .Note', { timeout: 60_000 });
 
-    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('expand-panel-ai-tools').click();
     await page.getByTestId('tab-ai').click();
     await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
     await page.getByPlaceholder('Paste your key').fill('test-key');
@@ -465,7 +465,7 @@ test.describe('Assistant diff editor flow', () => {
 
     await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
     await page.waitForSelector('svg .Note', { timeout: 60_000 });
-    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('expand-panel-ai-tools').click();
     await page.getByTestId('tab-ai').click();
     await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
     await page.getByPlaceholder('Paste your key').fill('test-key');
@@ -841,7 +841,7 @@ test.describe('Assistant diff editor flow', () => {
 
     await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
     await page.waitForSelector('svg .Note', { timeout: 60_000 });
-    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('expand-panel-ai-tools').click();
     await page.getByTestId('tab-ai').click();
     await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
     await page.getByPlaceholder('Paste your key').fill('test-key');
@@ -916,7 +916,7 @@ test.describe('Assistant diff editor flow', () => {
 
     await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
     await page.waitForSelector('svg .Note', { timeout: 60_000 });
-    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('expand-panel-ai-tools').click();
     await page.getByTestId('tab-ai').click();
     await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
     await page.getByPlaceholder('Paste your key').fill('test-key');
@@ -1013,7 +1013,7 @@ test.describe('Assistant diff editor flow', () => {
     await page.getByTestId('new-score-modal').waitFor();
     await page.getByRole('button', { name: 'Create Score' }).click();
     await page.waitForSelector('svg .Rest', { timeout: 60_000 });
-    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('expand-panel-ai-tools').click();
     await page.getByTestId('tab-ai').click();
     await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
     await page.getByPlaceholder('Paste your key').fill('test-key');
@@ -1049,7 +1049,7 @@ test.describe('Assistant diff editor flow', () => {
 
     await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
     await page.waitForSelector('svg .Note', { timeout: 60_000 });
-    await page.getByTestId('btn-xml-toggle').click();
+    await page.getByTestId('expand-panel-ai-tools').click();
     await page.getByTestId('tab-ai').click();
     await page.getByPlaceholder('Enter model name').fill('gpt-test-model');
     await page.getByPlaceholder('Paste your key').fill('test-key');

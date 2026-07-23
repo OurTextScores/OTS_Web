@@ -14613,6 +14613,7 @@ ${partsBodyXml}
     const xmlApplyEnabled = !xmlControlsDisabled && xmlDirty;
     const xmlReloadEnabled = !xmlControlsDisabled && scoreDirtySinceXml;
     const xmlApplyDisabled = !xmlApplyEnabled;
+    const aiToolsSidebarOpen = xmlSidebarMode !== 'closed';
     const xmlEditorHeight = '45vh';
     const xmlEditorMaxHeight = '55vh';
 
@@ -15413,33 +15414,28 @@ ${partsBodyXml}
                 />
             )}
 
-            {!isEmbedMode && panelsVisible && (
+            {!isEmbedMode && panelsVisible && musicXmlOpen && (
                 <aside
-                    className={`flex shrink-0 border-l bg-white text-sm ${musicXmlOpen ? '' : 'w-12'}`}
-                    style={musicXmlOpen ? { width: 384 } : undefined}
+                    style={{ width: 384 }}
+                    className="flex shrink-0 border-l bg-white text-sm"
                     data-testid="musicxml-sidebar"
                 >
                     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                        <div className={musicXmlOpen ? 'flex items-center justify-between p-4' : 'flex flex-col items-center gap-2 p-2'}>
-                            {musicXmlOpen && (
-                                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">MusicXML</span>
-                            )}
+                        <div className="flex items-center justify-between p-4">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">MusicXML</span>
                             <button
                                 type="button"
                                 data-testid="btn-musicxml-toggle"
-                                aria-expanded={musicXmlOpen}
-                                aria-label={musicXmlOpen ? 'Close MusicXML sidebar' : 'Open MusicXML sidebar'}
-                                title={musicXmlOpen ? 'Close MusicXML sidebar' : 'Open MusicXML sidebar'}
-                                onClick={() => setMusicXmlOpen(open => !open)}
+                                aria-expanded
+                                aria-label="Close MusicXML sidebar"
+                                title="Close MusicXML sidebar"
+                                onClick={() => setMusicXmlOpen(false)}
                                 className="rounded p-1 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                             >
-                                {musicXmlOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+                                <PanelRightClose size={16} />
                             </button>
-                            {!musicXmlOpen && (
-                                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600" style={{ writingMode: 'vertical-rl' }}>MusicXML</span>
-                            )}
                         </div>
-                        {musicXmlOpen && (
+                        {(
                             <div className="flex flex-1 flex-col overflow-y-auto px-4 pb-4">
                                 <div className="flex items-center justify-end pb-2">
                                     <label className="flex items-center gap-2">
@@ -15504,11 +15500,10 @@ ${partsBodyXml}
                 </aside>
             )}
 
+            {!isEmbedMode && panelsVisible && aiToolsSidebarOpen && (
             <aside
-                className={`shrink-0 border-l bg-white text-sm ${isEmbedMode || !panelsVisible ? 'hidden' : 'flex'} ${
-                    xmlSidebarMode === 'closed' ? 'w-12' : ''
-                }`}
-                style={xmlSidebarMode === 'open' ? { width: `${xmlSidebarWidth}px` } : undefined}
+                className="flex shrink-0 border-l bg-white text-sm"
+                style={{ width: `${xmlSidebarWidth}px` }}
                 data-testid="xml-sidebar"
             >
                 {/* Resize Handle Container */}
@@ -15534,31 +15529,24 @@ ${partsBodyXml}
                 {/* Sidebar Content */}
                 <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
                     <div className="sticky top-0 z-10 bg-white">
-                    <div className={xmlSidebarMode === 'closed' ? 'flex flex-col items-center gap-2 p-2' : 'flex items-center justify-between p-4'}>
-                        {xmlSidebarMode !== 'closed' && (
-                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                AI Tools
-                            </span>
-                        )}
+                    <div className="flex items-center justify-between p-4">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            AI Tools
+                        </span>
                         <button
                             type="button"
                             data-testid="btn-xml-toggle"
-                            aria-expanded={xmlSidebarMode !== 'closed'}
+                            aria-expanded
                             aria-controls="xml-sidebar-content"
-                            aria-label={xmlSidebarMode === 'closed' ? 'Open AI Tools sidebar' : 'Close AI Tools sidebar'}
-                            title={xmlSidebarMode === 'closed' ? 'Open AI Tools sidebar' : 'Close AI Tools sidebar'}
-                            onClick={() => {
-                                setXmlSidebarMode((prev) => (prev === 'closed' ? 'open' : 'closed'));
-                            }}
+                            aria-label="Close AI Tools sidebar"
+                            title="Close AI Tools sidebar"
+                            onClick={() => setXmlSidebarMode('closed')}
                             className="rounded p-1 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                         >
-                            {xmlSidebarMode === 'closed' ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
+                            <PanelRightClose size={16} />
                         </button>
-                        {xmlSidebarMode === 'closed' && (
-                            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600" style={{ writingMode: 'vertical-rl' }}>AI Tools</span>
-                        )}
                     </div>
-                    {xmlSidebarMode !== 'closed' && (
+                    {aiToolsSidebarOpen && (
                         <div className="px-4 pb-3">
                             <div className="flex items-center justify-between text-xs text-gray-500">
                                 <span>
@@ -15668,7 +15656,7 @@ ${partsBodyXml}
                         </div>
                     )}
                 </div>
-                {xmlSidebarMode !== 'closed' && (
+                {aiToolsSidebarOpen && (
                     <div id="xml-sidebar-content" className="flex-1 overflow-y-auto pb-4 px-4">
                         {xmlSidebarTab === 'assistant' && aiEnabled && (
                             <AiAssistantPanel
@@ -16675,6 +16663,36 @@ ${partsBodyXml}
                 )}
                 </div>
             </aside>
+            )}
+
+            {!isEmbedMode && panelsVisible && (() => {
+                const tabs = [
+                    !inspectorOpen && { key: 'inspector', label: 'Inspector', onOpen: () => setInspectorOpen(true) },
+                    !musicXmlOpen && { key: 'musicxml', label: 'MusicXML', onOpen: () => setMusicXmlOpen(true) },
+                    xmlSidebarMode === 'closed' && { key: 'ai-tools', label: 'AI Tools', onOpen: () => setXmlSidebarMode('open') },
+                    checkpointsCollapsed && { key: 'history', label: 'History', onOpen: () => setCheckpointsCollapsed(false) },
+                ].filter(Boolean) as Array<{ key: string; label: string; onOpen: () => void }>;
+                if (tabs.length === 0) {
+                    return null;
+                }
+                return (
+                    <div style={{ order: 4 }} className="flex w-8 shrink-0 flex-col items-stretch gap-2 border-l border-slate-200 bg-slate-50 py-3" data-testid="collapsed-panel-strip">
+                        {tabs.map(tab => (
+                            <button
+                                key={tab.key}
+                                type="button"
+                                data-testid={`expand-panel-${tab.key}`}
+                                onClick={tab.onOpen}
+                                title={`Open ${tab.label}`}
+                                className="flex flex-col items-center gap-1 rounded-l-md border border-r-0 border-slate-200 bg-white py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                            >
+                                <PanelRightOpen size={14} />
+                                <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ writingMode: 'vertical-rl' }}>{tab.label}</span>
+                            </button>
+                        ))}
+                    </div>
+                );
+            })()}
 
             {pngExportDialogOpen && (
                 <div

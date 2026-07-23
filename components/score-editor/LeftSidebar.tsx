@@ -1,5 +1,5 @@
 import React from 'react';
-import { PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { PanelRightClose } from 'lucide-react';
 import type { CheckpointSummary, ScoreSummary } from '../../lib/checkpoints';
 import type { SourceHistoryBranch, SourceHistoryRevision } from '../../lib/ourtextscores-api-client';
 
@@ -570,7 +570,8 @@ export function LeftSidebar(props: LeftSidebarProps) {
         showVersionsTab = false,
     } = props;
 
-    if (hidden) {
+    if (hidden || collapsed) {
+        // When collapsed, the History tab lives in the shared collapsed-panel strip.
         return null;
     }
 
@@ -608,7 +609,7 @@ export function LeftSidebar(props: LeftSidebarProps) {
                         onClick={onToggleCollapsed}
                         className="rounded p-1 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                     >
-                        {collapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
+                        <PanelRightClose size={16} />
                     </button>
                     {collapsed && (
                         <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600" style={{ writingMode: 'vertical-rl' }}>History</span>
