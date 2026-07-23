@@ -2950,15 +2950,26 @@ static engraving::EngravingItem* pickTopmostSelectableItem(std::vector<engraving
     }
 
     std::sort(items.begin(), items.end(), elementLower);
+    // Prefer a concrete element (e.g. a title/frame text) over the frame box that
+    // contains it. A VBox/HBox/TBox spans the whole frame, so without this it
+    // swallows clicks meant for the text inside it — which then can't be edited
+    // (setSelectedText needs a TextBase selected, not the box).
+    engraving::EngravingItem* boxFallback = nullptr;
     for (auto it = items.rbegin(); it != items.rend(); ++it) {
         engraving::EngravingItem* item = *it;
         if (!item || item->isPage() || !item->selectable()) {
             continue;
         }
+        if (item->isBox()) {
+            if (!boxFallback) {
+                boxFallback = item;
+            }
+            continue;
+        }
         return item;
     }
 
-    return nullptr;
+    return boxFallback;
 }
 
 static std::vector<engraving::EngravingItem*> selectableItemsAtPoint(engraving::Page* page, const mu::PointF& pt)
