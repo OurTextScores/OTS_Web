@@ -5,7 +5,7 @@ import { ToolbarSectionProps } from '../types';
 import { PaletteLink } from '../PaletteLink';
 import { BeamIcon } from '../BeamIcon';
 import { graceNoteOptions } from '../constants';
-import { Music2, PenLine, Speech, Spline, Waves, Layers } from 'lucide-react';
+import { Music2, PenLine, Speech, Spline, Waves, Layers, FlipVertical2 } from 'lucide-react';
 import styles from './NotesSection.module.css';
 
 const graceNoteGlyphs: Record<number, string> = {
@@ -84,6 +84,7 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
     onSetVoice,
     onAddSlur,
     onAddTie,
+    onFlipStem,
     onAddOttava,
     onAddTrill,
     onAddGlissando,
@@ -236,6 +237,19 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
                     <DropdownMenuItem data-testid="btn-tie" disabled={mutationDisabled || !selectionActive || !onAddTie} onSelect={() => onAddTie?.()}>Tie</DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
+
+            <Button
+                data-testid="btn-flip-stem"
+                variant="outline"
+                size="sm"
+                disabled={mutationDisabled || !selectionActive || !onFlipStem}
+                onClick={() => onFlipStem?.()}
+                className="shadow-sm"
+                title="Flip stem direction of the selected notes"
+            >
+                <FlipVertical2 size={14} className="mr-2" />
+                Flip Stem
+            </Button>
 
             <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>

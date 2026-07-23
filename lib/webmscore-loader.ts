@@ -220,6 +220,7 @@ export interface Score {
     addTempoText?: (bpm: number) => Promise<unknown> | unknown;
     addArticulation?: (articulationSymbolName: string) => Promise<unknown> | unknown;
     addSlur?: () => Promise<unknown> | unknown;
+    flipStem?: () => Promise<boolean> | boolean;
     addTie?: () => Promise<unknown> | unknown;
     addGraceNote?: (graceType: number) => Promise<unknown> | unknown;
     addTuplet?: (tupletCount: number) => Promise<unknown> | unknown;

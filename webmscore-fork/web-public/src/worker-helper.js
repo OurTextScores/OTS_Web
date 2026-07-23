@@ -1104,6 +1104,10 @@ class WebMscoreW {
         return this.rpc('addArticulation', [articulationSymbolName])
     }
 
+    flipStem() {
+        return this.rpc('flipStem')
+    }
+
     addSlur() {
         return this.rpc('addSlur')
     }

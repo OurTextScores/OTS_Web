@@ -1913,6 +1913,11 @@ class WebMscore {
      * - With multi-selection, this slurs from the first selected chord/rest to the last.
      * @returns {Promise<boolean>}
      */
+    /** Flip the stem direction of the selected note(s)/chord(s). */
+    async flipStem() {
+        return Module.ccall('flipStem', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
     async addSlur() {
         return Module.ccall('addSlur', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
     }

@@ -552,6 +552,7 @@ type MutationMethods = Pick<
     | 'addTempoText'
     | 'addArticulation'
     | 'addSlur'
+    | 'flipStem'
     | 'addTie'
     | 'addGraceNote'
     | 'addTuplet'
@@ -11478,6 +11479,13 @@ ${partsBodyXml}
         return fn();
     });
 
+    const handleFlipStem = () => performMutation('flip stem', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('flipStem');
+        if (!fn) return false;
+        return fn();
+    });
+
     const handleAddTie = () => performMutation('add tie', async () => {
         await ensureSelectionInWasm();
         const fn = requireMutation('addTie');
@@ -14845,6 +14853,7 @@ ${partsBodyXml}
                 onAddFiguredBassText={handleAddFiguredBassText}
                 onAddArticulation={handleAddArticulation}
                 onAddSlur={handleAddSlur}
+                onFlipStem={handleFlipStem}
                 onAddTie={handleAddTie}
                 onAddGraceNote={handleAddGraceNote}
                 onToggleNoteInput={toggleNoteInputMode}

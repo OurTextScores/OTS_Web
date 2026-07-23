@@ -117,6 +117,7 @@ export interface ToolbarSectionProps {
     onAddFiguredBassText?: () => void;
     onAddArticulation?: (articulationSymbolName: string) => void;
     onAddSlur?: () => void;
+    onFlipStem?: () => void;
     onAddTie?: () => void;
     onAddGraceNote?: (graceType: number) => void;
     onAddTuplet?: (tupletCount: number) => void;
