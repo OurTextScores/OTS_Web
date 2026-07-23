@@ -4,11 +4,18 @@
     font-display: swap;
 }
 
+/* Fallback for SMuFL glyphs Leland lacks (e.g. glissando/arpeggio symbols). */
+@font-face {
+    font-family: "BravuraFallback";
+    src: url("../../../webmscore-fork/fonts/bravura/Bravura.woff2") format("woff2");
+    font-display: swap;
+}
+
 .graceNoteSymbol {
     display: inline-flex;
     min-width: 2rem;
     justify-content: center;
-    font-family: "LelandNotesToolbar", serif;
+    font-family: "LelandNotesToolbar", "BravuraFallback", serif;
     font-size: 1.65rem;
     font-style: normal;
     font-weight: 400;
@@ -20,7 +27,7 @@
     display: inline-flex;
     min-width: 1.5rem;
     justify-content: center;
-    font-family: "LelandNotesToolbar", serif;
+    font-family: "LelandNotesToolbar", "BravuraFallback", serif;
     font-size: 1.55rem;
     font-style: normal;
     font-weight: 400;
@@ -32,7 +39,7 @@
     display: inline-flex;
     min-width: 2.5rem;
     justify-content: center;
-    font-family: "LelandNotesToolbar", serif;
+    font-family: "LelandNotesToolbar", "BravuraFallback", serif;
     font-size: 1.55rem;
     font-style: normal;
     font-weight: 400;
@@ -45,7 +52,7 @@
     display: inline-flex;
     min-width: 2rem;
     justify-content: center;
-    font-family: "LelandNotesToolbar", serif;
+    font-family: "LelandNotesToolbar", "BravuraFallback", serif;
     font-size: 1.55rem;
     font-style: normal;
     font-weight: 400;

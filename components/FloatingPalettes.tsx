@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { GripHorizontal, Search, X } from 'lucide-react';
 import { SCORE_PALETTE_DRAG_MIME, scorePaletteItems, type PaletteCategory, type ScorePaletteItem } from './toolbar/palette';
+import { BeamIcon } from './toolbar/BeamIcon';
 import styles from './FloatingPalettes.module.css';
 
 interface FloatingPalettesProps {
@@ -22,7 +23,12 @@ export function FloatingPalettes({ disabled = false, dragEnabled = false, onAppl
     const dragRef = useRef<{ dx: number; dy: number } | null>(null);
     const normalizedQuery = query.trim().toLowerCase();
     const categories = category ? [category] : allCategories;
-    const visibleItems = useMemo(() => scorePaletteItems.filter(item => item.label.toLowerCase().includes(normalizedQuery)), [normalizedQuery]);
+    const visibleItems = useMemo(
+        () => scorePaletteItems.filter(item =>
+            item.label.toLowerCase().includes(normalizedQuery)
+            || item.category.toLowerCase().includes(normalizedQuery)),
+        [normalizedQuery],
+    );
 
     // Escape closes the palette.
     useEffect(() => {
@@ -110,9 +116,11 @@ export function FloatingPalettes({ disabled = false, dragEnabled = false, onAppl
                                             }}
                                             className="flex min-h-12 items-center justify-center rounded border border-slate-200 bg-slate-50 p-1 hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50"
                                         >
-                                            {item.symbol
-                                                ? <span className={styles.glyph}>{item.symbol}</span>
-                                                : <span className="px-0.5 text-center text-[10px] font-medium leading-tight text-slate-700">{item.label}</span>}
+                                            {item.kind === 'beam'
+                                                ? <BeamIcon value={item.subtype} className="text-slate-800" />
+                                                : item.symbol
+                                                    ? <span className={styles.glyph}>{item.symbol}</span>
+                                                    : <span className="px-0.5 text-center text-[10px] font-medium leading-tight text-slate-700">{item.label}</span>}
                                         </button>
                                     );
                                 })}
