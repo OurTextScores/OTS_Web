@@ -66,13 +66,15 @@ const sections: Section[] = [
         ],
     },
     {
-        id: 'inspector',
-        title: 'The Inspector',
-        blurb: 'The collapsible panel on the right edits properties of whatever is selected. Open it with the tab on the right edge; it shows only the properties that apply, and reports “Mixed” when a multi-selection disagrees.',
+        id: 'panels',
+        title: 'Side panels',
+        blurb: 'All side panels live on the right edge. When collapsed they share one narrow strip of stacked, binder-style tabs — click a tab to open that panel, or use the Panels button in the View toolbar to hide them all and maximise the score.',
         items: [
-            { term: 'Common properties', detail: 'Visible, color, placement (above/below), horizontal/vertical offset (in staff spaces), small, stem direction, and line style.' },
-            { term: 'Fretboard editor', detail: 'When a fret diagram is selected, the Inspector shows a fret grid: set strings/frets, click a cell to toggle a fingering, and cycle the top row for open/muted strings.' },
-            { term: 'One undo step', detail: 'Each Inspector change is a single undoable edit; invalid values are rejected without touching the score.' },
+            { term: 'Inspector', detail: 'Edits properties of the selection: visible, color, placement, horizontal/vertical offset (staff spaces), small, stem direction, and line style. Shows only the properties that apply, reports “Mixed” for a disagreeing multi-selection, and each change is a single undo step.' },
+            { term: 'Fretboard editor', detail: 'Part of the Inspector: when a fret diagram is selected it shows a fret grid — set strings/frets, click a cell to toggle a fingering, and cycle the top row for open/muted strings.' },
+            { term: 'MusicXML', detail: 'A live MusicXML editor for the score. Edit the XML and Apply, or Reload to pull the latest from the score.' },
+            { term: 'AI Tools', detail: 'The Assistant, NotaGen, Transcoda, Chordify, Harmony, and MMA tools, each on its own tab.' },
+            { term: 'History', detail: 'Local checkpoints and score versions. Save a checkpoint, then Restore, Compare, Rename, or Delete it.' },
         ],
     },
     {
