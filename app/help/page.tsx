@@ -84,7 +84,7 @@ const sections: Section[] = [
         items: [
             { term: 'Assistant', detail: 'Describe a change in plain language and the assistant proposes an edit as a reviewable MusicXML patch. You see a diff, can give feedback for another pass, and apply it as one undoable step (auto-checkpointing first).' },
             { term: 'NotaGen', detail: 'Generative model that composes or continues musical material, which you can bring into the score.' },
-            { term: 'Transcoda', detail: 'Converts the score between formats — importing from and exporting to other encodings via the conversion backend.' },
+            { term: 'Transcoda', detail: 'Transcoda is an End-to-end zero-shot Optical Music Recognition engine, creating engravings from scanned images.' },
             { term: 'Chordify', detail: 'Analyses the harmony and adds chord symbols above the staff.' },
             { term: 'Harmony', detail: 'Functional-harmony analysis — labels chords with their Roman-numeral / functional role.' },
             { term: 'MMA', detail: 'Musical MIDI Accompaniment — generates a backing accompaniment from the score’s chords and structure.' },
