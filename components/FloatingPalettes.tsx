@@ -115,7 +115,8 @@ export function FloatingPalettes({ disabled = false, dragEnabled = false, onAppl
                                                 event.dataTransfer.setData(SCORE_PALETTE_DRAG_MIME, JSON.stringify(item));
                                                 event.dataTransfer.setData('text/plain', item.label);
                                             }}
-                                            className="flex min-h-12 items-center justify-center rounded border border-slate-200 bg-slate-50 p-1 hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50"
+                                            className="flex items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50"
+                                            style={{ height: '3.25rem' }}
                                         >
                                             {item.kind === 'beam'
                                                 ? <BeamIcon value={item.subtype} className="text-slate-800" />
