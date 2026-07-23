@@ -93,7 +93,7 @@ enum class SelState : char {
 //   SelectionFilterType
 //---------------------------------------------------------
 
-static constexpr size_t NUMBER_OF_SELECTION_FILTER_TYPES = 23;
+static constexpr size_t NUMBER_OF_SELECTION_FILTER_TYPES = 24;
 
 enum class SelectionFilterType : unsigned int {
     NONE                    = 0,
@@ -120,6 +120,7 @@ enum class SelectionFilterType : unsigned int {
     BREATH                  = 1 << 20,
     TREMOLO                 = 1 << 21,
     GRACE_NOTE              = 1 << 22,
+    NOTES_AND_RESTS         = 1 << 23,
     ALL                     = ~(~0u << NUMBER_OF_SELECTION_FILTER_TYPES)
 };
 

@@ -56,6 +56,23 @@ const tremoloOptions = [
     { label: 'Two-note 64th tremolo', value: 8, symbol: '\uE223', common: false },
 ] as const;
 
+const noteheadOptions = [
+    { label: 'Normal', value: 0, symbol: '\uE0A4' },
+    { label: 'Cross', value: 1, symbol: '\uE0A9' },
+    { label: 'Diamond', value: 9, symbol: '\uE0DB' },
+    { label: 'Triangle', value: 5, symbol: '\uE0BE' },
+    { label: 'Slash', value: 15, symbol: '\uE101' },
+] as const;
+
+const beamOptions = [
+    { label: 'Auto beam', value: 0 },
+    { label: 'Begin beam / break left', value: 2 },
+    { label: 'Join beams', value: 6 },
+    { label: 'No beam', value: 1 },
+    { label: 'Break secondary beam at eighth', value: 3 },
+    { label: 'Break secondary beam at 16th', value: 4 },
+] as const;
+
 export const NotesSection: React.FC<ToolbarSectionProps> = ({
     onAddGraceNote,
     onSetVoice,
@@ -66,6 +83,8 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
     onAddGlissando,
     onAddArpeggio,
     onAddTremolo,
+    onSetNoteheadGroup,
+    onSetBeamMode,
     onToggleNoteInput,
     noteInputActive,
     noteInputMethod,
@@ -123,6 +142,38 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
                             data-testid={`btn-note-input-method-${option.value}`}
                             onSelect={() => onSetNoteInputMethod?.(option.value)}
                         >
+                            {option.label}
+                        </DropdownMenuItem>
+                    ))}
+                </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                    <Button data-testid="dropdown-noteheads" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive} className="shadow-sm">
+                        <span className={styles.noteheadSymbol} aria-hidden="true">{'\uE0A4'}</span>
+                        Noteheads
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                    {noteheadOptions.map(option => (
+                        <DropdownMenuItem key={option.value} data-testid={`btn-notehead-${option.value}`} className="min-h-10 gap-3" disabled={!onSetNoteheadGroup} onSelect={() => onSetNoteheadGroup?.(option.value)}>
+                            <span data-testid={`notehead-symbol-${option.value}`} className={styles.noteheadSymbol} aria-hidden="true">{option.symbol}</span>
+                            <span>{option.label}</span>
+                        </DropdownMenuItem>
+                    ))}
+                </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                    <Button data-testid="dropdown-beams" variant="outline" size="sm" disabled={mutationDisabled || !selectionActive} className="shadow-sm">
+                        Beams
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                    {beamOptions.map(option => (
+                        <DropdownMenuItem key={option.value} data-testid={`btn-beam-${option.value}`} disabled={!onSetBeamMode} onSelect={() => onSetBeamMode?.(option.value)}>
                             {option.label}
                         </DropdownMenuItem>
                     ))}

@@ -534,6 +534,53 @@ describe('Toolbar', () => {
     expect(onAddJump).toHaveBeenCalledWith(10);
   });
 
+  it('renders and wires Batch 4 notation, filter, and measure controls', async () => {
+    const user = userEvent.setup();
+    const onSetNoteheadGroup = vi.fn();
+    const onSetBeamMode = vi.fn();
+    const onSetSelectionFilterBit = vi.fn();
+    const onAddMeasureRepeat = vi.fn();
+    const onSetMultiMeasureRests = vi.fn();
+
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        mutationsEnabled
+        selectionActive
+        selectionFilterMask={0xFFFFFF}
+        onSetNoteheadGroup={onSetNoteheadGroup}
+        onSetBeamMode={onSetBeamMode}
+        onSetSelectionFilterBit={onSetSelectionFilterBit}
+        onAddMeasureRepeat={onAddMeasureRepeat}
+        multiMeasureRestsEnabled={false}
+        onSetMultiMeasureRests={onSetMultiMeasureRests}
+      />,
+    );
+
+    await user.click(screen.getByTestId('dropdown-noteheads'));
+    expect(screen.getByTestId('notehead-symbol-9')).toHaveTextContent('\uE0DB');
+    await user.click(screen.getByTestId('btn-notehead-9'));
+    expect(onSetNoteheadGroup).toHaveBeenCalledWith(9);
+
+    await user.click(screen.getByTestId('dropdown-beams'));
+    await user.click(screen.getByTestId('btn-beam-3'));
+    expect(onSetBeamMode).toHaveBeenCalledWith(3);
+
+    await user.click(screen.getByTestId('dropdown-selection-filter'));
+    await user.click(screen.getByTestId(`selection-filter-${1 << 23}`));
+    expect(onSetSelectionFilterBit).toHaveBeenCalledWith(1 << 23, false);
+
+    await user.click(screen.getByTestId('dropdown-measure-repeat'));
+    await user.click(screen.getByTestId('btn-measure-repeat-2'));
+    expect(onAddMeasureRepeat).toHaveBeenCalledWith(2);
+
+    await user.click(screen.getByTestId('btn-multi-measure-rests'));
+    expect(onSetMultiMeasureRests).toHaveBeenCalledWith(true);
+  });
+
   it('lists the slur keyboard shortcut', async () => {
     const user = userEvent.setup();
 

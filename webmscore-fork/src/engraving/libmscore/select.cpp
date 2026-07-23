@@ -106,6 +106,9 @@ void SelectionFilter::setFiltered(SelectionFilterType type, bool filtered)
 
 bool SelectionFilter::canSelect(const EngravingItem* e) const
 {
+    if (e->isNote() || e->isChord() || e->isRest() || e->isMeasureRepeat()) {
+        return isFiltered(SelectionFilterType::NOTES_AND_RESTS);
+    }
     if (e->isDynamic()) {
         return isFiltered(SelectionFilterType::DYNAMIC);
     }
@@ -609,7 +612,9 @@ void Selection::updateSelectedElements()
                         appendChord(graceNote);
                     }
                 }
-                appendChord(chord);
+                if (canSelect(chord)) {
+                    appendChord(chord);
+                }
                 for (Articulation* art : chord->articulations()) {
                     appendFiltered(art);
                 }
@@ -1142,6 +1147,9 @@ std::vector<Note*> Selection::noteList(track_idx_t selTrack) const
             }
         }
     } else if (_state == SelState::RANGE) {
+        if (!selectionFilter().isFiltered(SelectionFilterType::NOTES_AND_RESTS)) {
+            return nl;
+        }
         for (staff_idx_t staffIdx = staffStart(); staffIdx < staffEnd(); ++staffIdx) {
             track_idx_t startTrack = staffIdx * VOICES;
             track_idx_t endTrack   = startTrack + VOICES;

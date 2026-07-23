@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
 import { Button } from '../../ui/Button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../../ui/DropdownMenu';
 import { ToolbarSectionProps } from '../types';
 import { toolbarInputBaseClass } from '../constants';
 import { MeasureInsertTarget } from '../../Toolbar';
-import { Plus, Trash2, ListStart } from 'lucide-react';
+import { Plus, Trash2, ListStart, Repeat2, Rows3 } from 'lucide-react';
 
 export const MeasuresSection: React.FC<ToolbarSectionProps> = ({
     onInsertMeasures,
     onAddPickup,
     onRemoveContainingMeasures,
     onRemoveTrailingEmptyMeasures,
+    onAddMeasureRepeat,
+    multiMeasureRestsEnabled,
+    onSetMultiMeasureRests,
     insertMeasuresDisabled,
     mutationsEnabled,
     selectionActive,
@@ -70,6 +74,40 @@ export const MeasuresSection: React.FC<ToolbarSectionProps> = ({
             >
                 <Plus size={14} className="mr-2" />
                 Add Bars
+            </Button>
+            <div className="h-3 w-px bg-slate-200"></div>
+            <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                    <Button
+                        data-testid="dropdown-measure-repeat"
+                        disabled={mutationDisabled || !selectionActive || !onAddMeasureRepeat}
+                        variant="outline"
+                        size="sm"
+                        className="shadow-sm"
+                    >
+                        <Repeat2 size={14} className="mr-2" />
+                        Measure Repeat
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                    {[1, 2, 4].map(count => (
+                        <DropdownMenuItem key={count} data-testid={`btn-measure-repeat-${count}`} onSelect={() => onAddMeasureRepeat?.(count)}>
+                            {count}-measure repeat
+                        </DropdownMenuItem>
+                    ))}
+                </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+                data-testid="btn-multi-measure-rests"
+                aria-pressed={Boolean(multiMeasureRestsEnabled)}
+                onClick={() => onSetMultiMeasureRests?.(!multiMeasureRestsEnabled)}
+                disabled={mutationDisabled || !onSetMultiMeasureRests}
+                variant={multiMeasureRestsEnabled ? 'primary' : 'outline'}
+                size="sm"
+                className="shadow-sm"
+            >
+                <Rows3 size={14} className="mr-2" />
+                Multi-bar Rests
             </Button>
             <div className="h-3 w-px bg-slate-200"></div>
             <input

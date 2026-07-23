@@ -1,13 +1,30 @@
 import React from 'react';
 import { Button } from '../../ui/Button';
+import { Checkbox } from '../../ui/Checkbox';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../../ui/DropdownMenu';
 import { ToolbarSectionProps } from '../types';
-import { Trash2, Undo2, Redo2, CheckSquare } from 'lucide-react';
+import { Trash2, Undo2, Redo2, CheckSquare, ListFilter } from 'lucide-react';
+
+const selectionFilterOptions = [
+    { label: 'Voice 1', bit: 1, group: 'Voices' },
+    { label: 'Voice 2', bit: 2, group: 'Voices' },
+    { label: 'Voice 3', bit: 4, group: 'Voices' },
+    { label: 'Voice 4', bit: 8, group: 'Voices' },
+    { label: 'Notes and rests', bit: 1 << 23, group: 'Elements' },
+    { label: 'Articulations', bit: 1 << 10, group: 'Elements' },
+    { label: 'Dynamics', bit: 1 << 4, group: 'Elements' },
+    { label: 'Text', bit: 1 << 9, group: 'Elements' },
+    { label: 'Lyrics', bit: 1 << 7, group: 'Elements' },
+    { label: 'Chord symbols', bit: 1 << 8, group: 'Elements' },
+] as const;
 
 export const EditSection: React.FC<ToolbarSectionProps> = ({
     onDeleteSelection,
     onUndo,
     onRedo,
     onSelectAll,
+    selectionFilterMask = 0xFFFFFF,
+    onSetSelectionFilterBit,
     mutationsEnabled,
     selectionActive,
 }) => {
@@ -28,6 +45,44 @@ export const EditSection: React.FC<ToolbarSectionProps> = ({
                 <CheckSquare size={14} className="mr-2" />
                 Select All
             </Button>
+            <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                    <Button
+                        data-testid="dropdown-selection-filter"
+                        disabled={!mutationsEnabled || !onSetSelectionFilterBit}
+                        variant="outline"
+                        size="sm"
+                        className="shadow-sm"
+                    >
+                        <ListFilter size={14} className="mr-2" />
+                        Selection Filter
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent data-testid="selection-filter-menu" className="max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto">
+                    {(['Voices', 'Elements'] as const).map(group => (
+                        <React.Fragment key={group}>
+                            <DropdownMenuLabel>{group}</DropdownMenuLabel>
+                            {selectionFilterOptions.filter(option => option.group === group).map(option => {
+                                const checked = Boolean(selectionFilterMask & option.bit);
+                                return (
+                                    <DropdownMenuItem
+                                        key={option.bit}
+                                        data-testid={`selection-filter-${option.bit}`}
+                                        onSelect={(event) => {
+                                            event.preventDefault();
+                                            onSetSelectionFilterBit?.(option.bit, !checked);
+                                        }}
+                                        className="gap-2"
+                                    >
+                                        <Checkbox checked={checked} tabIndex={-1} className="pointer-events-none" aria-hidden="true" />
+                                        {option.label}
+                                    </DropdownMenuItem>
+                                );
+                            })}
+                        </React.Fragment>
+                    ))}
+                </DropdownMenuContent>
+            </DropdownMenu>
             <div className="h-3 w-px bg-slate-200"></div>
             <Button
                 data-testid="btn-delete"

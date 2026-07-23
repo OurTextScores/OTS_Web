@@ -131,6 +131,13 @@ export interface ToolbarSectionProps {
     onAddVolta?: (endingNumber: number) => void;
     onAddMarker?: (markerType: number) => void;
     onAddJump?: (jumpType: number) => void;
+    onSetNoteheadGroup?: (noteheadGroup: number) => void;
+    onSetBeamMode?: (beamMode: number) => void;
+    selectionFilterMask?: number;
+    onSetSelectionFilterBit?: (filterBit: number, enabled: boolean) => void;
+    onAddMeasureRepeat?: (numMeasures: number) => void;
+    multiMeasureRestsEnabled?: boolean;
+    onSetMultiMeasureRests?: (enabled: boolean) => void;
     onInsertMeasures?: (count: number, target: MeasureInsertTarget) => void;
     onAddPickup?: (numerator: number, denominator: number) => void;
     onRemoveContainingMeasures?: () => void;

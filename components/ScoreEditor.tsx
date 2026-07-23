@@ -480,6 +480,9 @@ const LAYOUT_MODES = {
     HORIZONTAL_FIXED: 4,
 } as const;
 
+const SELECTION_FILTER_STORAGE_KEY = 'ots_editor_selection_filter_v1';
+const DEFAULT_SELECTION_FILTER_MASK = 0xFFFFFF;
+
 type MutationMethods = Pick<
     Score,
     | 'selectElementAtPoint'
@@ -580,6 +583,12 @@ type MutationMethods = Pick<
     | 'addVolta'
     | 'addMarker'
     | 'addJump'
+    | 'setNoteheadGroup'
+    | 'setBeamMode'
+    | 'setSelectionFilter'
+    | 'addMeasureRepeat'
+    | 'setMultiMeasureRests'
+    | 'multiMeasureRestsEnabled'
     | 'insertMeasures'
     | 'addPickupMeasure'
     | 'removeTrailingEmptyMeasures'
@@ -1187,12 +1196,39 @@ export default function ScoreEditor() {
     const [noteInputMethod, setNoteInputMethod] = useState(1);
     const [noteInputShadow, setNoteInputShadow] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
     const [paletteDropActive, setPaletteDropActive] = useState(false);
+    const [selectionFilterMask, setSelectionFilterMask] = useState(() => {
+        if (typeof window === 'undefined') return DEFAULT_SELECTION_FILTER_MASK;
+        const storedValue = window.localStorage.getItem(SELECTION_FILTER_STORAGE_KEY);
+        if (storedValue === null) return DEFAULT_SELECTION_FILTER_MASK;
+        const stored = Number(storedValue);
+        return Number.isInteger(stored) && stored >= 0 && stored <= DEFAULT_SELECTION_FILTER_MASK
+            ? stored
+            : DEFAULT_SELECTION_FILTER_MASK;
+    });
+    const selectionFilterMaskRef = useRef(selectionFilterMask);
+    const [multiMeasureRestsEnabled, setMultiMeasureRestsEnabled] = useState(false);
     const noteInputActiveRef = useRef(false);
     useEffect(() => {
         noteInputActiveRef.current = false;
         setNoteInputActive(false);
         setNoteInputMethod(1);
         setNoteInputShadow(null);
+    }, [score]);
+    useEffect(() => {
+        if (!score) {
+            setMultiMeasureRestsEnabled(false);
+            return;
+        }
+        void Promise.resolve(score.setSelectionFilter?.(selectionFilterMaskRef.current)).catch((err: unknown) => {
+            console.warn('Failed to apply selection filter:', err);
+        });
+        if (score.multiMeasureRestsEnabled) {
+            void Promise.resolve(score.multiMeasureRestsEnabled()).then((enabled) => {
+                setMultiMeasureRestsEnabled(Boolean(enabled));
+            }).catch((err: unknown) => {
+                console.warn('Failed to read multi-measure-rest state:', err);
+            });
+        }
     }, [score]);
     useEffect(() => () => {
         noteDragCleanupRef.current?.();
@@ -10606,6 +10642,30 @@ ${partsBodyXml}
         }
     };
 
+    const handleSetSelectionFilterBit = async (filterBit: number, enabled: boolean) => {
+        const nextMask = enabled
+            ? selectionFilterMaskRef.current | filterBit
+            : selectionFilterMaskRef.current & ~filterBit;
+        selectionFilterMaskRef.current = nextMask;
+        setSelectionFilterMask(nextMask);
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(SELECTION_FILTER_STORAGE_KEY, String(nextMask));
+        }
+        const activeScore = scoreRef.current ?? score;
+        if (!activeScore?.setSelectionFilter) {
+            console.warn('Selection filter is not available in this build.');
+            return;
+        }
+        try {
+            const applied = await activeScore.setSelectionFilter(nextMask);
+            if (applied !== false) {
+                await refreshSelectionFromSvg();
+            }
+        } catch (err) {
+            console.warn('Failed to update selection filter:', err);
+        }
+    };
+
     const handleDeleteSelection = () => performMutation('delete selection', async () => {
         await ensureSelectionInWasm();
         const del = requireMutation('deleteSelection');
@@ -10625,8 +10685,20 @@ ${partsBodyXml}
         }
         return fn(selectedTextValue);
     });
-    const handleUndo = () => performMutation('undo', score?.undo?.bind(score));
-    const handleRedo = () => performMutation('redo', score?.redo?.bind(score));
+    const handleUndo = () => performMutation('undo', score?.undo ? async () => {
+        const result = await score.undo?.();
+        if (score.multiMeasureRestsEnabled) {
+            setMultiMeasureRestsEnabled(Boolean(await score.multiMeasureRestsEnabled()));
+        }
+        return result;
+    } : undefined);
+    const handleRedo = () => performMutation('redo', score?.redo ? async () => {
+        const result = await score.redo?.();
+        if (score.multiMeasureRestsEnabled) {
+            setMultiMeasureRestsEnabled(Boolean(await score.multiMeasureRestsEnabled()));
+        }
+        return result;
+    } : undefined);
     const handlePitchUp = () => performMutation('raise pitch', async () => {
         // Don't call ensureSelectionInWasm - it would replace multi-selections with single element
         const fn = requireMutation('pitchUp');
@@ -11044,6 +11116,20 @@ ${partsBodyXml}
         });
     };
 
+    const handleSetNoteheadGroup = (noteheadGroup: number) => performMutation('set notehead group', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('setNoteheadGroup');
+        if (!fn) return false;
+        return fn(noteheadGroup);
+    });
+
+    const handleSetBeamMode = (beamMode: number) => performMutation('set beam mode', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('setBeamMode');
+        if (!fn) return false;
+        return fn(beamMode);
+    });
+
     const handleAddDynamic = (dynamicType: number) => performMutation('add dynamic', async () => {
         await ensureSelectionInWasm();
         const fn = requireMutation('addDynamic');
@@ -11397,6 +11483,23 @@ ${partsBodyXml}
         if (!fn) return false;
         return fn(jumpType);
     });
+
+    const handleAddMeasureRepeat = (numMeasures: number) => performMutation('add measure repeat', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('addMeasureRepeat');
+        if (!fn) return false;
+        return fn(numMeasures);
+    }, { skipWasmReselect: true, skipSelectionFallback: true });
+
+    const handleSetMultiMeasureRests = (enabled: boolean) => performMutation('set multi-measure rests', async () => {
+        const fn = requireMutation('setMultiMeasureRests');
+        if (!fn) return false;
+        const changed = await fn(enabled);
+        if (changed !== false) {
+            setMultiMeasureRestsEnabled(enabled);
+        }
+        return changed;
+    }, { clearSelection: true, skipWasmReselect: true, skipSelectionFallback: true });
 
     const handleSetTitleText = async () => {
         if (!score) {
@@ -14469,6 +14572,13 @@ ${partsBodyXml}
                 onAddVolta={handleAddVolta}
                 onAddMarker={handleAddMarker}
                 onAddJump={handleAddJump}
+                onSetNoteheadGroup={handleSetNoteheadGroup}
+                onSetBeamMode={handleSetBeamMode}
+                selectionFilterMask={selectionFilterMask}
+                onSetSelectionFilterBit={handleSetSelectionFilterBit}
+                onAddMeasureRepeat={handleAddMeasureRepeat}
+                multiMeasureRestsEnabled={multiMeasureRestsEnabled}
+                onSetMultiMeasureRests={handleSetMultiMeasureRests}
                 onInsertMeasures={handleInsertMeasures}
                 onAddPickup={handleAddPickup}
                 onRemoveTrailingEmptyMeasures={handleRemoveTrailingEmptyMeasures}

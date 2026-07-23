@@ -174,6 +174,12 @@ export interface Score {
     addGlissando?: (glissandoType: number) => Promise<boolean> | boolean;
     addMarker?: (markerType: number) => Promise<boolean> | boolean;
     addJump?: (jumpType: number) => Promise<boolean> | boolean;
+    setNoteheadGroup?: (noteheadGroup: number) => Promise<boolean> | boolean;
+    setBeamMode?: (beamMode: number) => Promise<boolean> | boolean;
+    setSelectionFilter?: (filterMask: number) => Promise<boolean> | boolean;
+    addMeasureRepeat?: (numMeasures: number) => Promise<boolean> | boolean;
+    setMultiMeasureRests?: (enabled: boolean) => Promise<boolean> | boolean;
+    multiMeasureRestsEnabled?: () => Promise<boolean> | boolean;
     addPedal?: (pedalVariant: number) => Promise<unknown> | unknown;
     addSostenutoPedal?: () => Promise<unknown> | unknown;
     addUnaCorda?: () => Promise<unknown> | unknown;

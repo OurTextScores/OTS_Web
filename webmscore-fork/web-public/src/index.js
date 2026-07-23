@@ -1576,6 +1576,35 @@ class WebMscore {
         return Module.ccall('addJump', 'boolean', ['number', 'number', 'number'], [this.scoreptr, jumpType, this.excerptId])
     }
 
+    /** Apply a curated notehead group to the selected notes. */
+    async setNoteheadGroup(noteheadGroup) {
+        return Module.ccall('setNoteheadGroup', 'boolean', ['number', 'number', 'number'], [this.scoreptr, noteheadGroup, this.excerptId])
+    }
+
+    /** Apply a MuseScore beam mode to the selected chord/rests. */
+    async setBeamMode(beamMode) {
+        return Module.ccall('setBeamMode', 'boolean', ['number', 'number', 'number'], [this.scoreptr, beamMode, this.excerptId])
+    }
+
+    /** Replace the native range-selection filter bitmask. */
+    async setSelectionFilter(filterMask) {
+        return Module.ccall('setSelectionFilter', 'boolean', ['number', 'number', 'number'], [this.scoreptr, filterMask, this.excerptId])
+    }
+
+    /** Replace empty selected measures with a semantic measure-repeat group. */
+    async addMeasureRepeat(numMeasures) {
+        return Module.ccall('addMeasureRepeat', 'boolean', ['number', 'number', 'number'], [this.scoreptr, numMeasures, this.excerptId])
+    }
+
+    /** Enable or disable score-wide multi-measure rest creation. */
+    async setMultiMeasureRests(enabled) {
+        return Module.ccall('setMultiMeasureRests', 'boolean', ['number', 'boolean', 'number'], [this.scoreptr, enabled, this.excerptId])
+    }
+
+    async multiMeasureRestsEnabled() {
+        return Module.ccall('multiMeasureRestsEnabled', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
     /**
      * Add a pedal marking at the current selection
      * @param {number} pedalVariant 0=line, 1=text

@@ -964,6 +964,30 @@ class WebMscoreW {
         return this.rpc('addJump', [jumpType])
     }
 
+    setNoteheadGroup(noteheadGroup) {
+        return this.rpc('setNoteheadGroup', [noteheadGroup])
+    }
+
+    setBeamMode(beamMode) {
+        return this.rpc('setBeamMode', [beamMode])
+    }
+
+    setSelectionFilter(filterMask) {
+        return this.rpc('setSelectionFilter', [filterMask])
+    }
+
+    addMeasureRepeat(numMeasures) {
+        return this.rpc('addMeasureRepeat', [numMeasures])
+    }
+
+    setMultiMeasureRests(enabled) {
+        return this.rpc('setMultiMeasureRests', [enabled])
+    }
+
+    multiMeasureRestsEnabled() {
+        return this.rpc('multiMeasureRestsEnabled')
+    }
+
     addPedal(pedalVariant) {
         return this.rpc('addPedal', [pedalVariant])
     }

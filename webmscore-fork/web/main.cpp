@@ -2141,6 +2141,167 @@ bool _addJump(uintptr_t score_ptr, int jumpType, int excerptId)
     return true;
 }
 
+bool _setNoteheadGroup(uintptr_t score_ptr, int noteheadGroup, int excerptId)
+{
+    const auto group = static_cast<engraving::NoteHeadGroup>(noteheadGroup);
+    switch (group) {
+    case engraving::NoteHeadGroup::HEAD_NORMAL:
+    case engraving::NoteHeadGroup::HEAD_CROSS:
+    case engraving::NoteHeadGroup::HEAD_TRIANGLE_UP:
+    case engraving::NoteHeadGroup::HEAD_DIAMOND:
+    case engraving::NoteHeadGroup::HEAD_SLASH:
+        break;
+    default:
+        LOGW() << "setNoteheadGroup: unsupported notehead group " << noteheadGroup;
+        return false;
+    }
+
+    MainScore score(score_ptr, excerptId);
+    std::vector<engraving::Note*> notes;
+    for (auto* note : score->selection().noteList()) {
+        if (note && note->headGroup() != group) {
+            notes.push_back(note);
+        }
+    }
+    if (notes.empty()) {
+        LOGW() << "setNoteheadGroup: no eligible selected notes";
+        return false;
+    }
+
+    score->startCmd();
+    for (auto* note : notes) {
+        note->undoChangeProperty(engraving::Pid::HEAD_GROUP, group);
+    }
+    score->endCmd();
+    return true;
+}
+
+bool _setBeamMode(uintptr_t score_ptr, int beamMode, int excerptId)
+{
+    const auto mode = static_cast<engraving::BeamMode>(beamMode);
+    switch (mode) {
+    case engraving::BeamMode::AUTO:
+    case engraving::BeamMode::NONE:
+    case engraving::BeamMode::BEGIN:
+    case engraving::BeamMode::BEGIN32:
+    case engraving::BeamMode::BEGIN64:
+    case engraving::BeamMode::MID:
+        break;
+    default:
+        LOGW() << "setBeamMode: unsupported beam mode " << beamMode;
+        return false;
+    }
+
+    MainScore score(score_ptr, excerptId);
+    std::vector<engraving::ChordRest*> chordRests;
+    for (auto* chordRest : score->getSelectedChordRests()) {
+        if (chordRest && !chordRest->isGrace() && chordRest->beamMode() != mode) {
+            chordRests.push_back(chordRest);
+        }
+    }
+    if (chordRests.empty()) {
+        LOGW() << "setBeamMode: no eligible selected chord/rests";
+        return false;
+    }
+
+    score->startCmd();
+    for (auto* chordRest : chordRests) {
+        chordRest->undoChangeProperty(engraving::Pid::BEAM_MODE, mode);
+    }
+    score->endCmd();
+    return true;
+}
+
+bool _setSelectionFilter(uintptr_t score_ptr, int filterMask, int excerptId)
+{
+    const auto allowedMask = static_cast<unsigned int>(engraving::SelectionFilterType::ALL);
+    if (filterMask < 0 || (static_cast<unsigned int>(filterMask) & ~allowedMask) != 0) {
+        LOGW() << "setSelectionFilter: invalid mask " << filterMask;
+        return false;
+    }
+
+    MainScore score(score_ptr, excerptId);
+    score->selectionFilter() = engraving::SelectionFilter(static_cast<engraving::SelectionFilterType>(filterMask));
+    score->selection().updateSelectedElements();
+    return true;
+}
+
+bool _addMeasureRepeat(uintptr_t score_ptr, int numMeasures, int excerptId)
+{
+    if (numMeasures != 1 && numMeasures != 2 && numMeasures != 4) {
+        LOGW() << "addMeasureRepeat: unsupported measure count " << numMeasures;
+        return false;
+    }
+
+    MainScore score(score_ptr, excerptId);
+    engraving::Measure* startMeasure = nullptr;
+    engraving::Measure* endMeasure = nullptr;
+    if (!selectionMeasureRange(score, startMeasure, endMeasure) || !startMeasure) {
+        LOGW() << "addMeasureRepeat: no measure selected";
+        return false;
+    }
+    auto* target = startMeasure->isMMRest() ? startMeasure->mmRestFirst() : startMeasure;
+    if (!target || !target->prevMeasure()) {
+        LOGW() << "addMeasureRepeat: the first score measure cannot repeat a previous measure";
+        return false;
+    }
+
+    engraving::staff_idx_t staffIdx = score->selection().isRange() ? score->selection().staffStart() : 0;
+    if (auto* chordRest = score->selection().firstChordRest()) {
+        staffIdx = chordRest->staffIdx();
+    }
+    if (staffIdx >= score->nstaves()) {
+        LOGW() << "addMeasureRepeat: invalid target staff";
+        return false;
+    }
+
+    auto* measure = target;
+    for (int i = 0; i < numMeasures; ++i) {
+        if (!measure || measure->ticks() != target->ticks() || measure->isMeasureRepeatGroup(staffIdx)) {
+            LOGW() << "addMeasureRepeat: incompatible target measure range";
+            return false;
+        }
+        for (auto* segment = measure->first(); segment; segment = segment->next()) {
+            if (!(segment->segmentType() & engraving::SegmentType::ChordRest)) {
+                continue;
+            }
+            const auto startTrack = engraving::staff2track(staffIdx, 0);
+            const auto endTrack = startTrack + engraving::VOICES;
+            for (auto track = startTrack; track < endTrack; ++track) {
+                auto* item = segment->element(track);
+                if (item && !item->generated() && !item->isRest()) {
+                    LOGW() << "addMeasureRepeat: target measures must be empty";
+                    return false;
+                }
+            }
+        }
+        measure = measure->nextMeasure();
+    }
+
+    score->startCmd();
+    score->cmdAddMeasureRepeat(target, numMeasures, staffIdx);
+    score->endCmd();
+    return target->isMeasureRepeatGroup(staffIdx);
+}
+
+bool _setMultiMeasureRests(uintptr_t score_ptr, bool enabled, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    if (score->styleB(engraving::Sid::createMultiMeasureRests) == enabled) {
+        return false;
+    }
+    score->startCmd();
+    score->cmdToggleMmrest();
+    score->endCmd();
+    return true;
+}
+
+bool _multiMeasureRestsEnabled(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    return score->styleB(engraving::Sid::createMultiMeasureRests);
+}
+
 /**
  * get the number of pages
  */
@@ -6322,6 +6483,36 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool addJump(uintptr_t score_ptr, int jumpType, int excerptId = -1) {
         return _addJump(score_ptr, jumpType, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setNoteheadGroup(uintptr_t score_ptr, int noteheadGroup, int excerptId = -1) {
+        return _setNoteheadGroup(score_ptr, noteheadGroup, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setBeamMode(uintptr_t score_ptr, int beamMode, int excerptId = -1) {
+        return _setBeamMode(score_ptr, beamMode, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setSelectionFilter(uintptr_t score_ptr, int filterMask, int excerptId = -1) {
+        return _setSelectionFilter(score_ptr, filterMask, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool addMeasureRepeat(uintptr_t score_ptr, int numMeasures, int excerptId = -1) {
+        return _addMeasureRepeat(score_ptr, numMeasures, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setMultiMeasureRests(uintptr_t score_ptr, bool enabled, int excerptId = -1) {
+        return _setMultiMeasureRests(score_ptr, enabled, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool multiMeasureRestsEnabled(uintptr_t score_ptr, int excerptId = -1) {
+        return _multiMeasureRestsEnabled(score_ptr, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE
