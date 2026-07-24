@@ -108,6 +108,7 @@ import { readAiEditServiceResponse } from '../lib/ai-edit-progress-client';
 import { useAiEditController } from './score-editor/useAiEditController';
 import { useAiProposalController } from './score-editor/useAiProposalController';
 import { AiAssistantPanel } from './score-editor/AiAssistantPanel';
+import { MultitrackVaePanel } from './score-editor/MultitrackVaePanel';
 import {
     AiCompareWorkspace,
     AiCompareWorkspaceActions,
@@ -1415,7 +1416,7 @@ export default function ScoreEditor() {
     const [isResizingSidebar, setIsResizingSidebar] = useState(false);
     const sidebarResizeStartXRef = useRef<number>(0);
     const sidebarResizeStartWidthRef = useRef<number>(0);
-    const [xmlSidebarTab, setXmlSidebarTab] = useState<'xml' | 'assistant' | 'notagen' | 'transcoda' | 'harmony' | 'functional' | 'mma'>('assistant');
+    const [xmlSidebarTab, setXmlSidebarTab] = useState<'xml' | 'assistant' | 'notagen' | 'transcoda' | 'multitrack' | 'harmony' | 'functional' | 'mma'>('assistant');
     const [codeEditorTheme, setCodeEditorTheme] = useState<CodeEditorThemeMode>('light');
     const [xmlText, setXmlText] = useState('');
     const [xmlDirty, setXmlDirty] = useState(false);
@@ -2419,7 +2420,7 @@ export default function ScoreEditor() {
         if (aiEnabled) {
             return;
         }
-        if (xmlSidebarTab !== 'xml' && xmlSidebarTab !== 'transcoda' && xmlSidebarTab !== 'mma' && xmlSidebarTab !== 'harmony' && xmlSidebarTab !== 'functional') {
+        if (xmlSidebarTab !== 'xml' && xmlSidebarTab !== 'transcoda' && xmlSidebarTab !== 'multitrack' && xmlSidebarTab !== 'mma' && xmlSidebarTab !== 'harmony' && xmlSidebarTab !== 'functional') {
             setXmlSidebarTab('xml');
         }
     }, [aiEnabled, xmlSidebarTab]);
@@ -15657,6 +15658,18 @@ ${partsBodyXml}
                                     </button>
                                     <button
                                         type="button"
+                                        data-testid="tab-multitrack-vae"
+                                        onClick={() => setXmlSidebarTab('multitrack')}
+                                        className={`rounded border px-2 py-1 ${
+                                            xmlSidebarTab === 'multitrack'
+                                                ? 'border-gray-400 bg-gray-100 text-gray-900'
+                                                : 'border-transparent text-gray-500 hover:text-gray-700'
+                                        }`}
+                                    >
+                                        MusicVAE
+                                    </button>
+                                    <button
+                                        type="button"
                                         data-testid="tab-harmony"
                                         onClick={() => setXmlSidebarTab('harmony')}
                                         className={`rounded border px-2 py-1 ${
@@ -16102,6 +16115,59 @@ ${partsBodyXml}
                                     )}
                                 </div>
                             </div>
+                        )}
+                        {xmlSidebarTab === 'multitrack' && (
+                            <MultitrackVaePanel
+                                postJson={postScoreEditorJson}
+                                hasScore={Boolean(score)}
+                                getCurrentScoreMidiBase64={async () => {
+                                    if (!score || !score.saveMidi) {
+                                        return null;
+                                    }
+                                    const midi = await score.saveMidi(true, true);
+                                    let binary = '';
+                                    const bytes = new Uint8Array(midi);
+                                    for (let i = 0; i < bytes.length; i++) {
+                                        binary += String.fromCharCode(bytes[i]);
+                                    }
+                                    return btoa(binary);
+                                }}
+                                onApplyXml={async (xml, applyMode) => {
+                                    setXmlLoading(true);
+                                    setXmlError(null);
+                                    try {
+                                        if (!score || applyMode === 'overwrite') {
+                                            if (!score) {
+                                                const encoded = new TextEncoder().encode(xml);
+                                                const file = new File([encoded], 'multitrack-vae.musicxml', { type: 'application/xml' });
+                                                await handleFileUpload(file, {
+                                                    preserveScoreId: false,
+                                                    updateUrl: false,
+                                                    telemetrySource: 'multitrack_vae_output',
+                                                });
+                                            } else {
+                                                await applyXmlToScore(xml, { telemetrySource: 'multitrack_vae_output_overwrite' });
+                                            }
+                                        } else {
+                                            const currentXml = await resolveXmlContext();
+                                            if (!currentXml.trim()) {
+                                                throw new Error('Unable to load current score MusicXML for append.');
+                                            }
+                                            const appendResult = appendMusicXmlMeasures(currentXml, xml);
+                                            if (appendResult.appendedMeasureCount <= 0) {
+                                                throw new Error('Generated MusicXML did not contain appendable measures.');
+                                            }
+                                            await applyXmlToScore(appendResult.xml, {
+                                                telemetrySource: 'multitrack_vae_output_append',
+                                                inputFormat: 'musicxml',
+                                            });
+                                        }
+                                        setXmlSidebarTab('xml');
+                                    } finally {
+                                        setXmlLoading(false);
+                                    }
+                                }}
+                            />
                         )}
                         {xmlSidebarTab === 'mma' && (
                             <div className="mt-3 space-y-3 text-sm text-gray-700">

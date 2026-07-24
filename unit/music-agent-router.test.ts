@@ -7,6 +7,7 @@ const mocked = vi.hoisted(() => ({
   runDiffFeedbackService: vi.fn(),
   runFunctionalHarmonyAnalyzeService: vi.fn(),
   runMusicGenerateService: vi.fn(),
+  runMusicMultitrackVaeService: vi.fn(),
   runHarmonyAnalyzeService: vi.fn(),
   runMusicScoreOpsPromptService: vi.fn(),
   runMusicScoreOpsPreviewService: vi.fn(),
@@ -46,6 +47,10 @@ vi.mock('../lib/music-services/functional-harmony-service', () => ({
 
 vi.mock('../lib/music-services/generate-service', () => ({
   runMusicGenerateService: mocked.runMusicGenerateService,
+}));
+
+vi.mock('../lib/music-services/multitrack-vae-service', () => ({
+  runMusicMultitrackVaeService: mocked.runMusicMultitrackVaeService,
 }));
 
 vi.mock('../lib/music-services/harmony-service', () => ({
@@ -249,6 +254,26 @@ describe('runMusicAgentRouter', () => {
         dryRun: true,
       }),
     );
+  });
+
+  it('routes multitrack/groove prompts to music.multitrack_vae (not NotaGen)', async () => {
+    delete process.env.OPENAI_API_KEY;
+    mocked.runMusicMultitrackVaeService.mockResolvedValue({
+      status: 200,
+      body: { ok: true, engine: 'multitrack-musicvae', midiArtifactId: 'a1' },
+    });
+
+    const result = await runMusicAgentRouter({
+      prompt: 'Generate a multitrack groove that morphs between two styles',
+      toolInput: { multitrack_vae: { mode: 'style_interpolation', chords: ['C', 'Am'] } },
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ mode: 'fallback', selectedTool: 'music.multitrack_vae' });
+    expect(mocked.runMusicMultitrackVaeService).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'style_interpolation' }),
+    );
+    expect(mocked.runMusicGenerateService).not.toHaveBeenCalled();
   });
 
   it('uses fallback router and scoreops service for edit prompts', async () => {

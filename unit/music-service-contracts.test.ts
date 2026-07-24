@@ -12,6 +12,7 @@ import {
   MUSIC_MMA_TEMPLATE_TOOL_CONTRACT,
   MUSIC_MMA_RENDER_TOOL_CONTRACT,
   MUSIC_OMR_TRANSCRIBE_TOOL_CONTRACT,
+  MUSIC_MULTITRACK_VAE_TOOL_CONTRACT,
   MUSIC_TOOL_CONTRACTS,
 } from '../lib/music-services/contracts';
 
@@ -31,8 +32,21 @@ describe('music service tool contracts', () => {
       'music.mma_template',
       'music.mma_render',
       'music.omr_transcribe',
+      'music.multitrack_vae',
     ]);
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('declares required multitrack VAE contract fields', () => {
+    expect(MUSIC_MULTITRACK_VAE_TOOL_CONTRACT.name).toBe('music.multitrack_vae');
+    expect(MUSIC_MULTITRACK_VAE_TOOL_CONTRACT.description.length).toBeGreaterThan(0);
+    expect(MUSIC_MULTITRACK_VAE_TOOL_CONTRACT.inputSchema).toMatchObject({
+      type: 'object',
+      required: ['mode'],
+    });
+    expect(MUSIC_MULTITRACK_VAE_TOOL_CONTRACT.outputSchema).toMatchObject({
+      oneOf: expect.any(Array),
+    });
   });
 
   it('declares required convert contract fields', () => {

@@ -18,6 +18,7 @@ import { runMusicConvertService } from '../music-services/convert-service';
 import { runDiffFeedbackService } from '../music-services/diff-feedback-service';
 import { runFunctionalHarmonyAnalyzeService } from '../music-services/functional-harmony-service';
 import { runMusicGenerateService } from '../music-services/generate-service';
+import { runMusicMultitrackVaeService } from '../music-services/multitrack-vae-service';
 import { runHarmonyAnalyzeService } from '../music-services/harmony-service';
 import { runMusicPatchService } from '../music-services/patch-service';
 import { runMusicRenderService } from '../music-services/render-service';
@@ -36,6 +37,7 @@ import {
   MUSIC_PATCH_TOOL_CONTRACT,
   MUSIC_SCOREOPS_TOOL_CONTRACT,
   MUSIC_RENDER_TOOL_CONTRACT,
+  MUSIC_MULTITRACK_VAE_TOOL_CONTRACT,
 } from '../music-services/contracts';
 import { normalizeScoreSessionId, type ResolvedScoreSnapshot } from '../music-services/common';
 
@@ -48,7 +50,8 @@ type MusicAgentToolName =
   | 'music.harmony_analyze'
   | 'music.scoreops'
   | 'music.patch'
-  | 'music.render';
+  | 'music.render'
+  | 'music.multitrack_vae';
 
 type ToolDefaults = {
   context?: Record<string, unknown>;
@@ -60,6 +63,7 @@ type ToolDefaults = {
   scoreops?: Record<string, unknown>;
   patch?: Record<string, unknown>;
   render?: Record<string, unknown>;
+  multitrack_vae?: Record<string, unknown>;
 };
 
 type MusicAgentRunnerContext = {
@@ -307,6 +311,7 @@ const AGENT_OUTPUT_SCHEMA = z.object({
     'music_scoreops',
     'music_patch',
     'music_render',
+    'music_multitrack_vae',
   ]),
   toolStatus: z.number(),
   toolOk: z.boolean(),
@@ -358,6 +363,13 @@ function classifyPrompt(prompt: string | AgentInputItem[]): MusicAgentToolName {
   const isChordify = /\b(chordify|chord symbols?|harmony tags?|lead sheet|lead-sheet|mma|accompaniment chords?)\b/.test(normalized);
   if (isChordify) {
     return 'music.harmony_analyze';
+  }
+  // Multitrack MusicVAE: latent multitrack MIDI (grooves, chord-conditioned measures,
+  // style morph/interpolation). Checked before the generic generate heuristic so
+  // MusicVAE-specific intents don't fall through to NotaGen.
+  const isMultitrackVae = /\b(musicvae|music vae|multitrack|multi-track|groove|grooves|drum ?beat|latent|interpolate between styles|style morph|morph between|blend .* (measures?|styles?)|arrange over|jam)\b/.test(normalized);
+  if (isMultitrackVae) {
+    return 'music.multitrack_vae';
   }
   const isGenerate = /\b(generate|compose|write|create|new score|melody|variation)\b/.test(normalized);
   if (isGenerate) {
@@ -498,6 +510,25 @@ async function runFallbackRouter(
         response: result.status < 400
           ? 'Prepared generation request via fallback router.'
           : 'Generation request failed in fallback router.',
+        result: result.body,
+      },
+    };
+  }
+  if (selectedTool === 'music.multitrack_vae') {
+    const vaePayload = mergeToolInput({ mode: 'sample' }, toolInput?.multitrack_vae);
+    const result = trace?.traceContext
+      ? await runMusicMultitrackVaeService(vaePayload, { traceContext: trace.traceContext })
+      : await runMusicMultitrackVaeService(vaePayload);
+    return {
+      status: result.status,
+      body: {
+        mode: 'fallback',
+        selectedTool,
+        toolStatus: result.status,
+        toolOk: result.status < 400,
+        response: result.status < 400
+          ? 'Generated multitrack MusicVAE MIDI via fallback router.'
+          : 'Multitrack MusicVAE request failed in fallback router.',
         result: result.body,
       },
     };
@@ -936,6 +967,31 @@ function createMusicRouterAgent() {
     },
   });
 
+  const musicMultitrackVaeTool = tool({
+    name: MUSIC_MULTITRACK_VAE_TOOL_CONTRACT.name,
+    description: MUSIC_MULTITRACK_VAE_TOOL_CONTRACT.description,
+    parameters: toolParameters(MUSIC_MULTITRACK_VAE_TOOL_CONTRACT.inputSchema),
+    strict: false,
+    execute: async (input, runContext) => {
+      console.info('[music-agent] Tool called: music.multitrack_vae');
+      const rawContext: any = (runContext as any)?.context || runContext;
+      const defaults = rawContext?.toolInput?.multitrack_vae;
+      const payload = mergeToolInput(defaults, input);
+      const toolTrace = rawContext?.trace;
+      const result = toolTrace?.traceContext
+        ? await runMusicMultitrackVaeService(payload, { traceContext: toolTrace.traceContext })
+        : await runMusicMultitrackVaeService(payload);
+      console.info(`[music-agent] Tool music.multitrack_vae completed: status=${result.status}`);
+      const fullResult = {
+        tool: 'music.multitrack_vae',
+        status: result.status,
+        ok: result.status < 400,
+        body: result.body,
+      };
+      return summarizeForModel(fullResult, runContext);
+    },
+  });
+
   const musicHarmonyAnalyzeTool = tool({
     name: MUSIC_HARMONY_ANALYZE_TOOL_CONTRACT.name,
     description: MUSIC_HARMONY_ANALYZE_TOOL_CONTRACT.description,
@@ -1181,7 +1237,8 @@ function createMusicRouterAgent() {
       '  * Tip: Use this when you need to see visual notation particulars, layout, or symbols not easily captured in XML/ABC.',
       '- music_convert: format conversion between MusicXML and ABC.',
       '- music_diff_feedback: iterate on assistant proposals using structured per-block review feedback.',
-      '- music_generate: generation/composition requests.',
+      '- music_generate: generation/composition requests (notated, classical/period-composer style via NotaGen).',
+      '- music_multitrack_vae: short multitrack (up to 8-track) General-MIDI ideas via Magenta MusicVAE — grooves, chord-conditioned measures, style morph/interpolation, or reconstruct/blend measures. Prefer this over music_generate for multitrack MIDI grooves, latent style interpolation, and chord-progression backing ideas.',
       '- music_scoreops: deterministic score editing with typed operations.',
       '- music_patch: score edit requests that should produce a musicxml-patch@1 payload.',
       '',
@@ -1228,6 +1285,7 @@ function createMusicRouterAgent() {
       musicDiffFeedbackTool,
       musicFunctionalHarmonyAnalyzeTool,
       musicGenerateTool,
+      musicMultitrackVaeTool,
       musicHarmonyAnalyzeTool,
       musicScoreOpsTool,
       musicPatchTool,
@@ -1405,6 +1463,7 @@ export async function runMusicAgentRouter(
         music_diff_feedback: 'music.diff_feedback',
         music_functional_harmony_analyze: 'music.functional_harmony_analyze',
         music_generate: 'music.generate',
+        music_multitrack_vae: 'music.multitrack_vae',
         music_harmony_analyze: 'music.harmony_analyze',
         music_scoreops: 'music.scoreops',
         music_patch: 'music.patch',
