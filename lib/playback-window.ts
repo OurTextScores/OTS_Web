@@ -9,11 +9,21 @@
  * faure.mscz (22 minutes) means ~115k source nodes and ~450 MB of AudioBuffers
  * held at once, with the render loop competing with the main thread throughout.
  *
- * Bounding it is what makes playback independent of score length. The window keeps
- * rendering a fixed distance ahead of the playhead and idles once it gets there,
- * which is also the precondition for Phase 5: a lookahead scheduler needs a horizon
- * at least as long as its longest forward dependency, and that horizon has to be one
- * number someone can raise.
+ * Bounding it takes two things, and the window is only one of them:
+ *
+ *  1. the render horizon here, which stops work running arbitrarily far *ahead* of
+ *     the playhead, and
+ *  2. releasing each source once it has played, which stops buffers accumulating
+ *     *behind* it — see `releaseScheduledSource`.
+ *
+ * Without (2) the horizon alone does not bound memory at all: rendering stays close
+ * to the playhead, but every buffer it ever produced is still strongly referenced by
+ * the live-sources array, so a long score retains just as much as before. An earlier
+ * revision of this file claimed the horizon alone bounded memory. It does not.
+ *
+ * The horizon is also the precondition for Phase 5: a lookahead scheduler needs a
+ * horizon at least as long as its longest forward dependency, and that horizon has
+ * to be one number someone can raise.
  */
 
 export interface RenderWindow {
@@ -62,9 +72,39 @@ export function renderWindowDelayMs(aheadSeconds: number, window: RenderWindow =
 }
 
 /**
- * Upper bound on simultaneously held audio buffers for a given window, used to
- * document and test the memory guarantee.
+ * Upper bound on simultaneously held audio buffers for a given window.
+ *
+ * Only achievable if played sources are released as they finish; the horizon alone
+ * caps how far *ahead* buffers are produced, not how many are retained.
  */
 export function maxBufferedChunks(window: RenderWindow, sampleRate: number, framesPerChunk: number): number {
     return Math.ceil((window.horizonSeconds * sampleRate) / framesPerChunk);
+}
+
+/** The subset of AudioBufferSourceNode this module needs, so it is testable with fakes. */
+export interface ReleasableSource {
+    disconnect: () => void;
+}
+
+/**
+ * Drops a finished source from the live-sources list and disconnects it, so its
+ * AudioBuffer becomes collectable.
+ *
+ * Sources are pushed as they are scheduled and, without this, removed only when the
+ * *final* one ends — which for a 22-minute score means ~115k nodes and ~450MB of
+ * buffers retained until playback finishes, and a stop that has to iterate all of
+ * them. Identity-based removal keeps the list at roughly the render window's size,
+ * which is what makes the O(n) scan here cheap.
+ */
+export function releaseScheduledSource<T extends ReleasableSource>(sources: T[], source: T): void {
+    try {
+        source.disconnect();
+    } catch {
+        // Already disconnected, or the context is gone. Either way it is released.
+    }
+
+    const index = sources.indexOf(source);
+    if (index !== -1) {
+        sources.splice(index, 1);
+    }
 }

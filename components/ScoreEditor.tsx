@@ -73,7 +73,7 @@ import {
 } from '../lib/ourtextscores-api-client';
 import { appendMusicXmlMeasures, appendMusicXmlParts } from '../lib/musicxml-append-parts';
 import { sanitizeEngineSvg } from '../lib/sanitize-svg';
-import { DEFAULT_RENDER_WINDOW, renderWindowDelayMs, type RenderWindow } from '../lib/playback-window';
+import { DEFAULT_RENDER_WINDOW, releaseScheduledSource, renderWindowDelayMs, type RenderWindow } from '../lib/playback-window';
 import { extractPatchAnnotations, PATCH_ANNOTATIONS_INSTRUCTION, type PatchAnnotation } from '../lib/patch-annotations';
 import {
     extractTraceContextFromHeaders,
@@ -12623,6 +12623,13 @@ ${partsBodyXml}
             source.connect(audioCtx.destination);
             const scheduledStart = baseTime + relativeChunkStart;
             source.start(scheduledStart);
+            // Release each source as it finishes. Without this the array only ever
+            // grows -- it is cleared when the *final* source ends -- so every buffer
+            // behind the playhead stays strongly referenced and the render window
+            // bounds nothing. The final source's handler below releases too.
+            source.onended = () => {
+                releaseScheduledSource(options.sourcesRef.current, source);
+            };
             options.sourcesRef.current.push(source);
             lastSource = source;
             startedAny = true;
@@ -12813,6 +12820,9 @@ ${partsBodyXml}
         const finalSource = lastSource as AudioBufferSourceNode | null;
         if (finalSource) {
             finalSource.onended = () => {
+                // This overwrites the per-source handler assigned in scheduleChunk,
+                // so it must release as well as finish the transport.
+                releaseScheduledSource(options.sourcesRef.current, finalSource);
                 if (options.generationRef.current !== generation) {
                     return;
                 }
