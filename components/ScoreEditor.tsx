@@ -73,6 +73,7 @@ import {
 } from '../lib/ourtextscores-api-client';
 import { appendMusicXmlMeasures, appendMusicXmlParts } from '../lib/musicxml-append-parts';
 import { sanitizeEngineSvg } from '../lib/sanitize-svg';
+import { DEFAULT_RENDER_WINDOW, renderWindowDelayMs, type RenderWindow } from '../lib/playback-window';
 import { extractPatchAnnotations, PATCH_ANNOTATIONS_INSTRUCTION, type PatchAnnotation } from '../lib/patch-annotations';
 import {
     extractTraceContextFromHeaders,
@@ -12583,6 +12584,8 @@ ${partsBodyXml}
             prerollSeconds?: number;
             startupBufferSeconds?: number;
             minStartupBatches?: number;
+            /** Bounds render-ahead. null disables throttling for short one-shot clips. */
+            renderWindow?: RenderWindow | null;
         },
     ) => {
         const audioCtx = await ensureAudioContextReady();
@@ -12671,6 +12674,28 @@ ${partsBodyXml}
         };
 
         while (options.generationRef.current === generation) {
+            // Render-ahead window. Without this the loop pulls until the score is
+            // exhausted, scheduling every chunk of a 22-minute score up front
+            // (~115k source nodes, ~450MB of buffers). Idle once we are far enough
+            // ahead, and let the playhead catch up. Short one-shot streams
+            // (auditions, previews) pass renderWindow: null and are never throttled.
+            if (options.renderWindow && baseTime !== null) {
+                let delayMs = renderWindowDelayMs(
+                    (baseTime + bufferedUntilSeconds) - audioCtx.currentTime,
+                    options.renderWindow,
+                );
+                while (delayMs > 0 && options.generationRef.current === generation) {
+                    await new Promise<void>((resolve) => { setTimeout(resolve, Math.min(delayMs, 1000)); });
+                    delayMs = renderWindowDelayMs(
+                        (baseTime + bufferedUntilSeconds) - audioCtx.currentTime,
+                        options.renderWindow,
+                    );
+                }
+                if (options.generationRef.current !== generation) {
+                    break;
+                }
+            }
+
             const batch = await batchFn(false);
             batchCount += 1;
             if (!Array.isArray(batch) || batch.length === 0) {
@@ -12891,6 +12916,9 @@ ${partsBodyXml}
                         prerollSeconds: useSelectionStreaming ? SELECTION_SYNTH_START_PREROLL_SECONDS : SYNTH_START_PREROLL_SECONDS,
                         startupBufferSeconds: useSelectionStreaming ? SELECTION_STREAM_STARTUP_BUFFER_SECONDS : 0,
                         minStartupBatches: useSelectionStreaming ? SELECTION_STREAM_MIN_STARTUP_BATCHES : 1,
+                        // Transport can run the length of the score, so it is the
+                        // path that must stay bounded.
+                        renderWindow: DEFAULT_RENDER_WINDOW,
                     });
                     streamed = true;
                 } catch (streamErr) {
@@ -12969,6 +12997,10 @@ ${partsBodyXml}
                 maxDurationSeconds: 0.6,
                 trackTransportState: false,
                 debugLabel: `preview:${trigger}`,
+                // A 0.6s audition is already bounded by maxDurationSeconds; throttling
+                // it would only add latency to the interaction it exists to make feel
+                // immediate.
+                renderWindow: null,
             });
         } catch (err) {
             console.warn('[AUDITION] selection preview playback failed', { trigger, err });
