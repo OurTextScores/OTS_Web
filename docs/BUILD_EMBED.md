@@ -525,7 +525,7 @@ The `out/` directory contains:
 ## Performance Notes
 
 - **First load**: ~20MB download (WASM + initial JS bundle)
-- **Soundfont load**: 38MB additional download on first audio playback (from CDN, cached by browser)
+- **Soundfont load**: 38MB additional download, started in the background as soon as a score finishes loading (not deferred to first playback), from CDN and cached by the browser. For large scores the WASM-side install is deferred until playback so it does not compete with layout; the network fetch still starts early.
 - **Score loading**: Fast, scores are typically <100KB
 - **Rendering**: Real-time, uses WASM for layout/rendering
 
