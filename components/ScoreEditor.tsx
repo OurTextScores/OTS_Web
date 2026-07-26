@@ -1585,6 +1585,9 @@ export default function ScoreEditor() {
     const toolbarRef = useRef<HTMLDivElement>(null);
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
+    // Paused is a distinct state from stopped: the stream, its scheduled sources and
+    // its iterator all stay alive, so resuming continues rather than re-renders.
+    const [isPaused, setIsPaused] = useState(false);
     const [audioBusy, setAudioBusy] = useState(false);
     const audioUrlRef = useRef<string | null>(null);
     const tempPlaybackAudioUrlRef = useRef<string | null>(null);
@@ -12561,6 +12564,7 @@ ${partsBodyXml}
         await stopSynthStream(audioSourcesRef, streamIteratorRef, options);
         await stopPreviewAudio(options);
         setIsPlaying(false);
+        setIsPaused(false);
     };
 
     const ensureAudioContextReady = async () => {
@@ -12570,6 +12574,36 @@ ${partsBodyXml}
             await audioCtx.resume();
         }
         return audioCtx;
+    };
+
+    /**
+     * Pauses without tearing the stream down.
+     *
+     * Suspending the AudioContext freezes its clock, so already-scheduled sources
+     * hold their positions and the render loop's horizon check sees a constant
+     * distance ahead of the playhead and idles. The <audio> element path (the
+     * non-streaming WAV fallback) is paused alongside it.
+     */
+    const pauseAudio = async () => {
+        const audioCtx = audioCtxRef.current;
+        if (audioCtx && audioCtx.state === 'running') {
+            await audioCtx.suspend();
+        }
+        if (audioRef.current && !audioRef.current.paused) {
+            audioRef.current.pause();
+        }
+        setIsPaused(true);
+    };
+
+    const resumeAudio = async () => {
+        const audioCtx = audioCtxRef.current;
+        if (audioCtx && audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+        }
+        if (audioRef.current && audioRef.current.paused) {
+            await audioRef.current.play().catch(() => { /* element playback already gone */ });
+        }
+        setIsPaused(false);
     };
 
     const playSynthBatchStream = async (
@@ -12813,6 +12847,7 @@ ${partsBodyXml}
             stopSynthStream(options.sourcesRef, options.iteratorRef);
             if (options.trackTransportState) {
                 setIsPlaying(false);
+                setIsPaused(false);
             }
             return;
         }
@@ -12830,6 +12865,7 @@ ${partsBodyXml}
                 options.iteratorRef.current = null;
                 if (options.trackTransportState) {
                     setIsPlaying(false);
+                    setIsPaused(false);
                 }
             };
         }
@@ -12851,6 +12887,7 @@ ${partsBodyXml}
         }
         audio.onended = () => {
             setIsPlaying(false);
+            setIsPaused(false);
             if (options?.revokeOnEnded && tempPlaybackAudioUrlRef.current === url) {
                 URL.revokeObjectURL(url);
                 tempPlaybackAudioUrlRef.current = null;
@@ -12858,37 +12895,7 @@ ${partsBodyXml}
         };
         await audio.play();
         setIsPlaying(true);
-    };
-
-    const playPageAudio = async (pageIndex: number) => {
-        if (!score || !score.saveAudioForMeasureRange) {
-            alert('Current-page audio playback is not available in this build.');
-            return;
-        }
-        try {
-            setAudioBusy(true);
-            const ok = await ensureSoundFontLoaded(undefined, { forceRetry: true });
-            if (!ok) {
-                alert('No default soundfont found. Configure NEXT_PUBLIC_SOUNDFONT_CDN_URL or provide /public/soundfonts/default.sf3 (or .sf2).');
-                return;
-            }
-            await stopAudio({ awaitCancel: true });
-            const { startMeasureIndex, endMeasureIndex } = await getPageMeasureRange(score, pageIndex);
-            const wav = await score.saveAudioForMeasureRange('wav', startMeasureIndex, endMeasureIndex);
-            const blob = new Blob([toOwnedBytes(wav)], { type: 'audio/wav' });
-            const url = URL.createObjectURL(blob);
-            await playFromUrl(url, { revokeOnEnded: true });
-        } catch (err) {
-            console.error('Failed to play current-page audio', err);
-            alert(err instanceof Error ? err.message : 'Unable to play current-page audio. See console for details.');
-            await stopAudio({ awaitCancel: true });
-        } finally {
-            setAudioBusy(false);
-        }
-    };
-
-    const playCurrentPageAudio = async () => {
-        await playPageAudio(Math.max(0, currentPageRef.current || 0));
+        setIsPaused(false);
     };
 
     const playTransportAudio = async (fromSelection: boolean) => {
@@ -13020,6 +13027,24 @@ ${partsBodyXml}
 
     const handlePlayAudio = async () => {
         await playTransportAudio(false);
+    };
+
+    /**
+     * Single transport control: play -> pause -> resume.
+     *
+     * Pausing keeps the stream and its scheduled sources alive, so resuming is
+     * immediate and does not re-render audio that was already synthesised.
+     */
+    const handleTogglePlayPause = async () => {
+        if (isPlaying && !isPaused) {
+            await pauseAudio();
+            return;
+        }
+        if (isPaused) {
+            await resumeAudio();
+            return;
+        }
+        await handlePlayAudio();
     };
 
     const handlePlayFromSelectionAudio = async () => {
@@ -14849,11 +14874,11 @@ ${partsBodyXml}
                 onExportCurrentPageAudio={score?.saveAudioForMeasureRange ? handleExportCurrentPageAudio : undefined}
                 onExportToGoogleDrive={handleExportToGoogleDrive}
                 onCreateShareableLink={handleOpenShareLinkDialog}
-                onPlayAudio={handlePlayAudio}
-                onPlayCurrentPageAudio={score?.saveAudioForMeasureRange ? playCurrentPageAudio : undefined}
-                onPlayFromSelectionAudio={interactionReady ? handlePlayFromSelectionAudio : undefined}
+                onTogglePlayPause={() => { void handleTogglePlayPause(); }}
                 onStopAudio={() => { void stopAudio({ awaitCancel: true }); }}
+                onPlayFromSelectionAudio={interactionReady ? handlePlayFromSelectionAudio : undefined}
                 isPlaying={isPlaying}
+                isPaused={isPaused}
                 audioBusy={audioBusy}
                 exportsEnabled={Boolean(score)}
                 pngAvailable={Boolean(score?.savePng)}

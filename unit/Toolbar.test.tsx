@@ -696,15 +696,80 @@ describe('Toolbar', () => {
         exportsEnabled
         audioAvailable
         onExportAudio={() => {}}
-        onPlayCurrentPageAudio={() => {}}
-        onStopAudio={() => {}}
+        onTogglePlayPause={() => {}}
         audioBusy
       />,
     );
 
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Export' }));
-    expect(screen.getByTestId('btn-play-current-page')).toHaveTextContent('Working…');
+    // The transport control is disabled while audio work is in flight; it keeps its
+    // Play label rather than gaining a busy label of its own.
+    expect(screen.getByTestId('btn-play')).toBeDisabled();
     expect(screen.getByTestId('btn-export-audio')).toHaveTextContent('Exporting…');
+  });
+
+  // Regression: playTransportAudio holds audioBusy for the whole of a streamed
+  // playback, because it awaits a render loop that runs until the score is
+  // exhausted. Gating the transport control on audioBusy alone made Pause
+  // unclickable for exactly as long as there was something to pause.
+  it('keeps the transport control live while playing, even when audioBusy', () => {
+    const onTogglePlayPause = vi.fn();
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        audioAvailable
+        onTogglePlayPause={onTogglePlayPause}
+        isPlaying
+        audioBusy
+      />,
+    );
+
+    const transport = screen.getByTestId('btn-play');
+    expect(transport).toHaveTextContent('Pause');
+    expect(transport).toBeEnabled();
+
+    fireEvent.click(transport);
+    expect(onTogglePlayPause).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers Resume while paused, and Stop only while the transport is active', () => {
+    const { rerender } = render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        audioAvailable
+        onTogglePlayPause={() => {}}
+        onStopAudio={() => {}}
+      />,
+    );
+
+    // Idle: Play offered, nothing to stop.
+    expect(screen.getByTestId('btn-play')).toHaveTextContent('Play');
+    expect(screen.getByTestId('btn-stop')).toBeDisabled();
+
+    // Paused: the stream is alive, so both resuming and rewinding are available.
+    rerender(
+      <Toolbar
+        onFileUpload={() => {}}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+        audioAvailable
+        onTogglePlayPause={() => {}}
+        onStopAudio={() => {}}
+        isPlaying
+        isPaused
+        audioBusy
+      />,
+    );
+    expect(screen.getByTestId('btn-play')).toHaveTextContent('Resume');
+    expect(screen.getByTestId('btn-play')).toBeEnabled();
+    expect(screen.getByTestId('btn-stop')).toBeEnabled();
   });
 
   it('renders export order with MSCZ default first and includes MSCX/MUSICXML/ABC', () => {

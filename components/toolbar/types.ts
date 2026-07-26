@@ -69,11 +69,14 @@ export interface ToolbarSectionProps {
     exportsEnabled?: boolean;
     pngAvailable?: boolean;
     audioAvailable?: boolean;
-    onPlayAudio?: () => void;
-    onPlayCurrentPageAudio?: () => void;
-    onPlayFromSelectionAudio?: () => void;
+    /** Single transport control: play, then pause, then resume. */
+    onTogglePlayPause?: () => void;
+    /** Tears the stream down and rewinds; pause/resume alone cannot return to the start. */
     onStopAudio?: () => void;
+    onPlayFromSelectionAudio?: () => void;
     isPlaying?: boolean;
+    /** Playing but suspended -- the stream is still alive and resumable. */
+    isPaused?: boolean;
     audioBusy?: boolean;
     onSetTimeSignature?: (numerator: number, denominator: number, timeSigType?: number) => void;
     timeSignatureOptions?: { label: string; numerator: number; denominator: number; timeSigType?: number }[];

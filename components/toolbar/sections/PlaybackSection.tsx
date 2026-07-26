@@ -1,42 +1,56 @@
 import React from 'react';
 import { Button } from '../../ui/Button';
 import { ToolbarSectionProps } from '../types';
-import { Play, Square } from 'lucide-react';
+import { Pause, Play, Square } from 'lucide-react';
 
 export const PlaybackSection: React.FC<ToolbarSectionProps> = ({
-    onPlayAudio,
-    onPlayCurrentPageAudio,
-    onPlayFromSelectionAudio,
+    onTogglePlayPause,
     onStopAudio,
+    onPlayFromSelectionAudio,
     audioAvailable,
     audioBusy,
     isPlaying,
+    isPaused,
     selectionActive,
 }) => {
+    const showPause = Boolean(isPlaying && !isPaused);
+    const transportActive = Boolean(isPlaying || isPaused);
+    // audioBusy stays true for the whole of a streamed playback -- playTransportAudio
+    // awaits the render loop, which runs until the score is exhausted. Gating on it
+    // unconditionally would make Pause unclickable for exactly as long as there is
+    // something to pause. It only guards the pre-sound startup, so once the transport
+    // is active the control must stay live.
+    const startupBusy = Boolean(audioBusy) && !transportActive;
+
     return (
         <>
             <Button
                 data-testid="btn-play"
-                onClick={onPlayAudio}
-                disabled={!audioAvailable || !onPlayAudio || audioBusy || isPlaying}
+                onClick={onTogglePlayPause}
+                disabled={!audioAvailable || !onTogglePlayPause || startupBusy}
                 variant="primary"
                 size="sm"
                 className="shadow-sm"
-                title="Play (full transport)"
+                title={showPause ? 'Pause' : isPaused ? 'Resume' : 'Play'}
             >
-                <Play size={14} className="mr-2" />
-                {isPlaying ? 'Playing…' : 'Play'}
+                {showPause
+                    ? <Pause size={14} className="mr-2" />
+                    : <Play size={14} className="mr-2" />}
+                {showPause ? 'Pause' : isPaused ? 'Resume' : 'Play'}
             </Button>
             <Button
-                data-testid="btn-play-current-page"
-                onClick={onPlayCurrentPageAudio}
-                disabled={!audioAvailable || !onPlayCurrentPageAudio || audioBusy}
-                variant="primary"
+                data-testid="btn-stop"
+                onClick={onStopAudio}
+                // Only meaningful while the transport is live, and -- like the toggle --
+                // must not be gated on audioBusy, which stays true for all of playback.
+                disabled={!audioAvailable || !onStopAudio || !transportActive}
+                variant="outline"
                 size="sm"
-                className="shadow-sm bg-green-600 hover:bg-green-700 border-green-600"
+                className="shadow-sm"
+                title="Stop and rewind"
             >
-                <Play size={14} className="mr-2" />
-                {audioBusy ? 'Working…' : 'Play Page'}
+                <Square size={14} className="mr-2" />
+                Stop
             </Button>
             <Button
                 data-testid="btn-play-from-selection"
@@ -48,18 +62,6 @@ export const PlaybackSection: React.FC<ToolbarSectionProps> = ({
             >
                 <Play size={14} className="mr-2" />
                 Play From Selection
-            </Button>
-            <Button
-                data-testid="btn-stop"
-                onClick={onStopAudio}
-                disabled={!audioAvailable || !onStopAudio}
-                variant="outline"
-                size="sm"
-                className="shadow-sm"
-                title="Stop"
-            >
-                <Square size={14} className="mr-2" />
-                Stop
             </Button>
         </>
     );

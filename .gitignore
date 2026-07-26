@@ -57,3 +57,5 @@ next-env.d.ts
 test_scores/
 docs/private/
 /.claude/
+
+dist/sfizz-packs/
