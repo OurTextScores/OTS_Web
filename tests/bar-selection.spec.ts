@@ -100,6 +100,59 @@ test('a selected bar produces one rectangle spanning the bar, not one per note',
   expect(box.width).toBeGreaterThan(box.height);
 });
 
+// KNOWN FAILING -- open bug, reproduced and diagnosed but not fixed.
+//
+// The engine is correct throughout: isSelectionRange stays true and
+// getSelectionBoundingBoxes returns one 565-unit bar rectangle both before and after
+// the note click. The overlay is what is wrong. primarySelectionRect resolves as
+//
+//     selectedElement ?? (selectionBoxes.length === 1 ? selectionBoxes[0] : null)
+//
+// so selectedElement wins, and the measure path never sets it -- the drawn rectangle
+// is therefore whatever was selected before: a notehead rect after a note click
+// (measured 47px where the bar is 565 units), or nothing once it has been cleared.
+//
+// Two attempted fixes did not work and are not in the tree:
+//   - setting selectedElement/selectedPoint from the range box in the measure path;
+//   - preferring the engine box at render time when hasBackendHighlighting is set.
+// The second is clean and still fails this test, so the overlay rect is being
+// recomputed or overwritten by a path not yet identified -- refreshSelectionOverlay
+// and the selectedIndex-driven effects are the places left to look.
+test.fixme('a bar stays selectable, with its rectangle, after a note has been clicked', async ({ page }) => {
+  // Reported repro: the first empty-space click selects the bar, but once a note has
+  // been clicked, later empty-space clicks either highlight the noteheads with no bar
+  // rectangle or appear to select nothing.
+  //
+  // The engine was right throughout -- isSelectionRange stayed true. The overlay was
+  // wrong: primarySelectionRect prefers selectedElement and only falls back to
+  // selectionBoxes, and the measure path never set selectedElement, so the visible
+  // rectangle came from whatever was selected before (a notehead, or nothing).
+  const overlay = page.getByTestId('selection-overlay');
+  const overlayWidth = async () => (await overlay.first().boundingBox())?.width ?? 0;
+
+  await selectBar2(page);
+  await expect(overlay).toHaveCount(1);
+  const barWidth = await overlayWidth();
+
+  // Select a single note; its rectangle must be far smaller than a bar's.
+  // Raw mouse click rather than locator.click(): the bar overlay sits over the notes
+  // and Playwright's actionability check never settles, even though the overlay is
+  // pointer-events:none.
+  const note0 = await page.locator('svg .Note').first().boundingBox();
+  expect(note0).not.toBeNull();
+  if (!note0) return;
+  await page.mouse.click(note0.x + note0.width / 2, note0.y + note0.height / 2);
+  await expect.poll(async () => await page.evaluate(async () =>
+    (window as any).__webmscore.isSelectionRange()), { timeout: 30_000 }).toBe(false);
+  const noteWidth = await overlayWidth();
+  expect(noteWidth).toBeLessThan(barWidth / 2);
+
+  // Back to the bar: the rectangle must return, at bar size.
+  await selectBar2(page);
+  await expect(overlay).toHaveCount(1);
+  expect(await overlayWidth()).toBeCloseTo(barWidth, 0);
+});
+
 test('Ctrl+Shift+Right extends the selection by a whole bar', async ({ page }) => {
   await selectBar2(page);
   const [before] = await boxes(page);
