@@ -501,6 +501,9 @@ type MutationMethods = Pick<
     | 'selectPrevChord'
     | 'extendSelectionNextChord'
     | 'extendSelectionPrevChord'
+    | 'isSelectionRange'
+    | 'extendSelectionNextMeasure'
+    | 'extendSelectionPrevMeasure'
     | 'beginElementDrag'
     | 'updateElementDrag'
     | 'endElementDrag'
@@ -10277,6 +10280,19 @@ ${partsBodyXml}
         if (!score || !selectedPoint) {
             return;
         }
+        // A range selection cannot be reconstructed from a single point, so
+        // re-projecting the UI's selection into the engine would destroy it. Box count
+        // is not a usable proxy for this: a range renders as one rectangle per system,
+        // so a single-system range legitimately has exactly one box and would otherwise
+        // fall through to selectElementAtPoint below and collapse to one note. Ask the
+        // engine what it is actually holding.
+        try {
+            if (score.isSelectionRange && await score.isSelectionRange()) {
+                return;
+            }
+        } catch {
+            // Older build without the export: fall through to the point re-select.
+        }
 
         try {
             const { page, x, y } = selectedPoint;
@@ -11033,74 +11049,58 @@ ${partsBodyXml}
         await refreshSelectionFromSvg();
         void playSelectionPreview('select-prev-chord');
     };
-    const handleExtendSelectionNextChord = async () => {
+    /**
+     * Extends the engine's range selection and mirrors the result into the overlay.
+     *
+     * `anchor` picks which returned box drives selectedElement/selectedPoint: extending
+     * forward should leave the caret on the new trailing edge, backward on the leading
+     * one. For a range selection the engine now returns one box per system rather than
+     * one per notehead, so this is usually a single box either way.
+     */
+    const extendSelectionBy = async (
+        method: 'extendSelectionNextChord' | 'extendSelectionPrevChord'
+            | 'extendSelectionNextMeasure' | 'extendSelectionPrevMeasure',
+        anchor: 'first' | 'last',
+    ) => {
         if (!score) return;
         await ensureSelectionInWasm();
-        const extendFn = requireMutation('extendSelectionNextChord');
+        const extendFn = requireMutation(method);
         const getBBoxesFn = requireMutation('getSelectionBoundingBoxes');
         if (!extendFn || !getBBoxesFn) {
             return;
         }
 
         const result = await extendFn.call(score);
-        if (result) {
-            const bboxes = await getBBoxesFn.call(score);
+        if (!result) return;
 
-            await renderScore(score, currentPageRef.current);
-            if (bboxes && bboxes.length > 0) {
-                // Update selection boxes for all selected elements
-                const boxes = bboxes.map((bbox: { page: number; x: number; y: number; width: number; height: number }, index: number) => ({
-                    index,
-                    page: bbox.page,
-                    x: bbox.x,
-                    y: bbox.y,
-                    w: bbox.width,
-                    h: bbox.height,
-                    centerX: bbox.x + bbox.width / 2,
-                    centerY: bbox.y + bbox.height / 2,
-                }));
-                // Use the last element for selectedElement and selectedPoint
-                const lastBbox = bboxes[bboxes.length - 1];
-                setSelectedElement({ x: lastBbox.x, y: lastBbox.y, w: lastBbox.width, h: lastBbox.height });
-                setSelectedPoint({ page: lastBbox.page, x: lastBbox.x + lastBbox.width / 2, y: lastBbox.y + lastBbox.height / 2 });
-                setSelectionBoxes(boxes);
-            }
-        }
+        const bboxes = await getBBoxesFn.call(score);
+        await renderScore(score, currentPageRef.current);
+        if (!bboxes || bboxes.length === 0) return;
+
+        const boxes = bboxes.map((bbox: { page: number; x: number; y: number; width: number; height: number }, index: number) => ({
+            index,
+            page: bbox.page,
+            x: bbox.x,
+            y: bbox.y,
+            w: bbox.width,
+            h: bbox.height,
+            centerX: bbox.x + bbox.width / 2,
+            centerY: bbox.y + bbox.height / 2,
+        }));
+        const anchorBox = anchor === 'last' ? bboxes[bboxes.length - 1] : bboxes[0];
+        setSelectedElement({ x: anchorBox.x, y: anchorBox.y, w: anchorBox.width, h: anchorBox.height });
+        setSelectedPoint({
+            page: anchorBox.page,
+            x: anchorBox.x + anchorBox.width / 2,
+            y: anchorBox.y + anchorBox.height / 2,
+        });
+        setSelectionBoxes(boxes);
     };
-    const handleExtendSelectionPrevChord = async () => {
-        if (!score) return;
-        await ensureSelectionInWasm();
-        const extendFn = requireMutation('extendSelectionPrevChord');
-        const getBBoxesFn = requireMutation('getSelectionBoundingBoxes');
-        if (!extendFn || !getBBoxesFn) {
-            return;
-        }
-
-        const result = await extendFn.call(score);
-        if (result) {
-            const bboxes = await getBBoxesFn.call(score);
-
-            await renderScore(score, currentPageRef.current);
-            if (bboxes && bboxes.length > 0) {
-                // Update selection boxes for all selected elements
-                const boxes = bboxes.map((bbox: { page: number; x: number; y: number; width: number; height: number }, index: number) => ({
-                    index,
-                    page: bbox.page,
-                    x: bbox.x,
-                    y: bbox.y,
-                    w: bbox.width,
-                    h: bbox.height,
-                    centerX: bbox.x + bbox.width / 2,
-                    centerY: bbox.y + bbox.height / 2,
-                }));
-                // Use the first element for selectedElement and selectedPoint
-                const firstBbox = bboxes[0];
-                setSelectedElement({ x: firstBbox.x, y: firstBbox.y, w: firstBbox.width, h: firstBbox.height });
-                setSelectedPoint({ page: firstBbox.page, x: firstBbox.x + firstBbox.width / 2, y: firstBbox.y + firstBbox.height / 2 });
-                setSelectionBoxes(boxes);
-            }
-        }
-    };
+    const handleExtendSelectionNextChord = () => extendSelectionBy('extendSelectionNextChord', 'last');
+    const handleExtendSelectionPrevChord = () => extendSelectionBy('extendSelectionPrevChord', 'first');
+    // Ctrl+Shift+Arrow, matching desktop MuseScore's select-next/prev-measure.
+    const handleExtendSelectionNextMeasure = () => extendSelectionBy('extendSelectionNextMeasure', 'last');
+    const handleExtendSelectionPrevMeasure = () => extendSelectionBy('extendSelectionPrevMeasure', 'first');
     const handleSetAccidental = (accidentalType: number) => {
         return performMutation(`set accidental ${accidentalType}`, async () => {
             await ensureSelectionInWasm();
@@ -12082,9 +12082,17 @@ ${partsBodyXml}
                 }
                 event.preventDefault();
                 if (event.shiftKey) {
-                    // Shift+Arrow extends selection (range selection)
+                    // Matches desktop MuseScore: Shift+Arrow extends by chord,
+                    // Ctrl+Shift+Arrow by whole measure.
+                    const byMeasure = event.ctrlKey || event.metaKey;
                     if (key === 'arrowright') {
-                        handleExtendSelectionNextChord();
+                        if (byMeasure) {
+                            handleExtendSelectionNextMeasure();
+                        } else {
+                            handleExtendSelectionNextChord();
+                        }
+                    } else if (byMeasure) {
+                        handleExtendSelectionPrevMeasure();
                     } else {
                         handleExtendSelectionPrevChord();
                     }
@@ -12138,6 +12146,8 @@ ${partsBodyXml}
         handleSelectPrevChord,
         handleExtendSelectionNextChord,
         handleExtendSelectionPrevChord,
+        handleExtendSelectionNextMeasure,
+        handleExtendSelectionPrevMeasure,
         handleDeleteSelection,
         handleCopySelection,
         handlePasteSelection,

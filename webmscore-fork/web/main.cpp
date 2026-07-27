@@ -62,6 +62,7 @@
 #include "importexport/midi/internal/midiexport/exportmidi.h"
 #include "./importexport/positionjsonwriter.h"
 #include "engraving/libmscore/page.h"
+#include "engraving/libmscore/system.h"
 #include "engraving/libmscore/measurebase.h"
 #include "engraving/libmscore/measure.h"
 #include "engraving/libmscore/repeatlist.h"
@@ -3391,6 +3392,44 @@ bool _extendSelectionPrevChord(uintptr_t score_ptr, int excerptId)
     return false;
 }
 
+// Whether the engine currently holds a range selection (as opposed to a list/single
+// selection or none). The UI needs this to decide if re-projecting its own selection
+// into the engine would destroy a richer selection than it can describe: a range
+// cannot be reconstructed from a single point, so it must be left alone.
+bool _isSelectionRange(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    return score->selection().isRange();
+}
+
+// Bar-wise range extension. Desktop MuseScore binds these to Ctrl+Shift+Right/Left
+// ("select-next-measure"/"select-prev-measure"), distinct from the chord-wise
+// Shift+Right/Left above. Score::selectMove already implements both commands and
+// extends via SelectType::RANGE, so these only expose it across the bridge.
+bool _extendSelectionNextMeasure(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    auto* el = score->selectMove(u"select-next-measure");
+    if (el) {
+        score->updateSelection();
+        score->setSelectionChanged(true);
+        return true;
+    }
+    return false;
+}
+
+bool _extendSelectionPrevMeasure(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    auto* el = score->selectMove(u"select-prev-measure");
+    if (el) {
+        score->updateSelection();
+        score->setSelectionChanged(true);
+        return true;
+    }
+    return false;
+}
+
 //---------------------------------------------------------
 //   Element drag gesture (begin/update/end)
 //   Mirrors NotationInteraction::startDrag/drag/endDrag from desktop
@@ -4334,6 +4373,95 @@ WasmRes _getSelectionBoundingBox(uintptr_t score_ptr, int excerptId)
     return WasmRes(json);
 }
 
+// Range-selection bounding geometry, ported from upstream MuseScore
+// src/notation/utilities/scorerangeutilities.cpp (ScoreRangeUtilities::boundingArea).
+//
+// A range selection is one blue rectangle per system covering the full staff range,
+// not a box per notehead. Emitting per-note boxes makes a selected bar look like a
+// list selection of its notes, which is what this used to do.
+//
+// Divergences from upstream, all forced by the 4.00 fork's API surface:
+//   - Staff::height() replaces staffHeight().
+//   - No coveringMMRestOrThis(); mmRest1() covers the same case here.
+//   - Rects stay in page coordinates and carry a page index, because that is the
+//     contract this export already has with the overlay. Upstream translates by
+//     system->page()->pos() to reach canvas coordinates; we must not.
+struct RangeSection {
+    const engraving::System* system = nullptr;
+    const engraving::Segment* startSegment = nullptr;
+    const engraving::Segment* endSegment = nullptr;
+};
+
+static std::vector<RangeSection> splitRangeBySections(const engraving::Segment* rangeStartSegment,
+                                                      const engraving::Segment* rangeEndSegment)
+{
+    std::vector<RangeSection> sections;
+    if (!rangeStartSegment || !rangeEndSegment) {
+        return sections;
+    }
+
+    const engraving::Segment* startSegment = rangeStartSegment;
+    const engraving::Fraction rangeEndTick = rangeEndSegment->tick();
+
+    for (const engraving::Segment* segment = startSegment;
+         segment && segment != rangeEndSegment && segment->tick() < rangeEndTick;) {
+        const engraving::System* currentSegmentSystem = segment->measure()->system();
+
+        const engraving::Segment* nextSegment = segment->next1MMenabled();
+        while (nextSegment && !nextSegment->visible()) {
+            nextSegment = nextSegment->next1MMenabled();
+        }
+
+        if (!nextSegment) {
+            sections.push_back({ currentSegmentSystem, startSegment, segment });
+            break;
+        }
+
+        const engraving::System* nextSegmentSystem = nextSegment->measure()->system();
+        if (!nextSegmentSystem) {
+            const engraving::Measure* mmr = nextSegment->measure()->mmRest1();
+            if (mmr) {
+                nextSegmentSystem = mmr->system();
+            }
+            if (!nextSegmentSystem) {
+                break;
+            }
+        }
+
+        if (nextSegmentSystem != currentSegmentSystem || nextSegment->tick() >= rangeEndTick) {
+            sections.push_back({ currentSegmentSystem, startSegment, segment });
+            startSegment = nextSegment;
+        }
+
+        segment = nextSegment;
+    }
+
+    return sections;
+}
+
+static engraving::staff_idx_t rangeFirstVisibleStaffIdx(const engraving::Score* score,
+                                                        const engraving::System* system,
+                                                        engraving::staff_idx_t startStaffIndex)
+{
+    for (engraving::staff_idx_t i = startStaffIndex; i < score->nstaves(); ++i) {
+        if (system->staff(i) && system->staff(i)->show()) {
+            return i;
+        }
+    }
+    return mu::nidx;
+}
+
+static engraving::staff_idx_t rangeLastVisibleStaffIdx(const engraving::System* system,
+                                                       engraving::staff_idx_t endStaffIndex)
+{
+    for (int i = static_cast<int>(endStaffIndex) - 1; i >= 0; --i) {
+        if (system->staff(i) && system->staff(i)->show()) {
+            return static_cast<engraving::staff_idx_t>(i);
+        }
+    }
+    return mu::nidx;
+}
+
 WasmRes _getSelectionBoundingBoxes(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
@@ -4347,69 +4475,85 @@ WasmRes _getSelectionBoundingBoxes(uintptr_t score_ptr, int excerptId)
     if (sel.isRange()) {
         auto* startSeg = sel.startSegment();
         auto* endSeg = sel.endSegment();
-        auto staffStart = sel.staffStart();
-        auto staffEnd = sel.staffEnd();
+        const auto staffStart = sel.staffStart();
+        const auto staffEnd = sel.staffEnd();
 
+        // A range running to the end of the score has a null endSegment; the last
+        // segment of the score closes it.
+        if (startSeg && !endSeg) {
+            endSeg = score->lastSegment();
+        }
 
-        if (startSeg) {
-            int segCount = 0;
-            int elementCount = 0;
-            // Iterate through all segments in the range
-            for (auto* seg = startSeg; seg && seg != endSeg; seg = seg->next1()) {
-                if (seg->segmentType() != engraving::SegmentType::ChordRest) {
+        if (startSeg && endSeg && startSeg->tick() <= endSeg->tick()) {
+            for (const RangeSection& section : splitRangeBySections(startSeg, endSeg)) {
+                if (!section.system || !section.startSegment || !section.endSegment) {
                     continue;
                 }
-                segCount++;
 
-                // Iterate through all staves in the selection
-                for (auto staffIdx = staffStart; staffIdx < staffEnd; ++staffIdx) {
-                    // Check all voices in this staff
-                    for (int voice = 0; voice < mu::engraving::VOICES; ++voice) {
-                        auto* el = seg->element(staffIdx * mu::engraving::VOICES + voice);
-                        if (!el || (!el->isChord() && !el->isRest())) {
-                            continue;
-                        }
-                        elementCount++;
+                const auto firstStaff = rangeFirstVisibleStaffIdx(score, section.system, staffStart);
+                const auto lastStaff = rangeLastVisibleStaffIdx(section.system, staffEnd);
+                if (firstStaff == mu::nidx || lastStaff == mu::nidx) {
+                    continue;
+                }
 
-                        // For Chords, use the first note's bounding box (noteheads are child elements)
-                        mu::RectF pageBbox;
-                        if (el->isChord()) {
-                            auto* chord = static_cast<engraving::Chord*>(el);
-                            if (!chord->notes().empty()) {
-                                // Use the first note's bounding box
-                                pageBbox = chord->notes()[0]->pageBoundingRect();
-                            } else {
-                                // Fallback to chord's own bbox
-                                pageBbox = el->pageBoundingRect();
-                            }
-                        } else {
-                            // For rests and other elements, use their own bbox
-                            pageBbox = el->pageBoundingRect();
-                        }
+                const engraving::SysStaff* segmentFirstStaff = section.system->staff(firstStaff);
+                const engraving::SysStaff* segmentLastStaff = section.system->staff(lastStaff);
+                const engraving::Staff* scoreFirstStaff = score->staff(firstStaff);
+                const engraving::Staff* scoreLastStaff = score->staff(lastStaff);
+                if (!segmentFirstStaff || !segmentLastStaff || !scoreFirstStaff || !scoreLastStaff) {
+                    continue;
+                }
 
-                        // Find which page this element is on
-                        int pageNumber = 0;
-                        const auto& pages = score->pages();
-                        for (size_t i = 0; i < pages.size(); ++i) {
-                            if (el->findAncestor(mu::engraving::ElementType::PAGE) == pages[i]) {
-                                pageNumber = static_cast<int>(i);
-                                break;
-                            }
-                        }
+                const engraving::Fraction zeroTick = engraving::Fraction(0, 1);
+                const double standardStaffHeight = 4 * scoreFirstStaff->spatium(zeroTick);
+                const double firstStaffHeight = scoreFirstStaff->height();
+                const double lastStaffHeight = scoreLastStaff->height();
 
-                        if (!first) {
-                            json += u",";
-                        }
-                        first = false;
+                // Short staves (e.g. single-line percussion) are centred within the
+                // height a standard 5-line staff would occupy, so the rectangle stays
+                // a consistent size rather than collapsing onto the lines.
+                double topY = 0.0;
+                if (firstStaffHeight < standardStaffHeight) {
+                    topY -= 0.5 * (standardStaffHeight - firstStaffHeight);
+                }
+                double bottomY = lastStaffHeight;
+                if (lastStaffHeight < standardStaffHeight) {
+                    bottomY += 0.5 * (standardStaffHeight - lastStaffHeight);
+                }
 
-                        json += String(u"{\"page\":%1,\"x\":%2,\"y\":%3,\"width\":%4,\"height\":%5}")
-                            .arg(pageNumber)
-                            .arg(pageBbox.x())
-                            .arg(pageBbox.y())
-                            .arg(pageBbox.width())
-                            .arg(pageBbox.height());
+                double x1 = section.startSegment->pagePos().x();
+                const double x2 = section.endSegment->pageBoundingRect().right();
+                const double padding = 0.5 * scoreFirstStaff->spatium(startSeg->tick());
+                const double y1 = topY + segmentFirstStaff->y() + section.startSegment->pagePos().y() - padding;
+                const double y2 = bottomY + segmentLastStaff->y() + section.endSegment->pagePos().y() + padding;
+
+                // Starting on a measure's first segment selects the whole bar, so the
+                // rectangle should begin at the barline rather than at the first note.
+                if (section.startSegment->measure()->firstEnabled() == section.startSegment) {
+                    x1 = section.startSegment->measure()->pagePos().x();
+                }
+
+                int pageNumber = 0;
+                const auto* page = section.system->page();
+                const auto& pages = score->pages();
+                for (size_t i = 0; i < pages.size(); ++i) {
+                    if (page == pages[i]) {
+                        pageNumber = static_cast<int>(i);
+                        break;
                     }
                 }
+
+                if (!first) {
+                    json += u",";
+                }
+                first = false;
+
+                json += String(u"{\"page\":%1,\"x\":%2,\"y\":%3,\"width\":%4,\"height\":%5}")
+                    .arg(pageNumber)
+                    .arg(x1)
+                    .arg(y1)
+                    .arg(x2 - x1)
+                    .arg(y2 - y1);
             }
         }
     } else {
@@ -7277,6 +7421,21 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool extendSelectionPrevChord(uintptr_t score_ptr, int excerptId = -1) {
         return _extendSelectionPrevChord(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool isSelectionRange(uintptr_t score_ptr, int excerptId = -1) {
+        return _isSelectionRange(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool extendSelectionNextMeasure(uintptr_t score_ptr, int excerptId = -1) {
+        return _extendSelectionNextMeasure(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool extendSelectionPrevMeasure(uintptr_t score_ptr, int excerptId = -1) {
+        return _extendSelectionPrevMeasure(score_ptr, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

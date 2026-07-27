@@ -701,6 +701,30 @@ class WebMscoreW {
     }
 
     /**
+     * Whether the engine currently holds a range selection.
+     * @returns {Promise<boolean>}
+     */
+    isSelectionRange() {
+        return this.rpc('isSelectionRange')
+    }
+
+    /**
+     * Extend selection to the next measure (for Ctrl+Shift+Right arrow)
+     * @returns {Promise<boolean>}
+     */
+    extendSelectionNextMeasure() {
+        return this.rpc('extendSelectionNextMeasure')
+    }
+
+    /**
+     * Extend selection to the previous measure (for Ctrl+Shift+Left arrow)
+     * @returns {Promise<boolean>}
+     */
+    extendSelectionPrevMeasure() {
+        return this.rpc('extendSelectionPrevMeasure')
+    }
+
+    /**
      * Get the bounding box of the current selection
      * @returns {Promise<{page: number, x: number, y: number, width: number, height: number} | null>}
      */

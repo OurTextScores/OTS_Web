@@ -1098,6 +1098,30 @@ class WebMscore {
     }
 
     /**
+     * Whether the engine currently holds a range selection.
+     * @returns {Promise<boolean>}
+     */
+    async isSelectionRange() {
+        return Module.ccall('isSelectionRange', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Extend selection to the next measure (for Ctrl+Shift+Right arrow)
+     * @returns {Promise<boolean>}
+     */
+    async extendSelectionNextMeasure() {
+        return Module.ccall('extendSelectionNextMeasure', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Extend selection to the previous measure (for Ctrl+Shift+Left arrow)
+     * @returns {Promise<boolean>}
+     */
+    async extendSelectionPrevMeasure() {
+        return Module.ccall('extendSelectionPrevMeasure', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
      * Get the bounding box of the current selection
      * @returns {Promise<{page: number, x: number, y: number, width: number, height: number} | null>}
      */
