@@ -29,22 +29,33 @@ test('title and subtitle persist after save and reload', async ({ page }) => {
   await page.goto('/?score=/test_scores/bach_orig.mscz');
   await page.waitForSelector('svg .Clef', { timeout: 60_000 });
 
-  const readHeader = async (): Promise<{ title: string; subtitle: string }> => {
-    return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
-      if (!score?.metadata) {
-        throw new Error('window.__webmscore.metadata is not available');
-      }
-      const metadata = await score.metadata();
-      const subtitle =
-        typeof score?.subtitle === 'function'
-          ? await score.subtitle()
-          : (typeof metadata?.subtitle === 'string' ? metadata.subtitle : '');
-      return {
-        title: typeof metadata?.title === 'string' ? metadata.title : '',
-        subtitle,
-      };
-    });
+  // Returns null on failure rather than throwing: the loader aborts and restarts
+  // once notes first appear (docs/private/SELECTION_WORK_HANDOFF.md §4), and a
+  // worker call that lands during that restart can throw ("table index out of
+  // bounds") instead of returning a stale value. A thrown error inside an
+  // expect.poll predicate fails the assertion outright rather than retrying, so
+  // swallow it into a mismatching value the poll will naturally retry past once
+  // the restart has settled.
+  const readHeader = async (): Promise<{ title: string | null; subtitle: string | null }> => {
+    try {
+      return await page.evaluate(async () => {
+        const score = (window as any).__webmscore;
+        if (!score?.metadata) {
+          throw new Error('window.__webmscore.metadata is not available');
+        }
+        const metadata = await score.metadata();
+        const subtitle =
+          typeof score?.subtitle === 'function'
+            ? await score.subtitle()
+            : (typeof metadata?.subtitle === 'string' ? metadata.subtitle : '');
+        return {
+          title: typeof metadata?.title === 'string' ? metadata.title : '',
+          subtitle,
+        };
+      });
+    } catch {
+      return { title: null, subtitle: null };
+    }
   };
 
   const newTitle = 'OTS Title Reload';
@@ -90,14 +101,8 @@ test('title and subtitle persist after save and reload', async ({ page }) => {
   });
 
   await page.waitForSelector('svg .Clef', { timeout: 60_000 });
-  // The loader aborts and restarts once notes first appear (see
-  // docs/private/SELECTION_WORK_HANDOFF.md §4); a worker call that lands during that
-  // restart can throw ("table index out of bounds") instead of returning a stale
-  // value, which a bare expect.poll doesn't recover from the way it does a mismatch.
-  // Let the restart settle before reading through the worker.
-  await page.waitForTimeout(1000);
-  await expect.poll(async () => (await readHeader()).title, { timeout: 20_000 })
+  await expect.poll(async () => (await readHeader()).title, { timeout: 30_000 })
     .toBe(newTitle);
-  await expect.poll(async () => (await readHeader()).subtitle, { timeout: 20_000 })
+  await expect.poll(async () => (await readHeader()).subtitle, { timeout: 30_000 })
     .toBe(newSubtitle);
 });

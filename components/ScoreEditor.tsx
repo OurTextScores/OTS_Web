@@ -10818,10 +10818,23 @@ ${partsBodyXml}
     const refreshSelectionFromSvg = async (fallback?: SelectionFallback) => {
         if (!score) return;
         blockOverlayRefreshRef.current = false;
+        // Captured *before* the render, not after: renderScore() is a WASM round-trip
+        // whose latency scales with score complexity, so a newer click's generation
+        // bump in handleScoreClick can land while this one is still in flight. Bumping
+        // (and capturing) up front means that if this call is stale by the time the
+        // render resolves, the check below catches it -- capturing after the render
+        // would instead let this call re-mint itself as "current" and go on to
+        // schedule a refresh for a selection that no longer exists (regression: a
+        // note-click's overlay refresh landing after a later bar click, wiping the
+        // bar's selection -- reproduces with dense scores where the render is slow
+        // enough for this to race; see docs/private/SELECTION_WORK_HANDOFF.md §3).
+        const generation = ++selectionOverlayGenerationRef.current;
         try {
             setOverlaySuppressed(false);
             await renderScore(score, currentPageRef.current);
-            const generation = ++selectionOverlayGenerationRef.current;
+            if (generation !== selectionOverlayGenerationRef.current) {
+                return;
+            }
             scheduleSelectionOverlayRefresh(fallback?.index ?? null, fallback?.point ?? null, generation);
         } catch (err) {
             console.warn('Failed to refresh selection highlight from SVG:', err);
@@ -14861,16 +14874,34 @@ ${partsBodyXml}
         }
         return true;
     });
-    const primarySelectionRect = selectedElement
-        ? { x: selectedElement.x, y: selectedElement.y, w: selectedElement.w, h: selectedElement.h }
-        : selectionBoxes.length === 1
-            ? {
-                x: selectionBoxes[0].x,
-                y: selectionBoxes[0].y,
-                w: selectionBoxes[0].w,
-                h: selectionBoxes[0].h,
-            }
-            : null;
+    // hasBackendHighlighting means the current selection came from the measure/range
+    // path, which sets selectionBoxes but never touches selectedElement -- so
+    // selectedElement can be stale from whatever was selected before (a notehead, or
+    // nothing) and must not be allowed to win here. This is a pure render-time
+    // preference, not a state write: it doesn't fix a stale selectedElement, it just
+    // stops it from being read while it doesn't apply. See
+    // docs/private/SELECTION_WORK_HANDOFF.md §3 -- this was tried before the
+    // selectionOverlayGenerationRef races (both the click-start bump and the
+    // capture-before-render fix in refreshSelectionFromSvg) were closed, and back
+    // then something else was still overwriting the rect afterward; with those races
+    // closed this now holds.
+    const primarySelectionRect = hasBackendHighlighting && selectionBoxes.length === 1
+        ? {
+            x: selectionBoxes[0].x,
+            y: selectionBoxes[0].y,
+            w: selectionBoxes[0].w,
+            h: selectionBoxes[0].h,
+        }
+        : selectedElement
+            ? { x: selectedElement.x, y: selectedElement.y, w: selectedElement.w, h: selectedElement.h }
+            : selectionBoxes.length === 1
+                ? {
+                    x: selectionBoxes[0].x,
+                    y: selectionBoxes[0].y,
+                    w: selectionBoxes[0].w,
+                    h: selectionBoxes[0].h,
+                }
+                : null;
     const textEditorRect = textEditorPosition
         ? primarySelectionRect ?? { x: textEditorPosition.x, y: textEditorPosition.y, w: 220, h: 30 }
         : null;

@@ -31,6 +31,9 @@ const boxes = (page: import('playwright/test').Page): Promise<Box[]> =>
 const measureRange = (page: import('playwright/test').Page) =>
   page.evaluate(async () => (window as any).__webmscore.selectionMeasureRange());
 
+const isRange = (page: import('playwright/test').Page): Promise<boolean> =>
+  page.evaluate(async () => (window as any).__webmscore.isSelectionRange());
+
 /**
  * Clicks empty space inside bar 2 (right of its note, left of bar 3's note).
  *
@@ -338,4 +341,99 @@ test('Ctrl+Click toggles the already-selected bar off, and replaces a different 
   await expect.poll(async () => await measureRange(page), { timeout: 30_000 })
     .toEqual({ startMeasureIndex: 2, endMeasureIndex: 2 });
   await expect.poll(async () => (await boxes(page)).length, { timeout: 30_000 }).toBe(1);
+});
+
+// The single-staff, near-whole-note fixtures above render and hit-test fast enough
+// that they never exercise the actual race: renderScore() (a WASM saveSvg() round
+// trip) is slow enough on a real, dense score that a later click can complete while
+// an earlier click's own selection-refresh is still in flight. Reproduced against
+// bach_orig.mscz (320 notes on the first page alone) and NOT against the fixtures
+// above -- this is the regression test for that gap.
+//
+// Two distinct bugs showed up here, both in docs/private/SELECTION_WORK_HANDOFF.md §3:
+//
+//  1. refreshSelectionFromSvg captured its generation *after* awaiting renderScore(),
+//     not before. A later click's generation bump (handleScoreClick) could land
+//     while that render was in flight; when it resolved, capturing "now" re-minted a
+//     stale refresh as current, which then wiped the newer bar selection entirely.
+//     Fixed by capturing before the render and bailing out if superseded by the time
+//     it resolves.
+//
+//  2. Even with (1) fixed, primarySelectionRect still preferred selectedElement over
+//     the engine-provided range box. The measure/bar path never touches
+//     selectedElement, so it stayed pointed at whatever note was selected before --
+//     the *native* SVG highlight (saveSvg with highlightSelection=true) was correct,
+//     but the React overlay div stayed note-sized. Fixed by preferring the range box
+//     whenever hasBackendHighlighting is set, a pure render-time change matching
+//     "Fix 2" from the original diagnosis -- shelved back then because bug (1) was
+//     still live and made it look ineffective.
+test('a bar stays selectable, with its rectangle, after a note click in a dense real score', async ({ page }) => {
+  // At the default test viewport this score renders small enough that clicks land
+  // ambiguously between crowded noteheads; a larger viewport gives the hit-testing
+  // enough room to be unambiguous. Unrelated to the bug under test.
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto('/?score=/test_scores/bach_orig.mscz');
+  await page.waitForSelector('svg .Note', { timeout: 90_000 });
+
+  // Wide pitch range (arpeggiated figuration) means adjacent notes in time can sit
+  // far apart in y, so a click point derived from note geometry alone can miss the
+  // staff. Click at the staff's own mid-height instead, and only ever pick notes
+  // that fall within that staff line's vertical band, so leftover notes from other
+  // systems can't sneak into the ordering.
+  const staffBox = await page.locator('svg .StaffLines').first().boundingBox();
+  if (!staffBox) throw new Error('no .StaffLines found');
+  const staffMidY = staffBox.y + staffBox.height / 2;
+
+  const notesOnStaff = async () => {
+    const locators = page.locator('svg .Note');
+    const count = await locators.count();
+    const out: { x: number, width: number }[] = [];
+    for (let i = 0; i < count; i++) {
+      const box = await locators.nth(i).boundingBox();
+      if (!box) continue;
+      if (box.y + box.height >= staffBox.y - staffBox.height && box.y <= staffBox.y + staffBox.height * 2) {
+        out.push({ x: box.x, width: box.width });
+      }
+    }
+    return out.sort((a, b) => a.x - b.x);
+  };
+
+  await expect.poll(async () => (await notesOnStaff()).length, { timeout: 30_000 }).toBeGreaterThan(7);
+
+  // Retries, not a single click: the loader can still be aborting and restarting
+  // when notes first appear (docs/private/SELECTION_WORK_HANDOFF.md §4), and a click
+  // in that window lands on nothing. Re-clicking the same spot is idempotent once
+  // the score has actually settled.
+  const clickBetweenUntilRange = async (leftIndex: number, rightIndex: number) => {
+    await expect.poll(async () => {
+      const notes = await notesOnStaff();
+      const a = notes[leftIndex];
+      const b = notes[rightIndex];
+      if (!a || !b) return false;
+      await page.mouse.click((a.x + a.width + b.x) / 2, staffMidY);
+      await page.waitForTimeout(500);
+      return await isRange(page);
+    }, { timeout: 30_000, intervals: [500, 1000, 1000, 2000] }).toBe(true);
+  };
+
+  const overlay = page.getByTestId('selection-overlay');
+  const overlayWidth = async () => (await overlay.first().boundingBox())?.width ?? 0;
+
+  await clickBetweenUntilRange(0, 1);
+  await expect(overlay).toHaveCount(1);
+  const barWidth = await overlayWidth();
+  expect(barWidth).toBeGreaterThan(20);
+
+  const note = page.locator('svg .Note').nth(2);
+  const noteBox = await note.boundingBox();
+  if (!noteBox) throw new Error('no note to click');
+  await page.mouse.click(noteBox.x + noteBox.width / 2, noteBox.y + noteBox.height / 2);
+  await expect.poll(async () => await isRange(page), { timeout: 30_000 }).toBe(false);
+
+  // A bar that was never selected before -- not a re-click, so this can't be
+  // mistaken for the Ctrl+Click toggle-off case above.
+  await clickBetweenUntilRange(6, 7);
+  await expect(overlay).toHaveCount(1);
+  // Bar-sized, not note-sized: a stale selectedElement rendered a handful of px wide.
+  expect(await overlayWidth()).toBeGreaterThan(barWidth / 2);
 });
