@@ -28,7 +28,7 @@ import {
     type ScoreSummary,
 } from '../lib/checkpoints';
 import { CodeMirrorEditor, type CodeEditorThemeMode } from './CodeMirrorEditor';
-import { Toolbar, type MeasureInsertTarget } from './Toolbar';
+import { Toolbar, type MeasureInsertTarget, type HeaderTextTarget } from './Toolbar';
 import { InspectorPanel } from './InspectorPanel';
 import { FloatingPalettes } from './FloatingPalettes';
 import { SCORE_PALETTE_DRAG_MIME, parseScorePaletteItem, type PaletteCategory, type ScorePaletteItem } from './toolbar/palette';
@@ -11778,7 +11778,7 @@ ${partsBodyXml}
         return changed;
     }, { clearSelection: true, skipWasmReselect: true, skipSelectionFallback: true });
 
-    const handleSetTitleText = async () => {
+    const handleSetTitleText = async (text?: string) => {
         if (!score) {
             return;
         }
@@ -11786,12 +11786,12 @@ ${partsBodyXml}
         await performMutation('set title', async () => {
             const fn = requireMutation('setTitleText');
             if (!fn) return;
-            return fn(scoreTitle);
+            return fn(text ?? scoreTitle);
         }, { skipWasmReselect: true });
         await refreshScoreMetadata(score);
     };
 
-    const handleSetSubtitleText = async () => {
+    const handleSetSubtitleText = async (text?: string) => {
         if (!score) {
             return;
         }
@@ -11799,12 +11799,12 @@ ${partsBodyXml}
         await performMutation('set subtitle', async () => {
             const fn = requireMutation('setSubtitleText');
             if (!fn) return;
-            return fn(scoreSubtitle);
+            return fn(text ?? scoreSubtitle);
         }, { skipWasmReselect: true });
         await refreshScoreMetadata(score);
     };
 
-    const handleSetComposerText = async () => {
+    const handleSetComposerText = async (text?: string) => {
         if (!score) {
             return;
         }
@@ -11812,12 +11812,12 @@ ${partsBodyXml}
         await performMutation('set composer', async () => {
             const fn = requireMutation('setComposerText');
             if (!fn) return;
-            return fn(scoreComposer);
+            return fn(text ?? scoreComposer);
         }, { skipWasmReselect: true });
         await refreshScoreMetadata(score);
     };
 
-    const handleSetLyricistText = async () => {
+    const handleSetLyricistText = async (text?: string) => {
         if (!score) {
             return;
         }
@@ -11825,9 +11825,39 @@ ${partsBodyXml}
         await performMutation('set lyricist', async () => {
             const fn = requireMutation('setLyricistText');
             if (!fn) return;
-            return fn(scoreLyricist);
+            return fn(text ?? scoreLyricist);
         }, { skipWasmReselect: true });
         await refreshScoreMetadata(score);
+    };
+
+    /**
+     * ExpressionSection's Text > Score Header menu (Title/Subtitle/Composer/Lyricist).
+     * Reuses the same setXText mutations as the (currently unrendered) ScoreSection
+     * input/button pair -- see docs/private/SELECTION_WORK_HANDOFF.md open item #3.
+     * Prompts rather than positioning an inline editor at the menu's click point:
+     * that's the pattern every other Text-menu entry already uses (handleAddStaffText
+     * et al., via promptForText), and header text has no associated selection or
+     * on-page element to anchor an inline editor to in the general case.
+     */
+    const handleOpenHeaderEditor = (target: HeaderTextTarget) => {
+        const config: Record<HeaderTextTarget, {
+            label: string,
+            value: string,
+            setValue: (v: string) => void,
+            apply: (text?: string) => Promise<void>,
+        }> = {
+            title: { label: 'Title:', value: scoreTitle, setValue: setScoreTitle, apply: handleSetTitleText },
+            subtitle: { label: 'Subtitle:', value: scoreSubtitle, setValue: setScoreSubtitle, apply: handleSetSubtitleText },
+            composer: { label: 'Composer:', value: scoreComposer, setValue: setScoreComposer, apply: handleSetComposerText },
+            lyricist: { label: 'Lyricist:', value: scoreLyricist, setValue: setScoreLyricist, apply: handleSetLyricistText },
+        };
+        const { label, value, setValue, apply } = config[target];
+        const text = promptForText(label, value);
+        if (text === null) {
+            return;
+        }
+        setValue(text);
+        void apply(text);
     };
 
     const handleAddPart = async (instrumentId: string) => {
@@ -14926,6 +14956,7 @@ ${partsBodyXml}
                     onSetComposerText={handleSetComposerText}
                     onSetLyricistText={score?.setLyricistText ? handleSetLyricistText : undefined}
                 headerTextAvailable={Boolean(score?.setTitleText && score?.setComposerText)}
+                    onOpenHeaderEditor={score?.setTitleText ? handleOpenHeaderEditor : undefined}
 	                onZoomIn={handleZoomIn}
 	                onZoomOut={handleZoomOut}
 	                zoomLevel={zoom}

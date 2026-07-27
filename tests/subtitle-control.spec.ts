@@ -1,16 +1,28 @@
 import { expect, test } from 'playwright/test';
 
-test('subtitle control is populated from metadata', async ({ page }) => {
+/**
+ * The input/button pair this suite used to drive (input-title, input-subtitle,
+ * btn-set-title, btn-set-subtitle) was removed from ScoreSection at some point
+ * without the tests being updated or deleted -- see
+ * docs/private/SELECTION_WORK_HANDOFF.md open item #3. The underlying mutations
+ * (score.setTitleText/setSubtitleText) were never touched; ExpressionSection's
+ * Text > Score Header menu now drives them via onOpenHeaderEditor, which prompts
+ * for the new text pre-filled with the current value (the same promptForText
+ * helper every other Text-menu entry uses). This exercises that path instead.
+ */
+test('the subtitle prompt is pre-filled from metadata', async ({ page }) => {
   await page.goto('/?score=/test_scores/bach_orig.mscz');
   await page.waitForSelector('svg .Clef', { timeout: 60_000 });
 
-  const subtitleInput = page.getByTestId('input-subtitle');
-  await expect(subtitleInput).toBeVisible();
+  let promptDefault = '';
+  page.once('dialog', dialog => {
+    promptDefault = dialog.defaultValue();
+    return dialog.dismiss();
+  });
+  await page.getByTestId('dropdown-text').click();
+  await page.getByTestId('btn-text-subtitle').click();
 
-  const subtitleValue = await subtitleInput.inputValue();
-  expect(subtitleValue).toContain('Bach: Cello Suite');
-
-  await expect(page.getByTestId('btn-set-subtitle')).toBeVisible();
+  await expect.poll(() => promptDefault, { timeout: 20_000 }).toContain('Bach: Cello Suite');
 });
 
 test('title and subtitle persist after save and reload', async ({ page }) => {
@@ -38,10 +50,13 @@ test('title and subtitle persist after save and reload', async ({ page }) => {
   const newTitle = 'OTS Title Reload';
   const newSubtitle = 'OTS Subtitle Reload';
 
-  await page.getByTestId('input-title').fill(newTitle);
-  await page.getByTestId('btn-set-title').click();
-  await page.getByTestId('input-subtitle').fill(newSubtitle);
-  await page.getByTestId('btn-set-subtitle').click();
+  page.once('dialog', dialog => dialog.accept(newTitle));
+  await page.getByTestId('dropdown-text').click();
+  await page.getByTestId('btn-text-title').click();
+
+  page.once('dialog', dialog => dialog.accept(newSubtitle));
+  await page.getByTestId('dropdown-text').click();
+  await page.getByTestId('btn-text-subtitle').click();
 
   await expect.poll(async () => (await readHeader()).title, { timeout: 20_000 })
     .toBe(newTitle);
@@ -68,9 +83,6 @@ test('title and subtitle persist after save and reload', async ({ page }) => {
   expect(exportedXml).toContain(newTitle);
   expect(exportedXml).toContain(newSubtitle);
 
-  await page.getByTestId('input-title').fill('Temp Title');
-  await page.getByTestId('input-subtitle').fill('Temp Subtitle');
-
   await page.getByTestId('open-score-input').setInputFiles({
     name: 'reloaded.mscz',
     mimeType: 'application/vnd.musescore.mscz',
@@ -78,8 +90,14 @@ test('title and subtitle persist after save and reload', async ({ page }) => {
   });
 
   await page.waitForSelector('svg .Clef', { timeout: 60_000 });
-  await expect.poll(async () => await page.getByTestId('input-title').inputValue(), { timeout: 20_000 })
+  // The loader aborts and restarts once notes first appear (see
+  // docs/private/SELECTION_WORK_HANDOFF.md §4); a worker call that lands during that
+  // restart can throw ("table index out of bounds") instead of returning a stale
+  // value, which a bare expect.poll doesn't recover from the way it does a mismatch.
+  // Let the restart settle before reading through the worker.
+  await page.waitForTimeout(1000);
+  await expect.poll(async () => (await readHeader()).title, { timeout: 20_000 })
     .toBe(newTitle);
-  await expect.poll(async () => await page.getByTestId('input-subtitle').inputValue(), { timeout: 20_000 })
+  await expect.poll(async () => (await readHeader()).subtitle, { timeout: 20_000 })
     .toBe(newSubtitle);
 });

@@ -30,21 +30,7 @@ const SECTIONS_DIR = resolve(REPO, 'components/toolbar/sections');
  * Handler props a section may reference without ScoreEditor supplying one.
  * Add here only with a reason -- an entry is an admission that a control is dead.
  */
-const ALLOWED_UNWIRED = new Map<string, string>([
-    [
-        'onOpenHeaderEditor',
-        // Found by this guard on the day it was written. ExpressionSection's Text menu
-        // (Title/Subtitle/Composer/Lyricist, ExpressionSection.tsx:216-219) is dead:
-        // every item is disabled because ScoreEditor never supplies the handler.
-        // Unlike the other three cases this is NOT a one-line wiring fix -- the prop
-        // takes a screen point for an inline editor that does not exist yet, and
-        // ScoreEditor has no header-editor state to open. The capability itself is
-        // still reachable through ScoreSection's title/composer inputs (btn-set-title,
-        // covered by tests/header-text.spec.ts), so this is a dead alternate route
-        // rather than a lost feature. Remove this entry when the editor is built.
-        'needs an inline header editor that does not exist yet; capability reachable via ScoreSection inputs',
-    ],
-]);
+const ALLOWED_UNWIRED = new Map<string, string>([]);
 
 function toolbarCallSiteProps(): Set<string> {
     const source = readFileSync(resolve(REPO, 'components/ScoreEditor.tsx'), 'utf8');
