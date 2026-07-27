@@ -14365,6 +14365,15 @@ ${partsBodyXml}
         }
         if (!containerRef.current || !score) return;
 
+        // Invalidate any overlay refresh scheduled by a previous click (double-RAF
+        // in refreshSelectionFromSvg/scheduleSelectionOverlayRefresh) before it fires.
+        // Without this, a stale refreshSelectionOverlay callback from an earlier
+        // element click can land after this click's selection is already applied,
+        // scrape a DOM that has no .selected markers for a backend-highlighted
+        // range (see renderScore's highlightSelection path), find nothing, and wipe
+        // selectionBoxes/selectedElement -- see docs/private/SELECTION_WORK_HANDOFF.md §3.
+        selectionOverlayGenerationRef.current += 1;
+
         if (noteInputActiveRef.current && interactiveMutationEnabled) {
             const scorePoint = clientToScorePoint(e.clientX, e.clientY);
             if (scorePoint) {

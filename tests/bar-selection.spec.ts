@@ -53,6 +53,39 @@ const measureRange = (page: import('playwright/test').Page) =>
  * the left note's vertical centre. Clicking a notehead itself would take the element
  * branch rather than the measure one.
  */
+/**
+ * Notes in reading order (top-to-bottom staff row, then left-to-right within the
+ * row), independent of their DOM/SVG order.
+ *
+ * The engine redraws the SVG with highlightSelection=true after any element click,
+ * and the just-selected note is promoted to the end of that markup for z-stacking.
+ * `svg .Note >> nth(i)` is therefore only a stable proxy for "the i-th note in the
+ * piece" until the first note-level click; after that its DOM position no longer
+ * matches score position. Sorting by geometry instead of DOM order keeps `leftNote`/
+ * `rightNote` indices meaningful across a selection change.
+ */
+async function orderedNoteBoxes(page: import('playwright/test').Page) {
+  const notes = page.locator('svg .Note');
+  const count = await notes.count();
+  const raw: { x: number, y: number, width: number, height: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const box = await notes.nth(i).boundingBox();
+    if (box) raw.push(box);
+  }
+  const byY = [...raw].sort((a, b) => a.y - b.y);
+  const rows: (typeof raw)[] = [];
+  for (const box of byY) {
+    const row = rows.at(-1);
+    const rowRef = row?.[0];
+    if (row && rowRef && Math.abs(box.y - rowRef.y) < rowRef.height * 1.5) {
+      row.push(box);
+    } else {
+      rows.push([box]);
+    }
+  }
+  return rows.flatMap(row => [...row].sort((a, b) => a.x - b.x));
+}
+
 async function selectBarBetween(
   page: import('playwright/test').Page,
   leftNote: number,
@@ -60,9 +93,9 @@ async function selectBarBetween(
   expected: { startMeasureIndex: number; endMeasureIndex: number },
 ) {
   await expect.poll(async () => {
-    const notes = page.locator('svg .Note');
-    const a = await notes.nth(leftNote).boundingBox();
-    const b = await notes.nth(rightNote).boundingBox();
+    const ordered = await orderedNoteBoxes(page);
+    const a = ordered[leftNote];
+    const b = ordered[rightNote];
     if (!a || !b) return null;
     await page.mouse.click((a.x + a.width + b.x) / 2, a.y + a.height / 2);
     await page.waitForTimeout(400);
@@ -100,33 +133,21 @@ test('a selected bar produces one rectangle spanning the bar, not one per note',
   expect(box.width).toBeGreaterThan(box.height);
 });
 
-// KNOWN FAILING -- open bug, reproduced and diagnosed but not fixed.
-//
-// The engine is correct throughout: isSelectionRange stays true and
-// getSelectionBoundingBoxes returns one 565-unit bar rectangle both before and after
-// the note click. The overlay is what is wrong. primarySelectionRect resolves as
-//
-//     selectedElement ?? (selectionBoxes.length === 1 ? selectionBoxes[0] : null)
-//
-// so selectedElement wins, and the measure path never sets it -- the drawn rectangle
-// is therefore whatever was selected before: a notehead rect after a note click
-// (measured 47px where the bar is 565 units), or nothing once it has been cleared.
-//
-// Two attempted fixes did not work and are not in the tree:
-//   - setting selectedElement/selectedPoint from the range box in the measure path;
-//   - preferring the engine box at render time when hasBackendHighlighting is set.
-// The second is clean and still fails this test, so the overlay rect is being
-// recomputed or overwritten by a path not yet identified -- refreshSelectionOverlay
-// and the selectedIndex-driven effects are the places left to look.
-test.fixme('a bar stays selectable, with its rectangle, after a note has been clicked', async ({ page }) => {
+// Root cause (see docs/private/SELECTION_WORK_HANDOFF.md §3 for the original
+// diagnosis): a stale scheduled overlay refresh from a *previous* element click could
+// fire after a later bar click had already set the correct selection.
+// refreshSelectionFromSvg schedules refreshSelectionOverlay via a double-RAF, guarded
+// by selectionOverlayGenerationRef -- but the measure/bar-click path never bumped that
+// ref, so the stale callback still matched and ran. It scraped the DOM for
+// .selected/.note-selected markers, found none (backend-highlighted range selections
+// don't add those classes), fell back to the old note index, failed to resolve a box,
+// and wiped selectionBoxes/selectedElement entirely. Fixed by bumping
+// selectionOverlayGenerationRef at the very start of every click, invalidating any
+// refresh scheduled by an earlier click before it can clobber a newer selection.
+test('a bar stays selectable, with its rectangle, after a note has been clicked', async ({ page }) => {
   // Reported repro: the first empty-space click selects the bar, but once a note has
   // been clicked, later empty-space clicks either highlight the noteheads with no bar
   // rectangle or appear to select nothing.
-  //
-  // The engine was right throughout -- isSelectionRange stayed true. The overlay was
-  // wrong: primarySelectionRect prefers selectedElement and only falls back to
-  // selectionBoxes, and the measure path never set selectedElement, so the visible
-  // rectangle came from whatever was selected before (a notehead, or nothing).
   const overlay = page.getByTestId('selection-overlay');
   const overlayWidth = async () => (await overlay.first().boundingBox())?.width ?? 0;
 
