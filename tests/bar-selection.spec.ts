@@ -437,3 +437,70 @@ test('a bar stays selectable, with its rectangle, after a note click in a dense 
   // Bar-sized, not note-sized: a stale selectedElement rendered a handful of px wide.
   expect(await overlayWidth()).toBeGreaterThan(barWidth / 2);
 });
+
+// A range spanning multiple systems gets one bounding box per system from the engine
+// (ScoreRangeUtilities::boundingArea upstream, ported into _getSelectionBoundingBoxes --
+// see the file header). The overlay used to render exactly one rectangle no matter what:
+// primarySelectionRect only ever resolved a single box, and the only other render path
+// was explicitly gated `!hasBackendHighlighting`, so a backend-highlighted range with
+// more than one box hit neither path and drew nothing past the first system. The four
+// single-system fixtures above can't reach this at all.
+test('a range spanning multiple systems draws one rectangle per system', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto('/?score=/test_scores/bach_orig.mscz');
+  await page.waitForSelector('svg .Note', { timeout: 90_000 });
+
+  const staffBox = await page.locator('svg .StaffLines').first().boundingBox();
+  if (!staffBox) throw new Error('no .StaffLines found');
+  const staffMidY = staffBox.y + staffBox.height / 2;
+
+  const notesOnFirstStaff = async () => {
+    const locators = page.locator('svg .Note');
+    const count = await locators.count();
+    const out: { x: number, width: number }[] = [];
+    for (let i = 0; i < count; i++) {
+      const box = await locators.nth(i).boundingBox();
+      if (!box) continue;
+      if (box.y + box.height >= staffBox.y - staffBox.height && box.y <= staffBox.y + staffBox.height * 2) {
+        out.push({ x: box.x, width: box.width });
+      }
+    }
+    return out.sort((a, b) => a.x - b.x);
+  };
+
+  await expect.poll(async () => (await notesOnFirstStaff()).length, { timeout: 30_000 }).toBeGreaterThan(1);
+
+  await expect.poll(async () => {
+    const notes = await notesOnFirstStaff();
+    const a = notes[0];
+    const b = notes[1];
+    if (!a || !b) return false;
+    await page.mouse.click((a.x + a.width + b.x) / 2, staffMidY);
+    await page.waitForTimeout(500);
+    return await isRange(page);
+  }, { timeout: 30_000, intervals: [500, 1000, 1000, 2000] }).toBe(true);
+
+  // Extend by whole bars until the range crosses into a second system -- the engine
+  // reports one box per system, so this is the signal to stop.
+  await expect.poll(async () => {
+    await page.keyboard.press('Control+Shift+ArrowRight');
+    await page.waitForTimeout(500);
+    return (await boxes(page)).length;
+  }, { timeout: 30_000, intervals: [500, 500, 500, 1000] }).toBeGreaterThan(1);
+
+  const engineBoxes = await boxes(page);
+  expect(engineBoxes.length).toBeGreaterThan(1);
+
+  const overlay = page.getByTestId('selection-overlay');
+  await expect(overlay).toHaveCount(engineBoxes.length);
+
+  // Each rectangle sits on its own system: distinct y, all bar-sized.
+  const ys = new Set<number>();
+  for (let i = 0; i < engineBoxes.length; i++) {
+    const box = await overlay.nth(i).boundingBox();
+    if (!box) throw new Error(`overlay ${i} has no box`);
+    expect(box.width).toBeGreaterThan(20);
+    ys.add(Math.round(box.y));
+  }
+  expect(ys.size).toBe(engineBoxes.length);
+});

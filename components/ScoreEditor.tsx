@@ -14877,31 +14877,20 @@ ${partsBodyXml}
     // hasBackendHighlighting means the current selection came from the measure/range
     // path, which sets selectionBoxes but never touches selectedElement -- so
     // selectedElement can be stale from whatever was selected before (a notehead, or
-    // nothing) and must not be allowed to win here. This is a pure render-time
-    // preference, not a state write: it doesn't fix a stale selectedElement, it just
-    // stops it from being read while it doesn't apply. See
-    // docs/private/SELECTION_WORK_HANDOFF.md §3 -- this was tried before the
-    // selectionOverlayGenerationRef races (both the click-start bump and the
-    // capture-before-render fix in refreshSelectionFromSvg) were closed, and back
-    // then something else was still overwriting the rect afterward; with those races
-    // closed this now holds.
-    const primarySelectionRect = hasBackendHighlighting && selectionBoxes.length === 1
-        ? {
-            x: selectionBoxes[0].x,
-            y: selectionBoxes[0].y,
-            w: selectionBoxes[0].w,
-            h: selectionBoxes[0].h,
-        }
-        : selectedElement
-            ? { x: selectedElement.x, y: selectedElement.y, w: selectedElement.w, h: selectedElement.h }
-            : selectionBoxes.length === 1
-                ? {
-                    x: selectionBoxes[0].x,
-                    y: selectionBoxes[0].y,
-                    w: selectionBoxes[0].w,
-                    h: selectionBoxes[0].h,
-                }
-                : null;
+    // nothing) and must not be allowed to win here. A range spanning multiple systems
+    // gets one box per system (ScoreRangeUtilities::boundingArea upstream), so
+    // "the" backend rect isn't well-defined -- that case is rendered separately,
+    // below, as one rectangle per box. This stays selectedElement/single-box only.
+    const primarySelectionRect = selectedElement
+        ? { x: selectedElement.x, y: selectedElement.y, w: selectedElement.w, h: selectedElement.h }
+        : selectionBoxes.length === 1
+            ? {
+                x: selectionBoxes[0].x,
+                y: selectionBoxes[0].y,
+                w: selectionBoxes[0].w,
+                h: selectionBoxes[0].h,
+            }
+            : null;
     const textEditorRect = textEditorPosition
         ? primarySelectionRect ?? { x: textEditorPosition.x, y: textEditorPosition.y, w: 220, h: 30 }
         : null;
@@ -15486,7 +15475,25 @@ ${partsBodyXml}
                         />
                     ))}
 
-                    {primarySelectionRect && !overlaySuppressed && selectionBoxes.length <= 1 && (
+                    {/* Backend range selections (measure/bar clicks, Shift-extend) get one box
+                        per system from the engine -- render every one of them, not just the
+                        first, or a range spanning a system break loses its rectangle entirely
+                        past the first line. All share the same testid: they're one logical
+                        selection, not a list. */}
+                    {hasBackendHighlighting && selectionBoxes.length > 0 && !overlaySuppressed && selectionBoxes.map((box, index) => (
+                        <div
+                            key={index}
+                            data-testid="selection-overlay"
+                            className="absolute pointer-events-none border-2 border-blue-600"
+                            style={{
+                                left: box.x,
+                                top: box.y,
+                                width: box.w,
+                                height: box.h
+                            }}
+                        />
+                    ))}
+                    {primarySelectionRect && !overlaySuppressed && selectionBoxes.length <= 1 && !hasBackendHighlighting && (
                         <div
                             data-testid="selection-overlay"
                             className="absolute pointer-events-none border-2 border-blue-600"
