@@ -14484,17 +14484,23 @@ ${partsBodyXml}
                 };
 
                 // Try selectElementAtPoint first, then fall back to selectMeasureAtPoint
-                const trySelect = async () => {
+                // Desktop MuseScore's Ctrl+Click on empty bar space does not build a list
+                // selection (Score::selectAdd, score.cpp:2984): it either replaces the
+                // range with the newly clicked bar, or -- when re-clicking the bar that
+                // is already the sole selection -- toggles it off
+                // (NotationInteraction::doSelect deselects on a Ctrl-click of an
+                // already-selected item). Bars never join a List upstream, and measure
+                // deletion (cmdTimeDelete) requires SelState::RANGE and refuses a List
+                // outright, so there is no "add this bar too, keep the others" to build.
+                // The only behaviour that isn't already the default replace-click is the
+                // toggle-off, handled below.
+                const isCtrlClick = (e.ctrlKey || e.metaKey) && !e.shiftKey;
+
+                const trySelect = async (): Promise<boolean | 'cleared'> => {
                     // Desktop MuseScore maps Shift+Click to SelectType::RANGE and plain
                     // click to SINGLE (notationviewinputcontroller.cpp). Mode 3 is RANGE,
                     // so shift-clicking another bar -- including one on a different staff
                     // -- widens the existing selection instead of replacing it.
-                    // Ctrl+Click is SelectType::ADD upstream, which builds a *list*
-                    // selection rather than a range; it is deliberately not routed here.
-                    // Desktop MuseScore maps Shift+Click to SelectType::RANGE and a plain
-                    // click to SINGLE (notationviewinputcontroller.cpp). Ctrl+Click is ADD
-                    // there -- a list selection, not a range -- so it is deliberately not
-                    // routed here.
                     //
                     // This has to go through the measure path, not the element one: empty
                     // space inside a bar matches no selectable item, so selectElementAtPoint
@@ -14518,8 +14524,37 @@ ${partsBodyXml}
 
                     // If no element was selected, try selecting the measure
                     if (score.selectMeasureAtPoint) {
+                        const readMeasureRange = async () => {
+                            if (!score.selectionMeasureRange) {
+                                return null;
+                            }
+                            try {
+                                return await score.selectionMeasureRange();
+                            } catch {
+                                return null;
+                            }
+                        };
+
+                        const previousRange = isCtrlClick ? await readMeasureRange() : null;
+
                         const measureSelected = await score.selectMeasureAtPoint(pageIndex, scorePoint.x, scorePoint.y);
-                        return measureSelected;
+                        if (!measureSelected) {
+                            return false;
+                        }
+
+                        if (isCtrlClick && score.clearSelection && previousRange
+                            && previousRange.startMeasureIndex === previousRange.endMeasureIndex) {
+                            const newRange = await readMeasureRange();
+                            const sameSingleBar = newRange
+                                && newRange.startMeasureIndex === previousRange.startMeasureIndex
+                                && newRange.endMeasureIndex === previousRange.endMeasureIndex;
+                            if (sameSingleBar) {
+                                await score.clearSelection();
+                                return 'cleared' as const;
+                            }
+                        }
+
+                        return Boolean(measureSelected);
                     }
 
                     return false;
@@ -14527,7 +14562,7 @@ ${partsBodyXml}
 
                 trySelect()
                     .then(async (selected) => {
-                        if (selected === false) {
+                        if (selected === false || selected === 'cleared') {
                             clearSelectionState();
                             return;
                         }

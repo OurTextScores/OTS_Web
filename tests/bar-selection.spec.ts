@@ -76,8 +76,12 @@ async function orderedNoteBoxes(page: import('playwright/test').Page) {
   const rows: (typeof raw)[] = [];
   for (const box of byY) {
     const row = rows.at(-1);
-    const rowRef = row?.[0];
-    if (row && rowRef && Math.abs(box.y - rowRef.y) < rowRef.height * 1.5) {
+    // Compare against the previous note, not the row's first: a single staff line can
+    // drift gradually in y across several notes (stem/accidental bbox differences), and
+    // comparing against a fixed first-note reference lets that drift accumulate past the
+    // threshold and falsely split one row into two.
+    const prev = row?.at(-1);
+    if (row && prev && Math.abs(box.y - prev.y) < prev.height * 1.5) {
       row.push(box);
     } else {
       rows.push([box]);
@@ -296,4 +300,42 @@ test('repeated Shift+Right keeps extending instead of collapsing the range', asy
   const after = await boxes(page);
   expect(after).toHaveLength(1);
   expect(after[0].width).toBeGreaterThan(100);
+});
+
+// Design: docs/private/SELECTION_WORK_HANDOFF.md open item #2. Upstream MuseScore's
+// Ctrl+Click on empty bar space (Score::selectAdd, score.cpp:2984) never builds a list
+// selection of bars -- it replaces the range with the newly clicked bar, or, when
+// re-clicking the bar that is already the sole selection, deselects it
+// (NotationInteraction::doSelect). There is no discontiguous "add this bar too" to
+// port: measure deletion (cmdTimeDelete) requires a RANGE and refuses a List outright
+// upstream too. So Ctrl+Click only needs to add the toggle-off case on top of the
+// default replace-click OTS_Web already does.
+test('Ctrl+Click toggles the already-selected bar off, and replaces a different one', async ({ page }) => {
+  await selectBar2(page);
+
+  const ctrlClickBetween = async (leftNote: number, rightNote: number) => {
+    const ordered = await orderedNoteBoxes(page);
+    const a = ordered[leftNote];
+    const b = ordered[rightNote];
+    await page.keyboard.down('Control');
+    await page.mouse.click((a.x + a.width + b.x) / 2, a.y + a.height / 2);
+    await page.keyboard.up('Control');
+    await page.waitForTimeout(400);
+  };
+
+  // Ctrl+Click the bar that is already selected: toggles off, nothing selected.
+  await ctrlClickBetween(1, 2);
+  await expect.poll(async () => await measureRange(page), { timeout: 30_000 }).toBeNull();
+  await expect.poll(async () => (await boxes(page)).length, { timeout: 30_000 }).toBe(0);
+
+  // Ctrl+Click the same bar again with nothing selected: selects it fresh.
+  await ctrlClickBetween(1, 2);
+  await expect.poll(async () => await measureRange(page), { timeout: 30_000 })
+    .toEqual({ startMeasureIndex: 1, endMeasureIndex: 1 });
+
+  // Ctrl+Click a different bar: replaces the selection, does not extend or list it.
+  await ctrlClickBetween(2, 3);
+  await expect.poll(async () => await measureRange(page), { timeout: 30_000 })
+    .toEqual({ startMeasureIndex: 2, endMeasureIndex: 2 });
+  await expect.poll(async () => (await boxes(page)).length, { timeout: 30_000 }).toBe(1);
 });
