@@ -39,16 +39,41 @@ const measureRange = (page: import('playwright/test').Page) =>
  * act on a stale selection. Polling only on box count is not enough -- a stale
  * single-element selection also yields one box.
  */
-async function selectBar2(page: import('playwright/test').Page) {
-  const notes = page.locator('svg .Note');
-  const a = await notes.nth(1).boundingBox();
-  const b = await notes.nth(2).boundingBox();
-  if (!a || !b) throw new Error('notes not laid out');
-  await page.mouse.click((a.x + a.width + b.x) / 2, a.y + a.height / 2);
-  await expect.poll(async () => await measureRange(page), { timeout: 30_000 })
-    .toEqual({ startMeasureIndex: 1, endMeasureIndex: 1 });
+/**
+ * Clicks empty space between two noteheads until the engine reports a range there.
+ *
+ * The click is retried rather than merely polled for its result: the score can still
+ * be re-booting when the notes first appear in the DOM (the loader aborts and
+ * restarts), and a click in that window lands on nothing at all -- selectionMeasureRange
+ * then reports null forever, because no selection was ever initiated. Re-selecting the
+ * same bar is idempotent, so this absorbs boot timing without papering over a wrong
+ * selection: the assertion on the resulting range is unchanged.
+ *
+ * `leftNote`/`rightNote` are indices into `svg .Note`; the click lands between them, at
+ * the left note's vertical centre. Clicking a notehead itself would take the element
+ * branch rather than the measure one.
+ */
+async function selectBarBetween(
+  page: import('playwright/test').Page,
+  leftNote: number,
+  rightNote: number,
+  expected: { startMeasureIndex: number; endMeasureIndex: number },
+) {
+  await expect.poll(async () => {
+    const notes = page.locator('svg .Note');
+    const a = await notes.nth(leftNote).boundingBox();
+    const b = await notes.nth(rightNote).boundingBox();
+    if (!a || !b) return null;
+    await page.mouse.click((a.x + a.width + b.x) / 2, a.y + a.height / 2);
+    await page.waitForTimeout(400);
+    return await measureRange(page);
+  }, { timeout: 30_000, intervals: [500, 1000, 1000, 2000] }).toEqual(expected);
+
   await expect.poll(async () => (await boxes(page)).length, { timeout: 30_000 }).toBe(1);
 }
+
+const selectBar2 = (page: import('playwright/test').Page) =>
+  selectBarBetween(page, 1, 2, { startMeasureIndex: 1, endMeasureIndex: 1 });
 
 test.beforeEach(async ({ page }) => {
   await page.goto(SCORE);
@@ -97,15 +122,8 @@ test('Shift+Down extends the rectangle across staves', async ({ page }) => {
   await page.waitForSelector('svg .Note', { timeout: 60_000 });
   await expect.poll(async () => await page.locator('svg .Note').count(), { timeout: 30_000 }).toBe(8);
 
-  // Select bar 2 of the top staff: empty space right of its note.
-  const notes = page.locator('svg .Note');
-  const a = await notes.nth(1).boundingBox();
-  const b = await notes.nth(2).boundingBox();
-  expect(a).not.toBeNull();
-  expect(b).not.toBeNull();
-  if (!a || !b) return;
-  await page.mouse.click((a.x + a.width + b.x) / 2, a.y + a.height / 2);
-  await expect.poll(async () => (await boxes(page)).length, { timeout: 30_000 }).toBe(1);
+  // Bar 2 of the top staff. Notes 0-3 are the upper staff, 4-7 the lower one.
+  await selectBarBetween(page, 1, 2, { startMeasureIndex: 1, endMeasureIndex: 1 });
 
   const [oneStaff] = await boxes(page);
 
@@ -157,19 +175,16 @@ test('Shift+Click on a lower staff widens the rectangle across staves', async ({
   await page.waitForSelector('svg .Note', { timeout: 60_000 });
   await expect.poll(async () => await page.locator('svg .Note').count(), { timeout: 30_000 }).toBe(8);
 
+  // Bar 2 of the top staff. Notes 0-3 are the upper staff, 4-7 the lower one.
+  await selectBarBetween(page, 1, 2, { startMeasureIndex: 1, endMeasureIndex: 1 });
+  const [oneStaff] = await boxes(page);
+
   const notes = page.locator('svg .Note');
-  const top = await notes.nth(1).boundingBox();
-  const topNext = await notes.nth(2).boundingBox();
-  // Notes 0-3 are the upper staff, 4-7 the lower one.
   const lower = await notes.nth(5).boundingBox();
   const lowerNext = await notes.nth(6).boundingBox();
-  expect(top).not.toBeNull();
   expect(lower).not.toBeNull();
-  if (!top || !topNext || !lower || !lowerNext) return;
-
-  await page.mouse.click((top.x + top.width + topNext.x) / 2, top.y + top.height / 2);
-  await expect.poll(async () => (await boxes(page)).length, { timeout: 30_000 }).toBe(1);
-  const [oneStaff] = await boxes(page);
+  expect(lowerNext).not.toBeNull();
+  if (!lower || !lowerNext) return;
 
   await page.keyboard.down('Shift');
   await page.mouse.click((lower.x + lower.width + lowerNext.x) / 2, lower.y + lower.height / 2);
@@ -189,7 +204,7 @@ test('Shift+Click on a lower staff widens the rectangle across staves', async ({
 // selectionBoxes, and the empty-click path deliberately skips the SVG refresh while
 // other call sites do not. Re-enable (drop .fixme) once that is resolved; the
 // assertions themselves are correct and did catch the isSelectionRange regression.
-test.fixme('repeated Shift+Right keeps extending instead of collapsing the range', async ({ page }) => {
+test('repeated Shift+Right keeps extending instead of collapsing the range', async ({ page }) => {
   await selectBar2(page);
 
   // Each bar holds a single whole note, so one chord-step is also one bar here.

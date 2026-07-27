@@ -10680,7 +10680,18 @@ ${partsBodyXml}
         // Preserve selection state before mutation for use in fallback
         const preservedIndex = selectedIndex;
         const preservedPoint = selectedPoint;
-        const preservedMultiSelection = selectionBoxes.length > 1;
+        // Both guards below exist to protect a selection richer than a single point --
+        // originally measure selections, which used to render as one box per notehead.
+        // A range now renders as one rectangle per system, so box count no longer
+        // detects it and the engine has to be asked. Captured before the mutation,
+        // while the caller's selection still exists.
+        let preservedRangeSelection = false;
+        try {
+            preservedRangeSelection = Boolean(score.isSelectionRange && await score.isSelectionRange());
+        } catch {
+            // Older build without the export; fall back to the box-count heuristic.
+        }
+        const preservedMultiSelection = selectionBoxes.length > 1 || preservedRangeSelection;
         const allowSelectionFallback = !options?.skipSelectionFallback;
         const shouldPlaySelectionPreview = Boolean(options?.playSelectionPreview);
 
