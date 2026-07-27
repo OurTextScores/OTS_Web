@@ -109,6 +109,7 @@ export interface Score {
      */
     selectElementAtPoint?: (pageNumber: number, x: number, y: number) => Promise<unknown> | unknown;
     selectMeasureAtPoint?: (pageNumber: number, x: number, y: number) => Promise<unknown> | unknown;
+    extendMeasureSelectionAtPoint?: (pageNumber: number, x: number, y: number) => Promise<unknown> | unknown;
     selectPartMeasureByIndex?: (partIndex: number, measureIndex: number) => Promise<unknown> | unknown;
     selectTextElementAtPoint?: (pageNumber: number, x: number, y: number) => Promise<unknown> | unknown;
     selectElementAtPointWithMode?: (

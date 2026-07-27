@@ -501,6 +501,7 @@ type MutationMethods = Pick<
     | 'selectPrevChord'
     | 'extendSelectionNextChord'
     | 'extendSelectionPrevChord'
+    | 'extendMeasureSelectionAtPoint'
     | 'isSelectionRange'
     | 'extendSelectionNextMeasure'
     | 'extendSelectionPrevMeasure'
@@ -14434,6 +14435,30 @@ ${partsBodyXml}
 
                 // Try selectElementAtPoint first, then fall back to selectMeasureAtPoint
                 const trySelect = async () => {
+                    // Desktop MuseScore maps Shift+Click to SelectType::RANGE and plain
+                    // click to SINGLE (notationviewinputcontroller.cpp). Mode 3 is RANGE,
+                    // so shift-clicking another bar -- including one on a different staff
+                    // -- widens the existing selection instead of replacing it.
+                    // Ctrl+Click is SelectType::ADD upstream, which builds a *list*
+                    // selection rather than a range; it is deliberately not routed here.
+                    // Desktop MuseScore maps Shift+Click to SelectType::RANGE and a plain
+                    // click to SINGLE (notationviewinputcontroller.cpp). Ctrl+Click is ADD
+                    // there -- a list selection, not a range -- so it is deliberately not
+                    // routed here.
+                    //
+                    // This has to go through the measure path, not the element one: empty
+                    // space inside a bar matches no selectable item, so selectElementAtPoint
+                    // returns false and bar selection actually comes from the
+                    // selectMeasureAtPoint fallback below. The extend variant is that same
+                    // lookup without the deselectAll, so the range widens instead.
+                    if (isShiftClick && score.extendMeasureSelectionAtPoint) {
+                        const extended = await score.extendMeasureSelectionAtPoint(
+                            pageIndex, scorePoint.x, scorePoint.y,
+                        );
+                        if (extended) {
+                            return true;
+                        }
+                    }
                     if (score.selectElementAtPoint) {
                         const elementSelected = await score.selectElementAtPoint(pageIndex, scorePoint.x, scorePoint.y);
                         if (elementSelected) {

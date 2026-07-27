@@ -1020,6 +1020,18 @@ class WebMscore {
      * @param {number} y
      * @returns {Promise<boolean>}
      */
+    /**
+     * Extend the current range selection to include the bar at a point (Shift+Click)
+     * @returns {Promise<boolean>}
+     */
+    async extendMeasureSelectionAtPoint(pageNumber, x, y) {
+        return Module.ccall('extendMeasureSelectionAtPoint',
+            'boolean',
+            ['number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, pageNumber, x, y, this.excerptId]
+        )
+    }
+
     async selectMeasureAtPoint(pageNumber, x, y) {
         return Module.ccall('selectMeasureAtPoint',
             'boolean',

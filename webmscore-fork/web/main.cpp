@@ -3103,9 +3103,20 @@ bool _selectElementAtPoint(uintptr_t score_ptr, int pageNumber, double x, double
     return true;
 }
 
-bool _selectMeasureAtPoint(uintptr_t score_ptr, int pageNumber, double x, double y, int excerptId)
+// Selects the bar under a point.
+//
+// `replace` mirrors desktop MuseScore's click semantics: a plain click replaces the
+// selection (SelectType::SINGLE), while Shift+Click extends it (SelectType::RANGE).
+// Extending simply means not clearing first, which lets selectMeasureRange take its
+// isRange() branch and call Selection::extendRangeSelection -- that is what widens
+// the range across bars and, when the point is on another staff, across staves.
+//
+// This is deliberately separate from the element hit-test used by
+// _selectElementAtPoint: empty space inside a bar matches no selectable item, so bar
+// selection has to go through pos2measure instead.
+static bool selectMeasureAtPointImpl(uintptr_t score_ptr, int pageNumber, double x, double y,
+                                     bool replace, int excerptId)
 {
-
     MainScore score(score_ptr, excerptId);
     const auto& pages = score->pages();
 
@@ -3135,7 +3146,9 @@ bool _selectMeasureAtPoint(uintptr_t score_ptr, int pageNumber, double x, double
         return false;
     }
 
-    score->deselectAll();
+    if (replace) {
+        score->deselectAll();
+    }
 
     if (!selectMeasureRange(score, measure, staffIdx)) {
         return false;
@@ -3144,10 +3157,18 @@ bool _selectMeasureAtPoint(uintptr_t score_ptr, int pageNumber, double x, double
     score->updateSelection();
     score->setSelectionChanged(true);
 
-    // Debug: check what was selected
-    const auto& sel = score->selection();
-
     return true;
+}
+
+bool _selectMeasureAtPoint(uintptr_t score_ptr, int pageNumber, double x, double y, int excerptId)
+{
+    return selectMeasureAtPointImpl(score_ptr, pageNumber, x, y, /*replace*/ true, excerptId);
+}
+
+// Shift+Click: widen the current range to take in this bar instead of replacing it.
+bool _extendMeasureSelectionAtPoint(uintptr_t score_ptr, int pageNumber, double x, double y, int excerptId)
+{
+    return selectMeasureAtPointImpl(score_ptr, pageNumber, x, y, /*replace*/ false, excerptId);
 }
 
 bool _clearSelection(uintptr_t score_ptr, int excerptId)
@@ -7389,6 +7410,11 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool selectMeasureAtPoint(uintptr_t score_ptr, int pageNumber, double x, double y, int excerptId = -1) {
         return _selectMeasureAtPoint(score_ptr, pageNumber, x, y, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool extendMeasureSelectionAtPoint(uintptr_t score_ptr, int pageNumber, double x, double y, int excerptId = -1) {
+        return _extendMeasureSelectionAtPoint(score_ptr, pageNumber, x, y, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

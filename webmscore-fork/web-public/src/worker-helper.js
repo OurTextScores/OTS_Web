@@ -635,6 +635,14 @@ class WebMscoreW {
      * @param {number} y
      * @returns {Promise<boolean>}
      */
+    /**
+     * Extend the current range selection to include the bar at a point (Shift+Click)
+     * @returns {Promise<boolean>}
+     */
+    extendMeasureSelectionAtPoint(pageNumber, x, y) {
+        return this.rpc('extendMeasureSelectionAtPoint', [pageNumber, x, y])
+    }
+
     selectMeasureAtPoint(pageNumber, x, y) {
         return this.rpc('selectMeasureAtPoint', [pageNumber, x, y])
     }

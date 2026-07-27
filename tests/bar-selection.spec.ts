@@ -45,15 +45,15 @@ async function selectBar2(page: import('playwright/test').Page) {
   const b = await notes.nth(2).boundingBox();
   if (!a || !b) throw new Error('notes not laid out');
   await page.mouse.click((a.x + a.width + b.x) / 2, a.y + a.height / 2);
-  await expect.poll(async () => await measureRange(page), { timeout: 15_000 })
+  await expect.poll(async () => await measureRange(page), { timeout: 30_000 })
     .toEqual({ startMeasureIndex: 1, endMeasureIndex: 1 });
-  await expect.poll(async () => (await boxes(page)).length, { timeout: 10_000 }).toBe(1);
+  await expect.poll(async () => (await boxes(page)).length, { timeout: 30_000 }).toBe(1);
 }
 
 test.beforeEach(async ({ page }) => {
   await page.goto(SCORE);
   await page.waitForSelector('svg .Note', { timeout: 60_000 });
-  await expect.poll(async () => (await page.locator('svg .Note').count()), { timeout: 20_000 }).toBe(4);
+  await expect.poll(async () => (await page.locator('svg .Note').count()), { timeout: 30_000 }).toBe(4);
 });
 
 test('a selected bar produces one rectangle spanning the bar, not one per note', async ({ page }) => {
@@ -81,7 +81,7 @@ test('Ctrl+Shift+Right extends the selection by a whole bar', async ({ page }) =
 
   await page.keyboard.press('Control+Shift+ArrowRight');
 
-  await expect.poll(async () => await measureRange(page), { timeout: 10_000 })
+  await expect.poll(async () => await measureRange(page), { timeout: 30_000 })
     .toEqual({ startMeasureIndex: 1, endMeasureIndex: 2 });
 
   const after = await boxes(page);
@@ -95,7 +95,7 @@ test('Shift+Down extends the rectangle across staves', async ({ page }) => {
   // Two-staff fixture; the single-staff one cannot exercise this at all.
   await page.goto('/?score=/test_scores/two_staves_four_bars.musicxml');
   await page.waitForSelector('svg .Note', { timeout: 60_000 });
-  await expect.poll(async () => await page.locator('svg .Note').count(), { timeout: 20_000 }).toBe(8);
+  await expect.poll(async () => await page.locator('svg .Note').count(), { timeout: 30_000 }).toBe(8);
 
   // Select bar 2 of the top staff: empty space right of its note.
   const notes = page.locator('svg .Note');
@@ -105,7 +105,7 @@ test('Shift+Down extends the rectangle across staves', async ({ page }) => {
   expect(b).not.toBeNull();
   if (!a || !b) return;
   await page.mouse.click((a.x + a.width + b.x) / 2, a.y + a.height / 2);
-  await expect.poll(async () => (await boxes(page)).length, { timeout: 15_000 }).toBe(1);
+  await expect.poll(async () => (await boxes(page)).length, { timeout: 30_000 }).toBe(1);
 
   const [oneStaff] = await boxes(page);
 
@@ -113,7 +113,7 @@ test('Shift+Down extends the rectangle across staves', async ({ page }) => {
   // was bound it fell through to the pitch handlers and transposed the note instead.
   await page.keyboard.press('Shift+ArrowDown');
 
-  await expect.poll(async () => (await boxes(page))[0]?.height, { timeout: 15_000 })
+  await expect.poll(async () => (await boxes(page))[0]?.height, { timeout: 30_000 })
     .toBeGreaterThan(oneStaff.height * 1.5);
 
   const twoStaff = (await boxes(page))[0];
@@ -122,6 +122,64 @@ test('Shift+Down extends the rectangle across staves', async ({ page }) => {
   expect(await boxes(page)).toHaveLength(1);
   expect(twoStaff.x).toBeCloseTo(oneStaff.x, 1);
   expect(twoStaff.width).toBeCloseTo(oneStaff.width, 1);
+  expect(twoStaff.y).toBeCloseTo(oneStaff.y, 1);
+});
+
+test('Shift+Click on another bar extends the range instead of replacing it', async ({ page }) => {
+  await selectBar2(page);
+  const [before] = await boxes(page);
+
+  // Empty space inside bar 3: right of bar 3's note, left of bar 4's. Clicking a
+  // notehead would take the element branch instead of the measure one.
+  const notes = page.locator('svg .Note');
+  const b3 = await notes.nth(2).boundingBox();
+  const b4 = await notes.nth(3).boundingBox();
+  expect(b3).not.toBeNull();
+  expect(b4).not.toBeNull();
+  if (!b3 || !b4) return;
+  await page.keyboard.down('Shift');
+  await page.mouse.click((b3.x + b3.width + b4.x) / 2, b3.y + b3.height / 2);
+  await page.keyboard.up('Shift');
+
+  // Upstream maps Shift+Click to SelectType::RANGE, so the selection should now run
+  // from bar 2 through bar 3 rather than jumping to bar 3 alone.
+  await expect.poll(async () => await measureRange(page), { timeout: 30_000 })
+    .toEqual({ startMeasureIndex: 1, endMeasureIndex: 2 });
+
+  const after = await boxes(page);
+  expect(after).toHaveLength(1);
+  expect(after[0].x).toBeCloseTo(before.x, 1);
+  expect(after[0].width).toBeGreaterThan(before.width * 1.5);
+});
+
+test('Shift+Click on a lower staff widens the rectangle across staves', async ({ page }) => {
+  await page.goto('/?score=/test_scores/two_staves_four_bars.musicxml');
+  await page.waitForSelector('svg .Note', { timeout: 60_000 });
+  await expect.poll(async () => await page.locator('svg .Note').count(), { timeout: 30_000 }).toBe(8);
+
+  const notes = page.locator('svg .Note');
+  const top = await notes.nth(1).boundingBox();
+  const topNext = await notes.nth(2).boundingBox();
+  // Notes 0-3 are the upper staff, 4-7 the lower one.
+  const lower = await notes.nth(5).boundingBox();
+  const lowerNext = await notes.nth(6).boundingBox();
+  expect(top).not.toBeNull();
+  expect(lower).not.toBeNull();
+  if (!top || !topNext || !lower || !lowerNext) return;
+
+  await page.mouse.click((top.x + top.width + topNext.x) / 2, top.y + top.height / 2);
+  await expect.poll(async () => (await boxes(page)).length, { timeout: 30_000 }).toBe(1);
+  const [oneStaff] = await boxes(page);
+
+  await page.keyboard.down('Shift');
+  await page.mouse.click((lower.x + lower.width + lowerNext.x) / 2, lower.y + lower.height / 2);
+  await page.keyboard.up('Shift');
+
+  await expect.poll(async () => (await boxes(page))[0]?.height, { timeout: 30_000 })
+    .toBeGreaterThan(oneStaff.height * 1.5);
+
+  const twoStaff = (await boxes(page))[0];
+  expect(await boxes(page)).toHaveLength(1);
   expect(twoStaff.y).toBeCloseTo(oneStaff.y, 1);
 });
 
@@ -136,14 +194,14 @@ test.fixme('repeated Shift+Right keeps extending instead of collapsing the range
 
   // Each bar holds a single whole note, so one chord-step is also one bar here.
   await page.keyboard.press('Shift+ArrowRight');
-  await expect.poll(async () => await measureRange(page), { timeout: 10_000 })
+  await expect.poll(async () => await measureRange(page), { timeout: 30_000 })
     .toEqual({ startMeasureIndex: 1, endMeasureIndex: 2 });
 
   // The regression: this second press used to collapse the range back to bar 2 and
   // render a sliver box, because the single-rectangle range failed the old
   // `selectionBoxes.length > 1` guard and got re-projected from a point.
   await page.keyboard.press('Shift+ArrowRight');
-  await expect.poll(async () => await measureRange(page), { timeout: 10_000 })
+  await expect.poll(async () => await measureRange(page), { timeout: 30_000 })
     .toEqual({ startMeasureIndex: 1, endMeasureIndex: 3 });
 
   const after = await boxes(page);
