@@ -153,6 +153,8 @@ export interface Score {
     isSelectionRange?: () => Promise<unknown> | unknown;
     extendSelectionNextMeasure?: () => Promise<unknown> | unknown;
     extendSelectionPrevMeasure?: () => Promise<unknown> | unknown;
+    extendSelectionStaffAbove?: () => Promise<unknown> | unknown;
+    extendSelectionStaffBelow?: () => Promise<unknown> | unknown;
     getSelectionBoundingBox?: () => Promise<{page: number, x: number, y: number, width: number, height: number} | null> | {page: number, x: number, y: number, width: number, height: number} | null;
     getSelectionBoundingBoxes?: () => Promise<Array<{page: number, x: number, y: number, width: number, height: number}>> | Array<{page: number, x: number, y: number, width: number, height: number}>;
     clearSelection?: () => Promise<unknown> | unknown;

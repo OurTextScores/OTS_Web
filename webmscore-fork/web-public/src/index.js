@@ -1122,6 +1122,22 @@ class WebMscore {
     }
 
     /**
+     * Extend selection to the staff above (for Shift+Up arrow)
+     * @returns {Promise<boolean>}
+     */
+    async extendSelectionStaffAbove() {
+        return Module.ccall('extendSelectionStaffAbove', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Extend selection to the staff below (for Shift+Down arrow)
+     * @returns {Promise<boolean>}
+     */
+    async extendSelectionStaffBelow() {
+        return Module.ccall('extendSelectionStaffBelow', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
      * Get the bounding box of the current selection
      * @returns {Promise<{page: number, x: number, y: number, width: number, height: number} | null>}
      */

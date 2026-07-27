@@ -504,6 +504,8 @@ type MutationMethods = Pick<
     | 'isSelectionRange'
     | 'extendSelectionNextMeasure'
     | 'extendSelectionPrevMeasure'
+    | 'extendSelectionStaffAbove'
+    | 'extendSelectionStaffBelow'
     | 'beginElementDrag'
     | 'updateElementDrag'
     | 'endElementDrag'
@@ -11059,7 +11061,8 @@ ${partsBodyXml}
      */
     const extendSelectionBy = async (
         method: 'extendSelectionNextChord' | 'extendSelectionPrevChord'
-            | 'extendSelectionNextMeasure' | 'extendSelectionPrevMeasure',
+            | 'extendSelectionNextMeasure' | 'extendSelectionPrevMeasure'
+            | 'extendSelectionStaffAbove' | 'extendSelectionStaffBelow',
         anchor: 'first' | 'last',
     ) => {
         if (!score) return;
@@ -11101,6 +11104,11 @@ ${partsBodyXml}
     // Ctrl+Shift+Arrow, matching desktop MuseScore's select-next/prev-measure.
     const handleExtendSelectionNextMeasure = () => extendSelectionBy('extendSelectionNextMeasure', 'last');
     const handleExtendSelectionPrevMeasure = () => extendSelectionBy('extendSelectionPrevMeasure', 'first');
+    // Shift+Up/Down, matching desktop MuseScore's select-staff-above/below. This is
+    // what widens a range across staves; without it a selection can never span more
+    // than the staff it started on.
+    const handleExtendSelectionStaffAbove = () => extendSelectionBy('extendSelectionStaffAbove', 'first');
+    const handleExtendSelectionStaffBelow = () => extendSelectionBy('extendSelectionStaffBelow', 'last');
     const handleSetAccidental = (accidentalType: number) => {
         return performMutation(`set accidental ${accidentalType}`, async () => {
             await ensureSelectionInWasm();
@@ -12064,6 +12072,15 @@ ${partsBodyXml}
                 event.preventDefault();
                 if (isMod) {
                     handleTranspose(key === 'arrowup' ? 12 : -12);
+                } else if (event.shiftKey) {
+                    // Desktop MuseScore: Shift+Up/Down extends the range to the staff
+                    // above/below. This must be checked before the pitch handlers --
+                    // Shift previously fell through to them and transposed instead.
+                    if (key === 'arrowup') {
+                        handleExtendSelectionStaffAbove();
+                    } else {
+                        handleExtendSelectionStaffBelow();
+                    }
                 } else if (key === 'arrowup') {
                     handlePitchUp();
                 } else {
@@ -12148,6 +12165,8 @@ ${partsBodyXml}
         handleExtendSelectionPrevChord,
         handleExtendSelectionNextMeasure,
         handleExtendSelectionPrevMeasure,
+        handleExtendSelectionStaffAbove,
+        handleExtendSelectionStaffBelow,
         handleDeleteSelection,
         handleCopySelection,
         handlePasteSelection,

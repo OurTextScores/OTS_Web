@@ -725,6 +725,22 @@ class WebMscoreW {
     }
 
     /**
+     * Extend selection to the staff above (for Shift+Up arrow)
+     * @returns {Promise<boolean>}
+     */
+    extendSelectionStaffAbove() {
+        return this.rpc('extendSelectionStaffAbove')
+    }
+
+    /**
+     * Extend selection to the staff below (for Shift+Down arrow)
+     * @returns {Promise<boolean>}
+     */
+    extendSelectionStaffBelow() {
+        return this.rpc('extendSelectionStaffBelow')
+    }
+
+    /**
      * Get the bounding box of the current selection
      * @returns {Promise<{page: number, x: number, y: number, width: number, height: number} | null>}
      */

@@ -3430,6 +3430,34 @@ bool _extendSelectionPrevMeasure(uintptr_t score_ptr, int excerptId)
     return false;
 }
 
+// Staff-wise range extension, so a selection can span more than one staff.
+// Desktop MuseScore binds these to Shift+Up/Shift+Down ("select-staff-above" /
+// "select-staff-below"). Score::selectMove implements both via upStaff/downStaff and
+// extends with SelectType::RANGE, which is what widens the selection's staff range.
+bool _extendSelectionStaffAbove(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    auto* el = score->selectMove(u"select-staff-above");
+    if (el) {
+        score->updateSelection();
+        score->setSelectionChanged(true);
+        return true;
+    }
+    return false;
+}
+
+bool _extendSelectionStaffBelow(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    auto* el = score->selectMove(u"select-staff-below");
+    if (el) {
+        score->updateSelection();
+        score->setSelectionChanged(true);
+        return true;
+    }
+    return false;
+}
+
 //---------------------------------------------------------
 //   Element drag gesture (begin/update/end)
 //   Mirrors NotationInteraction::startDrag/drag/endDrag from desktop
@@ -7436,6 +7464,16 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool extendSelectionPrevMeasure(uintptr_t score_ptr, int excerptId = -1) {
         return _extendSelectionPrevMeasure(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool extendSelectionStaffAbove(uintptr_t score_ptr, int excerptId = -1) {
+        return _extendSelectionStaffAbove(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool extendSelectionStaffBelow(uintptr_t score_ptr, int excerptId = -1) {
+        return _extendSelectionStaffBelow(score_ptr, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE
