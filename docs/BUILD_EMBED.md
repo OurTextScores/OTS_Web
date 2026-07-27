@@ -137,8 +137,11 @@ webmscore.lib.wasm
 webmscore.lib.mem.wasm
 webmscore.lib.data
 webmscore.lib.symbols
-webmscore.webpack.mjs
 ```
+
+(`webmscore.webpack.mjs` is not one of these -- it's the fork's JS bridge, imported from
+`webmscore-fork/web-public/webmscore.webpack.mjs` and bundled into `_next/` by webpack. It
+was never part of `public/`'s served-as-is static artifacts and does not need copying.)
 
 Do not vendor `out/soundfonts/`. Keep soundfonts on a CDN or another external static host; large soundfont files can exceed GitHub file-size limits and make the host repository difficult to push.
 
