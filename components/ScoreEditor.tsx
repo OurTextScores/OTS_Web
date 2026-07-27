@@ -612,6 +612,7 @@ type MutationMethods = Pick<
     | 'multiMeasureRestsEnabled'
     | 'insertMeasures'
     | 'addPickupMeasure'
+    | 'removeSelectedMeasures'
     | 'removeTrailingEmptyMeasures'
 >;
 
@@ -10954,6 +10955,15 @@ ${partsBodyXml}
         if (!fn) return false;
         return fn(numerator, denominator);
     });
+    // Deletes the measures the current selection sits in. ensureSelectionInWasm is
+    // required because the engine resolves the measure range from its own selection
+    // state, which a UI-side selection has not necessarily reached yet.
+    const handleRemoveContainingMeasures = () => performMutation('remove containing measures', async () => {
+        await ensureSelectionInWasm();
+        const fn = requireMutation('removeSelectedMeasures');
+        if (!fn) return false;
+        return fn();
+    }, { clearSelection: true, skipWasmReselect: true });
     const handleRemoveTrailingEmptyMeasures = () => performMutation('remove trailing empty measures', async () => {
         const fn = requireMutation('removeTrailingEmptyMeasures');
         if (!fn) return false;
@@ -14957,6 +14967,7 @@ ${partsBodyXml}
                 onSetMultiMeasureRests={handleSetMultiMeasureRests}
                 onInsertMeasures={handleInsertMeasures}
                 onAddPickup={handleAddPickup}
+                onRemoveContainingMeasures={handleRemoveContainingMeasures}
                 onRemoveTrailingEmptyMeasures={handleRemoveTrailingEmptyMeasures}
                 insertMeasuresDisabled={!score?.insertMeasures}
                 parts={scoreParts}
