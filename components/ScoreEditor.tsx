@@ -2,7 +2,7 @@
 
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { PanelRightOpen, PanelRightClose, Play, Pause, Square } from 'lucide-react';
 import {
     loadWebMscore,
     loadWebMscoreInProcess,
@@ -1302,6 +1302,18 @@ export default function ScoreEditor() {
     const soundFontLoadedRef = useRef(soundFontLoaded);
     const triedSoundFontRef = useRef(triedSoundFont);
     const soundFontLoadPromiseRef = useRef<Promise<boolean> | null>(null);
+    // Soundfont-applied state for Score instances other than the main `score` (e.g.
+    // compare-panel checkpoints/proposals loaded into their own WebMscore instance).
+    // Keyed by score identity, distinct from the refs above, which are the main
+    // score's applied/tried/in-flight state -- a single shared boolean would wrongly
+    // report "already loaded" for an instance that never actually got setSoundFont.
+    // Values are the soundfont *version* applied/attempted, so bumping
+    // soundFontVersionRef (e.g. on a user upload) invalidates every previously
+    // recorded application without needing to iterate/clear a WeakMap.
+    const soundFontVersionRef = useRef(0);
+    const soundFontAppliedScoresRef = useRef<WeakMap<Score, number>>(new WeakMap());
+    const soundFontFailedScoresRef = useRef<WeakMap<Score, number>>(new WeakMap());
+    const soundFontLoadPromisesByScoreRef = useRef<WeakMap<Score, Promise<boolean>>>(new WeakMap());
     const soundFontPrefetchPromiseRef = useRef<Promise<{ url: string; buf: Uint8Array } | null> | null>(null);
     const soundFontPrefetchResultRef = useRef<{ url: string; buf: Uint8Array } | null>(null);
     const [scoreTitle, setScoreTitle] = useState('');
@@ -1605,6 +1617,25 @@ export default function ScoreEditor() {
     const previewAudioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
     const previewStreamIteratorRef = useRef<((cancel?: boolean) => Promise<any>) | null>(null);
     const previewPlaybackGenerationRef = useRef(0);
+    // Independent transport for each AI-review/change-review compare panel. These are
+    // deliberately separate from the main transport above (and from each other): the
+    // panel's Score instance is whichever of `score` / `compareRightScore` is currently
+    // displayed on that visual side, and either side can be the live document or a
+    // read-only checkpoint depending on `compareSwapped`. Starting one side stops the
+    // other (and the main transport) so only one voice ever plays -- see
+    // `playCompareSideAudio`.
+    const [compareLeftIsPlaying, setCompareLeftIsPlaying] = useState(false);
+    const [compareLeftIsPaused, setCompareLeftIsPaused] = useState(false);
+    const [compareLeftAudioBusy, setCompareLeftAudioBusy] = useState(false);
+    const compareLeftAudioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
+    const compareLeftStreamIteratorRef = useRef<((cancel?: boolean) => Promise<any>) | null>(null);
+    const compareLeftPlaybackGenerationRef = useRef(0);
+    const [compareRightIsPlaying, setCompareRightIsPlaying] = useState(false);
+    const [compareRightIsPaused, setCompareRightIsPaused] = useState(false);
+    const [compareRightAudioBusy, setCompareRightAudioBusy] = useState(false);
+    const compareRightAudioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
+    const compareRightStreamIteratorRef = useRef<((cancel?: boolean) => Promise<any>) | null>(null);
+    const compareRightPlaybackGenerationRef = useRef(0);
     const clipboardRef = useRef<{ mimeType: string; data: Uint8Array } | null>(null);
     const currentPageRef = useRef(currentPage);
     const selectedPointRef = useRef<{ page: number, x: number, y: number } | null>(selectedPoint);
@@ -7312,41 +7343,80 @@ ${partsBodyXml}
         targetScore?: Score,
         options?: { forceRetry?: boolean },
     ): Promise<boolean> => {
-        if (soundFontLoadedRef.current) {
-            console.debug('[AUDIO] soundfont already loaded');
-            return true;
-        }
-        const activeScore = targetScore ?? score;
+        // scoreRef.current is updated synchronously the moment a newly loaded score
+        // becomes "the" main score (see handleUrlLoad/handleFileUpload); the `score`
+        // state closure can still be one render behind inside a deferred/background
+        // warmup callback queued from within that same load. Comparing against the
+        // ref (falling back to state before any score has ever loaded) avoids
+        // misclassifying a freshly loaded main score as an auxiliary one.
+        const currentMainScore = scoreRef.current ?? score;
+        const activeScore = targetScore ?? currentMainScore;
         if (!activeScore || !activeScore.setSoundFont) {
             console.warn('[AUDIO] soundfont load skipped: setSoundFont unavailable');
             return false;
         }
+        // The main score's applied/tried/in-flight state lives in the refs above (and
+        // is mirrored into UI state for the soundfont-status indicator). Any other
+        // Score instance -- e.g. a compare-panel checkpoint/proposal loaded into its
+        // own WebMscore instance -- is tracked separately by identity, versioned so a
+        // later soundfont upload (which replaces the shared prefetched bytes)
+        // invalidates every previously recorded application/failure.
+        const isMainScore = activeScore === currentMainScore;
+        const soundFontVersion = soundFontVersionRef.current;
+        const alreadyApplied = isMainScore
+            ? soundFontLoadedRef.current
+            : soundFontAppliedScoresRef.current.get(activeScore) === soundFontVersion;
+        if (alreadyApplied) {
+            console.debug('[AUDIO] soundfont already loaded');
+            return true;
+        }
         const forceRetry = Boolean(options?.forceRetry);
-        if (triedSoundFontRef.current && !forceRetry) {
+        const previouslyFailed = isMainScore
+            ? triedSoundFontRef.current
+            : soundFontFailedScoresRef.current.get(activeScore) === soundFontVersion;
+        if (previouslyFailed && !forceRetry) {
             console.warn('[AUDIO] soundfont load skipped: previous attempt already failed');
             return false;
         }
-        if (soundFontLoadPromiseRef.current) {
-            return soundFontLoadPromiseRef.current;
+        const existingPromise = isMainScore
+            ? soundFontLoadPromiseRef.current
+            : soundFontLoadPromisesByScoreRef.current.get(activeScore);
+        if (existingPromise) {
+            return existingPromise;
         }
-        if (forceRetry && triedSoundFontRef.current) {
+        if (forceRetry && previouslyFailed) {
             console.debug('[AUDIO] retrying soundfont load after previous failure');
         }
 
         const loadPromise = (async () => {
-            triedSoundFontRef.current = true;
-            setTriedSoundFont(true);
+            if (isMainScore) {
+                triedSoundFontRef.current = true;
+                setTriedSoundFont(true);
+            } else {
+                soundFontFailedScoresRef.current.set(activeScore, soundFontVersion);
+            }
             const prefetched = await prefetchSoundFontBytes();
             if (!prefetched) {
                 return false;
             }
             try {
+                // setSoundFont transfers the buffer to the score's worker (detaching
+                // it), so the cached bytes -- shared across every Score instance that
+                // calls ensureSoundFontLoaded -- must be copied per call. Without the
+                // slice, whichever instance applies the soundfont first detaches the
+                // shared ArrayBuffer and every other instance's call fails with
+                // "ArrayBuffer ... is already detached".
                 await runSerializedScoreOperation(
-                    () => activeScore.setSoundFont(prefetched.buf),
+                    () => activeScore.setSoundFont(prefetched.buf.slice()),
                     'setSoundFont',
                 );
-                soundFontLoadedRef.current = true;
-                setSoundFontLoaded(true);
+                if (isMainScore) {
+                    soundFontLoadedRef.current = true;
+                    setSoundFontLoaded(true);
+                } else {
+                    soundFontAppliedScoresRef.current.set(activeScore, soundFontVersion);
+                    soundFontFailedScoresRef.current.delete(activeScore);
+                }
                 console.debug('[AUDIO] soundfont loaded', { url: prefetched.url, bytes: prefetched.buf.byteLength });
                 return true;
             } catch (err) {
@@ -7355,12 +7425,20 @@ ${partsBodyXml}
             }
         })();
 
-        soundFontLoadPromiseRef.current = loadPromise;
+        if (isMainScore) {
+            soundFontLoadPromiseRef.current = loadPromise;
+        } else {
+            soundFontLoadPromisesByScoreRef.current.set(activeScore, loadPromise);
+        }
         try {
             return await loadPromise;
         } finally {
-            if (soundFontLoadPromiseRef.current === loadPromise) {
-                soundFontLoadPromiseRef.current = null;
+            if (isMainScore) {
+                if (soundFontLoadPromiseRef.current === loadPromise) {
+                    soundFontLoadPromiseRef.current = null;
+                }
+            } else if (soundFontLoadPromisesByScoreRef.current.get(activeScore) === loadPromise) {
+                soundFontLoadPromisesByScoreRef.current.delete(activeScore);
             }
         }
     };
@@ -7373,8 +7451,21 @@ ${partsBodyXml}
         try {
             const buffer = await file.arrayBuffer();
             const data = new Uint8Array(buffer);
+            // Cache the pristine bytes so any other Score instance (e.g. a
+            // compare-panel checkpoint/proposal) picks up this same soundfont via
+            // ensureSoundFontLoaded instead of silently falling back to the
+            // default/CDN one -- otherwise the two panels would compare under
+            // different timbres, or checkpoint playback would fail outright when no
+            // default is configured. setSoundFont transfers (detaches) whatever
+            // buffer it's given, so the main score gets its own copy and the cached
+            // bytes stay intact for later reuse. Bumping the version invalidates
+            // every previously recorded per-score application/failure so the next
+            // attempt on any auxiliary score re-applies this upload.
+            soundFontPrefetchResultRef.current = { url: `uploaded:${file.name}`, buf: data };
+            soundFontPrefetchPromiseRef.current = null;
+            soundFontVersionRef.current += 1;
             await runSerializedScoreOperation(
-                () => score.setSoundFont(data),
+                () => score.setSoundFont(data.slice()),
                 'setSoundFont(upload)',
             );
             soundFontLoadedRef.current = true;
@@ -8041,6 +8132,8 @@ ${partsBodyXml}
 
     useEffect(() => {
         if (!compareView) {
+            void stopCompareSideAudio('left');
+            void stopCompareSideAudio('right');
             if (compareRightScoreRef.current) {
                 compareRightScoreRef.current.destroy();
                 compareRightScoreRef.current = null;
@@ -8082,6 +8175,10 @@ ${partsBodyXml}
 
         let canceled = false;
         const loadCompareScore = async () => {
+            // The checkpoint side is being replaced -- stop whichever visual side is
+            // currently playing it before the underlying Score instance is destroyed.
+            await stopCompareSideAudio('left');
+            await stopCompareSideAudio('right');
             setCompareRightLoading(true);
             setCompareRightError(null);
             if (compareRightScoreRef.current) {
@@ -8135,12 +8232,38 @@ ${partsBodyXml}
 
     useEffect(() => {
         return () => {
+            void stopCompareSideAudio('left');
+            void stopCompareSideAudio('right');
             if (compareRightScoreRef.current) {
                 compareRightScoreRef.current.destroy();
                 compareRightScoreRef.current = null;
             }
         };
     }, []);
+
+    // compareLeftScore/compareRightScoreDisplay resolve to whichever of `score` /
+    // compareRightScore is currently shown on that visual side, and that mapping can
+    // change without the modal closing -- e.g. an Apply/Overwrite action replaces the
+    // live `score` instance while the compare view stays open, or compareSwapped
+    // flips which raw Score each side shows. A side's transport streams from a
+    // specific Score instance via its own iterator/refs (see getCompareSideRefs), so
+    // if the identity changes out from under it, that stream would keep pulling from
+    // a stale (possibly destroyed) instance instead of the one now displayed. Stop
+    // playback on a side whenever its displayed Score instance changes.
+    const prevCompareLeftScoreRef = useRef<Score | null>(null);
+    useEffect(() => {
+        if (prevCompareLeftScoreRef.current && prevCompareLeftScoreRef.current !== compareLeftScore) {
+            void stopCompareSideAudio('left');
+        }
+        prevCompareLeftScoreRef.current = compareLeftScore;
+    }, [compareLeftScore]);
+    const prevCompareRightScoreRef = useRef<Score | null>(null);
+    useEffect(() => {
+        if (prevCompareRightScoreRef.current && prevCompareRightScoreRef.current !== compareRightScoreDisplay) {
+            void stopCompareSideAudio('right');
+        }
+        prevCompareRightScoreRef.current = compareRightScoreDisplay;
+    }, [compareRightScoreDisplay]);
 
     useEffect(() => {
         if (!compareView || !compareLeftScore) {
@@ -12714,8 +12837,12 @@ ${partsBodyXml}
             minStartupBatches?: number;
             /** Bounds render-ahead. null disables throttling for short one-shot clips. */
             renderWindow?: RenderWindow | null;
+            /** Overrides which isPlaying/isPaused state trackTransportState updates. Defaults to the main transport's. */
+            stateSetters?: { setIsPlaying: (value: boolean) => void; setIsPaused: (value: boolean) => void };
         },
     ) => {
+        const setPlaying = options.stateSetters?.setIsPlaying ?? setIsPlaying;
+        const setPaused = options.stateSetters?.setIsPaused ?? setIsPaused;
         const audioCtx = await ensureAudioContextReady();
         const generation = ++options.generationRef.current;
         options.iteratorRef.current = batchFn;
@@ -12762,7 +12889,7 @@ ${partsBodyXml}
             lastSource = source;
             startedAny = true;
             if (options.trackTransportState) {
-                setIsPlaying(true);
+                setPlaying(true);
             }
         };
 
@@ -12940,8 +13067,8 @@ ${partsBodyXml}
         if (!startedAny || options.generationRef.current !== generation) {
             stopSynthStream(options.sourcesRef, options.iteratorRef);
             if (options.trackTransportState) {
-                setIsPlaying(false);
-                setIsPaused(false);
+                setPlaying(false);
+                setPaused(false);
             }
             return;
         }
@@ -12958,8 +13085,8 @@ ${partsBodyXml}
                 options.sourcesRef.current = [];
                 options.iteratorRef.current = null;
                 if (options.trackTransportState) {
-                    setIsPlaying(false);
-                    setIsPaused(false);
+                    setPlaying(false);
+                    setPaused(false);
                 }
             };
         }
@@ -13070,6 +13197,137 @@ ${partsBodyXml}
         } finally {
             setAudioBusy(false);
         }
+    };
+
+    const getCompareSideRefs = (side: 'left' | 'right') => (side === 'left' ? {
+        score: compareLeftScore,
+        isPlaying: compareLeftIsPlaying,
+        isPaused: compareLeftIsPaused,
+        setIsPlaying: setCompareLeftIsPlaying,
+        setIsPaused: setCompareLeftIsPaused,
+        setAudioBusy: setCompareLeftAudioBusy,
+        sourcesRef: compareLeftAudioSourcesRef,
+        iteratorRef: compareLeftStreamIteratorRef,
+        generationRef: compareLeftPlaybackGenerationRef,
+    } : {
+        score: compareRightScoreDisplay,
+        isPlaying: compareRightIsPlaying,
+        isPaused: compareRightIsPaused,
+        setIsPlaying: setCompareRightIsPlaying,
+        setIsPaused: setCompareRightIsPaused,
+        setAudioBusy: setCompareRightAudioBusy,
+        sourcesRef: compareRightAudioSourcesRef,
+        iteratorRef: compareRightStreamIteratorRef,
+        generationRef: compareRightPlaybackGenerationRef,
+    });
+
+    const stopCompareSideAudio = async (side: 'left' | 'right', options?: { awaitCancel?: boolean }) => {
+        const refs = getCompareSideRefs(side);
+        refs.generationRef.current += 1;
+        await stopSynthStream(refs.sourcesRef, refs.iteratorRef, options);
+        refs.setIsPlaying(false);
+        refs.setIsPaused(false);
+    };
+
+    /**
+     * Only one of {main transport, compare-left, compare-right} should ever be
+     * audible at once -- otherwise playing a panel while the main score (or the
+     * other panel) is already sounding would overlay two performances. Called
+     * before starting playback on any one of them.
+     */
+    const stopOtherTransports = async (except: 'main' | 'left' | 'right') => {
+        if (except !== 'main') {
+            await stopAudio({ awaitCancel: true });
+        }
+        if (except !== 'left') {
+            await stopCompareSideAudio('left', { awaitCancel: true });
+        }
+        if (except !== 'right') {
+            await stopCompareSideAudio('right', { awaitCancel: true });
+        }
+    };
+
+    const pauseCompareSideAudio = async (side: 'left' | 'right') => {
+        const audioCtx = audioCtxRef.current;
+        if (audioCtx && audioCtx.state === 'running') {
+            await audioCtx.suspend();
+        }
+        getCompareSideRefs(side).setIsPaused(true);
+    };
+
+    const resumeCompareSideAudio = async (side: 'left' | 'right') => {
+        const audioCtx = audioCtxRef.current;
+        if (audioCtx && audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+        }
+        getCompareSideRefs(side).setIsPaused(false);
+    };
+
+    const playCompareSideAudio = async (side: 'left' | 'right') => {
+        const refs = getCompareSideRefs(side);
+        const targetScore = refs.score;
+        if (!targetScore || typeof (targetScore as any).synthAudioBatch !== 'function') {
+            alert('Audio playback is not available for this score.');
+            return;
+        }
+        // Claim this attempt before the async setup below (soundfont load, fetching
+        // the batch iterator) so a stop/close/side-switch that happens while we're
+        // still awaiting is detected before any audio starts. Without this,
+        // stopCompareSideAudio's generation bump has nothing to invalidate yet --
+        // playSynthBatchStream only increments the counter once *it* starts, which
+        // would silently adopt it as the new "current" generation and start playing
+        // audio for a side the user already closed or switched away from.
+        const myGeneration = ++refs.generationRef.current;
+        const stillCurrent = () => refs.generationRef.current === myGeneration;
+        try {
+            refs.setAudioBusy(true);
+            const ok = await ensureSoundFontLoaded(targetScore, { forceRetry: true });
+            if (!stillCurrent()) {
+                return;
+            }
+            if (!ok) {
+                alert('No default soundfont found. Configure NEXT_PUBLIC_SOUNDFONT_CDN_URL or provide /public/soundfonts/default.sf3 (or .sf2).');
+                return;
+            }
+            await stopOtherTransports(side);
+            if (!stillCurrent()) {
+                return;
+            }
+            const batchFn = await (targetScore as any).synthAudioBatch(0, TRANSPORT_SYNTH_BATCH_SIZE) as SynthBatchIterator;
+            if (!stillCurrent()) {
+                return;
+            }
+            await playSynthBatchStream(batchFn, {
+                sourcesRef: refs.sourcesRef,
+                iteratorRef: refs.iteratorRef,
+                generationRef: refs.generationRef,
+                trackTransportState: true,
+                stateSetters: { setIsPlaying: refs.setIsPlaying, setIsPaused: refs.setIsPaused },
+                debugLabel: `compare-${side}`,
+                renderWindow: DEFAULT_RENDER_WINDOW,
+            });
+        } catch (err) {
+            console.error(`Failed to play ${side} compare audio`, err);
+            if (stillCurrent()) {
+                alert('Unable to play audio. See console for details.');
+                await stopCompareSideAudio(side, { awaitCancel: true });
+            }
+        } finally {
+            refs.setAudioBusy(false);
+        }
+    };
+
+    const toggleCompareSidePlayPause = async (side: 'left' | 'right') => {
+        const refs = getCompareSideRefs(side);
+        if (refs.isPlaying && !refs.isPaused) {
+            await pauseCompareSideAudio(side);
+            return;
+        }
+        if (refs.isPaused) {
+            await resumeCompareSideAudio(side);
+            return;
+        }
+        await playCompareSideAudio(side);
     };
 
     const playSelectionPreview = async (
@@ -17566,6 +17824,30 @@ ${partsBodyXml}
                                                         📝 Open in Editor
                                                     </button>
                                                 )}
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        type="button"
+                                                        data-testid="btn-compare-play-left"
+                                                        onClick={() => void toggleCompareSidePlayPause('left')}
+                                                        disabled={!compareLeftScore || (compareLeftAudioBusy && !(compareLeftIsPlaying || compareLeftIsPaused))}
+                                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                                        title={compareLeftIsPlaying && !compareLeftIsPaused ? 'Pause' : compareLeftIsPaused ? 'Resume' : 'Play'}
+                                                    >
+                                                        {compareLeftIsPlaying && !compareLeftIsPaused
+                                                            ? <Pause size={12} />
+                                                            : <Play size={12} />}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        data-testid="btn-compare-stop-left"
+                                                        onClick={() => void stopCompareSideAudio('left', { awaitCancel: true })}
+                                                        disabled={!(compareLeftIsPlaying || compareLeftIsPaused)}
+                                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                                        title="Stop"
+                                                    >
+                                                        <Square size={12} />
+                                                    </button>
+                                                </div>
                                             </div>
                                             {!isEmbedMode && (
                                             <div className="flex items-center gap-2">
@@ -18336,6 +18618,30 @@ ${partsBodyXml}
                                                         📝 Open in Editor
                                                     </button>
                                                 )}
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        type="button"
+                                                        data-testid="btn-compare-play-right"
+                                                        onClick={() => void toggleCompareSidePlayPause('right')}
+                                                        disabled={!compareRightScoreDisplay || (compareRightAudioBusy && !(compareRightIsPlaying || compareRightIsPaused))}
+                                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                                        title={compareRightIsPlaying && !compareRightIsPaused ? 'Pause' : compareRightIsPaused ? 'Resume' : 'Play'}
+                                                    >
+                                                        {compareRightIsPlaying && !compareRightIsPaused
+                                                            ? <Pause size={12} />
+                                                            : <Play size={12} />}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        data-testid="btn-compare-stop-right"
+                                                        onClick={() => void stopCompareSideAudio('right', { awaitCancel: true })}
+                                                        disabled={!(compareRightIsPlaying || compareRightIsPaused)}
+                                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                                        title="Stop"
+                                                    >
+                                                        <Square size={12} />
+                                                    </button>
+                                                </div>
                                             </div>
                                             {!isEmbedMode && (
                                             <div className="flex items-center gap-2">
