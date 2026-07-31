@@ -13228,6 +13228,32 @@ ${partsBodyXml}
         return fn(clip.mimeType, clip.data);
     }, { skipWasmReselect: true });
 
+    const copyCompareSelection = useCallback(async (
+        targetScore: Score,
+        side: 'left' | 'right',
+    ) => {
+        if (!targetScore.selectionMimeType || !targetScore.selectionMimeData) {
+            alert('This build of webmscore does not expose selection copy.');
+            return false;
+        }
+        const copied = await runSerializedScoreOperation(async () => {
+            const mimeType = await Promise.resolve(targetScore.selectionMimeType!());
+            if (!mimeType) {
+                return null;
+            }
+            const data = await Promise.resolve(targetScore.selectionMimeData!());
+            if (!data || data.byteLength === 0) {
+                return null;
+            }
+            return { mimeType, data: data.slice() };
+        }, `compare-copy-selection:${side}`);
+        if (!copied) {
+            return false;
+        }
+        clipboardRef.current = copied;
+        return true;
+    }, [runSerializedScoreOperation]);
+
     const handleCompareKeyboardShortcut = useCallback((event: KeyboardEvent) => {
         if (!compareView || !compareActiveSide || !compareActiveScore || !compareActiveRole) {
             return false;
@@ -13285,6 +13311,43 @@ ${partsBodyXml}
                 event.preventDefault();
                 mutate('select all', 'selectAll', [], true);
                 setCompareHasSelectionByRole((prev) => ({ ...prev, [compareActiveRole]: true }));
+                return true;
+            }
+            if (key === 'c') {
+                event.preventDefault();
+                const sourceScore = compareActiveScore;
+                const sourceSide = compareActiveSide;
+                void queueCompareKeyboardOperation(
+                    () => copyCompareSelection(sourceScore, sourceSide),
+                ).catch((err) => {
+                    console.warn('Compare selection copy failed:', err);
+                });
+                return true;
+            }
+            if (key === 'v') {
+                event.preventDefault();
+                const targetSide = compareActiveSide;
+                void queueCompareKeyboardOperation(async () => {
+                    // Resolve the clipboard after prior queued shortcuts complete so
+                    // a rapid Copy, Paste sequence sees the bytes captured by Copy.
+                    const clip = clipboardRef.current;
+                    if (!clip) {
+                        alert('Nothing copied yet.');
+                        return false;
+                    }
+                    return performCompareMutation('paste selection', (targetScore) => {
+                        if (!targetScore.pasteSelection) {
+                            alert('This build of webmscore does not expose "pasteSelection".');
+                            return false;
+                        }
+                        return targetScore.pasteSelection(clip.mimeType, clip.data);
+                    }, {
+                        side: targetSide,
+                        preserveKeyboardQueue: true,
+                    });
+                }).catch((err) => {
+                    console.warn('Compare selection paste failed:', err);
+                });
                 return true;
             }
         }
@@ -13415,6 +13478,7 @@ ${partsBodyXml}
         compareActiveSide,
         compareHasSelectionByRole,
         compareView,
+        copyCompareSelection,
         performCompareMutation,
         queueCompareKeyboardOperation,
         runSerializedScoreOperation,

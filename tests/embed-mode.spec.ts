@@ -309,6 +309,74 @@ test.describe('Embed Mode - External XML Comparison', () => {
         await expect(page.getByTestId('floating-palettes')).toBeVisible();
     });
 
+    test('copies and pastes selections between both compare scores', async ({ page }) => {
+        await page.goto(`/?compareLeft=${encodeURIComponent('/sample-left.xml')}&compareRight=${encodeURIComponent('/sample-right.xml')}&leftLabel=Left&rightLabel=Right`);
+        await expect(page.getByTestId('compare-pane-left').locator('svg').first()).toBeVisible({ timeout: 30000 });
+        await expect(page.getByTestId('compare-pane-right').locator('svg').first()).toBeVisible({ timeout: 30000 });
+        await expect(page.getByTestId('compare-pane-left').locator('svg .Note').first()).toBeVisible({ timeout: 30000 });
+        await expect(page.getByTestId('compare-pane-right').locator('svg .Note').first()).toBeVisible({ timeout: 30000 });
+        await page.evaluate(() => {
+            window.open = () => null;
+        });
+
+        const openButtons = page.getByRole('button', { name: /Open in Editor/ });
+        const readPaneXml = async (index: number) => {
+            await openButtons.nth(index).click();
+            return page.evaluate(() => JSON.parse(sessionStorage.getItem('openInEditor') || '{}').xml || '');
+        };
+        const selectNote = async (side: 'left' | 'right', noteIndex: number) => {
+            await page.getByTestId(`btn-compare-activate-${side}`).click();
+            const note = page.getByTestId(`compare-pane-${side}`).locator('svg .Note').nth(noteIndex);
+            let noteBox: Awaited<ReturnType<typeof note.boundingBox>> = null;
+            await expect.poll(async () => {
+                noteBox = await note.boundingBox();
+                return noteBox?.width ?? 0;
+            }, { timeout: 30000 }).toBeGreaterThan(0);
+            const renderedNoteBox = noteBox as {
+                x: number;
+                y: number;
+                width: number;
+                height: number;
+            } | null;
+            if (!renderedNoteBox) {
+                throw new Error(`Expected a clickable note in the ${side} compare score.`);
+            }
+            await page.mouse.click(
+                renderedNoteBox.x + renderedNoteBox.width / 2,
+                renderedNoteBox.y + renderedNoteBox.height / 2,
+            );
+            await expect(page.getByTestId(`compare-selection-overlay-${side}`).first()).toBeVisible();
+            const finishAnnotationButton = page.getByRole('button', { name: 'Done' });
+            if (await finishAnnotationButton.isVisible()) {
+                await finishAnnotationButton.click();
+            }
+            return renderedNoteBox;
+        };
+        await selectNote('left', 1);
+        await page.keyboard.press('Control+C');
+        const rightTargetBeforePaste = await selectNote('right', 0);
+        const rightTarget = page.getByTestId('compare-pane-right').locator('svg .Note').first();
+        await page.keyboard.press('Control+V');
+        await expect.poll(async () => (await rightTarget.boundingBox())?.y ?? rightTargetBeforePaste.y, {
+            timeout: 30000,
+        }).not.toBe(rightTargetBeforePaste.y);
+
+        await selectNote('right', 2);
+        await page.keyboard.press('Control+C');
+        const leftTargetBeforePaste = await selectNote('left', 0);
+        const leftTarget = page.getByTestId('compare-pane-left').locator('svg .Note').first();
+        await page.keyboard.press('Control+V');
+        await expect.poll(async () => (await leftTarget.boundingBox())?.y ?? leftTargetBeforePaste.y, {
+            timeout: 30000,
+        }).not.toBe(leftTargetBeforePaste.y);
+
+        const leftXml = await readPaneXml(0);
+        const rightXml = await readPaneXml(1);
+        const pitches = (xml: string) => [...xml.matchAll(/<step>([A-G])<\/step>/g)].map((match) => match[1]);
+        expect(pitches(leftXml).slice(0, 4)).toEqual(['G', 'D', 'E', 'F']);
+        expect(pitches(rightXml).slice(0, 4)).toEqual(['D', 'E', 'G', 'C']);
+    });
+
     test('shows and toggles the engine note-input cursor in both compare panes', async ({ page }) => {
         await page.goto(`/?compareLeft=${encodeURIComponent('/sample-left.xml')}&compareRight=${encodeURIComponent('/sample-right.xml')}&leftLabel=Left&rightLabel=Right`);
         await expect(page.getByTestId('compare-pane-left').locator('svg').first()).toBeVisible({ timeout: 30000 });
