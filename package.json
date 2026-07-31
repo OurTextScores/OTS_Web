@@ -28,6 +28,7 @@
     "test:e2e:music": "playwright test tests/music-api-smoke.spec.ts --workers=1",
     "coverage": "vitest run --coverage",
     "check:wasm": "node scripts/check-wasm-cli.js",
+    "check:bridge": "node scripts/audit-webmscore-bridge.mjs",
     "check:score-editor-globals": "eslint components/ScoreEditor.tsx --quiet --rule '@typescript-eslint/no-explicit-any: off' --rule 'no-undef: error' --global RequestInit --global BlobPart",
     "sync:wasm": "node scripts/sync-wasm-cli.js",
     "generate:data": "node scripts/generate-static-data.js",

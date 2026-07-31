@@ -1,0 +1,29 @@
+{
+  "_comment": "TD-05 reviewed bridge manifest. Changes here need the same review as an API change: an entry added to silence the audit is a bridge regression in disguise. Each allowlist entry states why the asymmetry is intentional and must remain true.",
+  "layers": {
+    "native": "webmscore-fork/web/main.cpp",
+    "mainThread": "webmscore-fork/web-public/src/index.js",
+    "worker": "webmscore-fork/web-public/src/worker-helper.js",
+    "typescript": "lib/webmscore-loader.ts"
+  },
+  "syntheticRpcPrefix": "_",
+  "_syntheticRpcPrefixReason": "The worker proxies the four synthAudio entry points under an underscore-prefixed RPC name because the worker returns an iterator function pointer that the helper wraps, rather than the raw native result. '_synthAudio' therefore resolves against native 'synthAudio'.",
+  "controlPlaneRpcTargets": {
+    "ready": "Worker readiness handshake; not a Score method.",
+    "load": "Module-level score load, called before any Score instance exists.",
+    "setLogLevel": "Module-level logger configuration, not per-score.",
+    "processSynth": "Worker-side pump for a synthAudio iterator; no native export of its own.",
+    "processSynthBatch": "Worker-side pump for a batched synthAudio iterator; no native export of its own."
+  },
+  "jsImplementedRpcTargets": {
+    "getExcerptId": "Pure JS state on the main-thread score object (this.excerptId); no native call.",
+    "setExcerptId": "Pure JS state on the main-thread score object (this.excerptId); no native call.",
+    "metadata": "JSON.parse over the native saveMetadata result; no native export of its own.",
+    "measurePositions": "JSON.parse over the native savePositions(false) result; no native export of its own.",
+    "segmentPositions": "JSON.parse over the native savePositions(true) result; no native export of its own.",
+    "titleFilenameSafe": "Sanitizes the native title() result in JS; no native export of its own.",
+    "setSoundFont": "Per-score method delegating to the module-level WebMscore.setSoundFont; the native export is module-level, not score-level."
+  },
+  "typescriptOnlyMembers": {},
+  "_typescriptOnlyMembersReason": "Members of the Score interface that intentionally have no bridge implementation. Should normally be empty: a declared method with no worker proxy is exactly the silent failure TD-05 exists to catch."
+}
