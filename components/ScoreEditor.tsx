@@ -742,6 +742,12 @@ type ApplyXmlToScore = (
     },
 ) => Promise<boolean>;
 
+type CompareSide = 'left' | 'right';
+type StopCompareSideAudio = (
+    side: CompareSide,
+    options?: { awaitCancel?: boolean },
+) => Promise<void>;
+
 const formatBytes = (bytes: number) => {
     if (!Number.isFinite(bytes)) {
         return '';
@@ -1281,6 +1287,7 @@ export default function ScoreEditor() {
     const isSyncingRef = useRef<boolean>(false);
     const scoreRef = useRef<Score | null>(null);
     const applyXmlToScoreRef = useRef<ApplyXmlToScore>(async () => false);
+    const stopCompareSideAudioRef = useRef<StopCompareSideAudio>(async () => {});
     const [zoom, setZoom] = useState(1.0);
     const containerRef = useRef<HTMLDivElement>(null);
     const scoreWrapperRef = useRef<HTMLDivElement>(null);
@@ -1893,6 +1900,11 @@ export default function ScoreEditor() {
             release();
         }
     }, []);
+
+    const stopCompareSideAudio = useCallback<StopCompareSideAudio>(
+        (side, options) => stopCompareSideAudioRef.current(side, options),
+        [],
+    );
 
     const aiEditController = useAiEditController(aiEditEffort);
     const beginAiEdit = aiEditController.begin;
@@ -2597,24 +2609,6 @@ export default function ScoreEditor() {
         ),
         [musicNotaGenSpaceCombinations, musicNotaGenSpacePeriod, musicNotaGenSpaceComposer],
     );
-
-    useEffect(() => {
-        if (!aiEnabled) {
-            return;
-        }
-        if (xmlSidebarTab !== 'notagen') {
-            return;
-        }
-        if (musicNotaGenSpaceCombinations || musicNotaGenSpaceOptionsLoading) {
-            return;
-        }
-        void loadNotaGenSpaceOptions();
-    }, [
-        aiEnabled,
-        xmlSidebarTab,
-        musicNotaGenSpaceCombinations,
-        musicNotaGenSpaceOptionsLoading,
-    ]);
 
     useEffect(() => {
         if (musicNotaGenSpaceComposers.length === 0) {
@@ -4359,7 +4353,7 @@ ${partsBodyXml}
         return () => clearTimeout(timer);
     }, [score, openScoreSession]);
 
-    const parseMusicXmlPatch = (text: string): {
+    const parseMusicXmlPatch = useCallback((text: string): {
         patch: MusicXmlPatch | null;
         annotations?: PatchAnnotation[];
         error: string;
@@ -4480,7 +4474,7 @@ ${partsBodyXml}
             ops.push(nextOp);
         }
         return { patch: { format: 'musicxml-patch@1', ops }, annotations: extractPatchAnnotations(parsed), error: '' };
-    };
+    }, []);
 
     const applyMusicXmlPatch = (baseXml: string, patch: MusicXmlPatch) => {
         if (!baseXml.trim()) {
@@ -5166,16 +5160,6 @@ ${partsBodyXml}
             setNewScoreInstrumentIds([fallbackId]);
         }
     }, [newScoreDialogOpen, newScoreInstrumentIds.length, newScoreInstrumentOptions, newScoreInstrumentToAdd]);
-
-    useEffect(() => {
-        if (!newScoreDialogOpen || !score) {
-            return;
-        }
-        if (instrumentGroups.length > 0) {
-            return;
-        }
-        void refreshInstrumentTemplates(score);
-    }, [newScoreDialogOpen, instrumentGroups.length, score]);
 
     useEffect(() => {
         if (!newScoreDialogOpen || instrumentClefMap) {
@@ -8199,7 +8183,7 @@ ${partsBodyXml}
         }
     };
 
-    const refreshInstrumentTemplates = async (currentScore: Score) => {
+    const refreshInstrumentTemplates = useCallback(async (currentScore: Score) => {
         if (!currentScore.listInstrumentTemplates) {
             setInstrumentGroups([]);
             return;
@@ -8214,7 +8198,22 @@ ${partsBodyXml}
             console.warn('Failed to read instrument templates', err);
             setInstrumentGroups([]);
         }
-    };
+    }, [runSerializedScoreOperation]);
+
+    useEffect(() => {
+        if (!newScoreDialogOpen || !score) {
+            return;
+        }
+        if (instrumentGroups.length > 0) {
+            return;
+        }
+        void refreshInstrumentTemplates(score);
+    }, [
+        instrumentGroups.length,
+        newScoreDialogOpen,
+        refreshInstrumentTemplates,
+        score,
+    ]);
 
 
     const buildSoundFontCandidates = useCallback((): string[] => {
@@ -9228,6 +9227,8 @@ ${partsBodyXml}
         clearAiProposal,
         invalidateCompareOperations,
         queueCompareScoreTeardown,
+        runSerializedScoreOperation,
+        stopCompareSideAudio,
     ]);
 
     useEffect(() => {
@@ -9242,7 +9243,7 @@ ${partsBodyXml}
                 'score-editor-unmount',
             );
         };
-    }, [invalidateCompareOperations, queueCompareScoreTeardown]);
+    }, [invalidateCompareOperations, queueCompareScoreTeardown, stopCompareSideAudio]);
 
     // compareLeftScore/compareRightScoreDisplay resolve to whichever of `score` /
     // compareRightScore is currently shown on that visual side, and that mapping can
@@ -9259,14 +9260,14 @@ ${partsBodyXml}
             void stopCompareSideAudio('left');
         }
         prevCompareLeftScoreRef.current = compareLeftScore;
-    }, [compareLeftScore]);
+    }, [compareLeftScore, stopCompareSideAudio]);
     const prevCompareRightScoreRef = useRef<Score | null>(null);
     useEffect(() => {
         if (prevCompareRightScoreRef.current && prevCompareRightScoreRef.current !== compareRightScoreDisplay) {
             void stopCompareSideAudio('right');
         }
         prevCompareRightScoreRef.current = compareRightScoreDisplay;
-    }, [compareRightScoreDisplay]);
+    }, [compareRightScoreDisplay, stopCompareSideAudio]);
     const prevCompareLiveSelectionScoreRef = useRef<Score | null>(null);
     useEffect(() => {
         if (
@@ -10136,6 +10137,7 @@ ${partsBodyXml}
     }, [
         aiBaseXml,
         aiScoreBridge,
+        parseMusicXmlPatch,
         setAiOutput,
         setAiPatch,
         setAiPatchError,
@@ -10628,6 +10630,22 @@ ${partsBodyXml}
         musicNotaGenSpaceInstrumentation,
         musicNotaGenSpacePeriod,
         postScoreEditorJson,
+    ]);
+
+    useEffect(() => {
+        if (!aiEnabled || xmlSidebarTab !== 'notagen') {
+            return;
+        }
+        if (musicNotaGenSpaceCombinations || musicNotaGenSpaceOptionsLoading) {
+            return;
+        }
+        void loadNotaGenSpaceOptions();
+    }, [
+        aiEnabled,
+        loadNotaGenSpaceOptions,
+        musicNotaGenSpaceCombinations,
+        musicNotaGenSpaceOptionsLoading,
+        xmlSidebarTab,
     ]);
 
     const handleMusicNotaGenRun = async () => {
@@ -14641,7 +14659,7 @@ ${partsBodyXml}
         generationRef: compareRightPlaybackGenerationRef,
     });
 
-    const stopCompareSideAudio = async (side: 'left' | 'right', options?: { awaitCancel?: boolean }) => {
+    stopCompareSideAudioRef.current = async (side, options) => {
         const refs = getCompareSideRefs(side);
         refs.generationRef.current += 1;
         await stopSynthStream(refs.sourcesRef, refs.iteratorRef, options);
@@ -15021,7 +15039,7 @@ ${partsBodyXml}
         };
     };
 
-    const closeGripEdit = (commit: boolean) => {
+    const closeGripEdit = useCallback((commit: boolean) => {
         gripDragCleanupRef.current?.();
         gripDragCleanupRef.current = null;
         setGripEdit(null);
@@ -15030,7 +15048,7 @@ ${partsBodyXml}
                 console.warn('Ending grip edit failed:', err);
             });
         }
-    };
+    }, [score]);
 
     useEffect(() => {
         if (!gripEdit) {
@@ -15045,7 +15063,7 @@ ${partsBodyXml}
         };
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
-    }, [gripEdit, score]);
+    }, [closeGripEdit, gripEdit]);
 
     const beginGripEditAtPoint = async (pageIndex: number, x: number, y: number) => {
         if (!interactiveMutationEnabled || noteInputActiveRef.current || !score?.beginGripEdit) {
