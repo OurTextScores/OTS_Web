@@ -132,7 +132,12 @@ import { type AiScoreBridge } from './score-editor/ai-score-bridge';
 import { useLatestCallbackFacade } from '@/lib/use-latest-callback-facade';
 import { useCompareOperationCoordinator } from './score-editor/compare/useCompareOperationCoordinator';
 import { useCompareTransport } from './score-editor/compare/useCompareTransport';
-import { useCompareEditing } from './score-editor/compare/useCompareEditing';
+import {
+    routeCompareKeyboardShortcut,
+    useCompareEditing,
+    type CompareInputStateMethod,
+    type CompareKeyboardMutationMethod,
+} from './score-editor/compare/useCompareEditing';
 import {
     buildCompareUserEditDiff,
     type CompareScoreRole,
@@ -13149,17 +13154,9 @@ ${partsBodyXml}
     }, [runSerializedScoreOperation]);
 
     const handleCompareKeyboardShortcut = useCallback((event: KeyboardEvent) => {
-        if (!compareView || !compareActiveSide || !compareActiveScore || !compareActiveRole) {
-            return false;
-        }
-        const rawKey = event.key;
-        const key = rawKey.toLowerCase();
-        const isMod = event.ctrlKey || event.metaKey;
-        const hasSelection = compareHasSelectionByRole[compareActiveRole];
-        const noteMode = isCompareNoteInputCommitted(compareActiveRole);
         const mutate = (
             label: string,
-            methodName: keyof MutationMethods,
+            methodName: CompareKeyboardMutationMethod,
             args: unknown[] = [],
             skipRelayout = false,
         ) => {
@@ -13175,8 +13172,10 @@ ${partsBodyXml}
                     console.warn(`Compare keyboard mutation "${label}" failed:`, err);
                 });
         };
-        const updateInputState = (methodName: keyof MutationMethods, args: unknown[] = []) => {
-            const fn = (compareActiveScore as MutationMethods)[methodName];
+        const updateInputState = (methodName: CompareInputStateMethod, args: unknown[] = []) => {
+            const fn = compareActiveScore
+                ? (compareActiveScore as MutationMethods)[methodName]
+                : null;
             if (typeof fn === 'function') {
                 void queueCompareKeyboardOperation(() => runSerializedScoreOperation(
                         () => Promise.resolve(
@@ -13189,26 +13188,17 @@ ${partsBodyXml}
                 });
             }
         };
-
-        if (isMod) {
-            if (key === 'z') {
-                event.preventDefault();
-                mutate(event.shiftKey ? 'redo' : 'undo', event.shiftKey ? 'redo' : 'undo');
-                return true;
-            }
-            if (key === 'y') {
-                event.preventDefault();
-                mutate('redo', 'redo');
-                return true;
-            }
-            if (key === 'a') {
-                event.preventDefault();
-                mutate('select all', 'selectAll', [], true);
-                setCompareHasSelection(compareActiveRole, true);
-                return true;
-            }
-            if (key === 'c') {
-                event.preventDefault();
+        return routeCompareKeyboardShortcut(event, {
+            active: Boolean(compareView && compareActiveSide && compareActiveScore && compareActiveRole),
+            activeRole: compareActiveRole,
+            hasSelection: compareActiveRole ? compareHasSelectionByRole[compareActiveRole] : false,
+            noteMode: compareActiveRole ? isCompareNoteInputCommitted(compareActiveRole) : false,
+            mutate,
+            updateInputState,
+            copySelection: () => {
+                if (!compareActiveScore || !compareActiveSide) {
+                    return;
+                }
                 const sourceScore = compareActiveScore;
                 const sourceSide = compareActiveSide;
                 void queueCompareKeyboardOperation(
@@ -13216,10 +13206,11 @@ ${partsBodyXml}
                 ).catch((err) => {
                     console.warn('Compare selection copy failed:', err);
                 });
-                return true;
-            }
-            if (key === 'v') {
-                event.preventDefault();
+            },
+            pasteSelection: () => {
+                if (!compareActiveSide) {
+                    return;
+                }
                 const targetSide = compareActiveSide;
                 void queueCompareKeyboardOperation(async () => {
                     // Resolve the clipboard after prior queued shortcuts complete so
@@ -13242,130 +13233,19 @@ ${partsBodyXml}
                 }).catch((err) => {
                     console.warn('Compare selection paste failed:', err);
                 });
-                return true;
-            }
-        }
-
-        if (key === 'escape' && noteMode) {
-            event.preventDefault();
-            void setCompareNoteInputMode(false, compareActiveSide);
-            return true;
-        }
-        if (!isMod && key === 'n' && !event.altKey && !event.shiftKey) {
-            event.preventDefault();
-            toggleCompareNoteInputMode(compareActiveSide);
-            return true;
-        }
-
-        const durationMap: Record<string, number> = {
-            '1': 8,
-            '2': 7,
-            '3': 6,
-            '4': 5,
-            '5': 4,
-            '6': 3,
-            '7': 2,
-            '8': 1,
-        };
-        if (noteMode && rawKey in durationMap) {
-            event.preventDefault();
-            updateInputState('setInputDurationType', [durationMap[rawKey]]);
-            return true;
-        }
-        if (noteMode && rawKey === '.') {
-            event.preventDefault();
-            updateInputState('toggleInputDot');
-            return true;
-        }
-        if (noteMode && (rawKey === '+' || rawKey === '-' || rawKey === '=')) {
-            event.preventDefault();
-            updateInputState('setInputAccidentalType', [rawKey === '+' ? 3 : rawKey === '-' ? 1 : 2]);
-            return true;
-        }
-        const noteMap: Record<string, number> = { c: 0, d: 1, e: 2, f: 3, g: 4, a: 5, b: 6 };
-        if (noteMode && rawKey === '0') {
-            event.preventDefault();
-            mutate('enter a rest', 'enterRest');
-            return true;
-        }
-        if (noteMode && !isMod && !event.altKey && key in noteMap) {
-            event.preventDefault();
-            mutate('add a pitch', 'addPitchByStep', [noteMap[key], event.shiftKey, false]);
-            return true;
-        }
-        if (!hasSelection) {
-            return false;
-        }
-
-        if (rawKey in durationMap) {
-            event.preventDefault();
-            mutate('set duration', 'setDurationType', [durationMap[rawKey]]);
-            return true;
-        }
-        if (rawKey === '0') {
-            event.preventDefault();
-            mutate('enter a rest', 'enterRest');
-            return true;
-        }
-        if (rawKey === '.') {
-            event.preventDefault();
-            mutate('toggle dot', 'toggleDot');
-            return true;
-        }
-        if (rawKey === '+' || rawKey === '-' || rawKey === '=') {
-            event.preventDefault();
-            mutate('set accidental', 'setAccidental', [rawKey === '+' ? 3 : rawKey === '-' ? 1 : 2]);
-            return true;
-        }
-        if (rawKey === 'T') {
-            event.preventDefault();
-            mutate('add a tie', 'addTie');
-            return true;
-        }
-        if (!event.altKey && key === 's' && !event.shiftKey && !noteMode) {
-            event.preventDefault();
-            mutate('add a slur', 'addSlur');
-            return true;
-        }
-        if (!isMod && !event.altKey && key in noteMap) {
-            event.preventDefault();
-            mutate('add a pitch', 'addPitchByStep', [noteMap[key], event.shiftKey, false]);
-            return true;
-        }
-        if (key === 'arrowup' || key === 'arrowdown') {
-            event.preventDefault();
-            if (event.shiftKey) {
-                mutate(
-                    `extend selection ${key === 'arrowup' ? 'up' : 'down'}`,
-                    key === 'arrowup' ? 'extendSelectionStaffAbove' : 'extendSelectionStaffBelow',
-                    [],
-                    true,
-                );
-            } else if (isMod) {
-                mutate('transpose an octave', 'transpose', [key === 'arrowup' ? 12 : -12]);
-            } else {
-                mutate(key === 'arrowup' ? 'raise pitch' : 'lower pitch', key === 'arrowup' ? 'pitchUp' : 'pitchDown');
-            }
-            return true;
-        }
-        if (key === 'arrowleft' || key === 'arrowright') {
-            event.preventDefault();
-            const forward = key === 'arrowright';
-            const methodName = event.shiftKey
-                ? (isMod
-                    ? (forward ? 'extendSelectionNextMeasure' : 'extendSelectionPrevMeasure')
-                    : (forward ? 'extendSelectionNextChord' : 'extendSelectionPrevChord'))
-                : (forward ? 'selectNextChord' : 'selectPrevChord');
-            mutate('move compare selection', methodName, [], true);
-            return true;
-        }
-        if (key === 'delete' || key === 'backspace') {
-            event.preventDefault();
-            mutate('delete selection', 'deleteSelection');
-            setCompareHasSelection(compareActiveRole, false);
-            return true;
-        }
-        return false;
+            },
+            disableNoteInput: () => {
+                if (compareActiveSide) {
+                    void setCompareNoteInputMode(false, compareActiveSide);
+                }
+            },
+            toggleNoteInput: () => {
+                if (compareActiveSide) {
+                    toggleCompareNoteInputMode(compareActiveSide);
+                }
+            },
+            setHasSelection: setCompareHasSelection,
+        });
     }, [
         compareActiveRole,
         compareActiveScore,
