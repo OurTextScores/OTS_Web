@@ -27,17 +27,34 @@ Each XPath must match exactly one node.`;
     return `${prompt}\n\n${patchSpec}`;
 };
 
-const parseChatCompletions = (data: any) => data?.choices?.[0]?.message?.content ?? '';
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+    value && typeof value === 'object' ? value as Record<string, unknown> : null
+);
 
-const parseResponsesText = (data: any) => {
-    if (typeof data?.output_text === 'string') {
-        return data.output_text;
+const parseChatCompletions = (data: unknown) => {
+    const root = asRecord(data);
+    const choices = Array.isArray(root?.choices) ? root.choices : [];
+    const firstChoice = asRecord(choices[0]);
+    const message = asRecord(firstChoice?.message);
+    return typeof message?.content === 'string' ? message.content : '';
+};
+
+const parseResponsesText = (data: unknown) => {
+    const root = asRecord(data);
+    if (typeof root?.output_text === 'string') {
+        return root.output_text;
     }
-    const output = Array.isArray(data?.output) ? data.output : [];
+    const output = Array.isArray(root?.output) ? root.output : [];
     for (const item of output) {
-        if (item?.type === 'message') {
-            const content = Array.isArray(item?.content) ? item.content : [];
-            return content.map((part: any) => part?.text || '').join('');
+        const itemRecord = asRecord(item);
+        if (itemRecord?.type === 'message') {
+            const content = Array.isArray(itemRecord.content) ? itemRecord.content : [];
+            return content
+                .map((part) => {
+                    const partRecord = asRecord(part);
+                    return typeof partRecord?.text === 'string' ? partRecord.text : '';
+                })
+                .join('');
         }
     }
     return '';

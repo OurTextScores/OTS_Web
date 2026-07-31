@@ -169,8 +169,13 @@ type MusicBrainzArtistResponse = {
     }>;
 };
 
-const cache = (globalThis as any).__otsSourceRagCache || new Map<string, CachedValue>();
-(globalThis as any).__otsSourceRagCache = cache;
+type SourceRagGlobal = typeof globalThis & {
+    __otsSourceRagCache?: Map<string, CachedValue>;
+};
+
+const sourceRagGlobal = globalThis as SourceRagGlobal;
+const cache = sourceRagGlobal.__otsSourceRagCache || new Map<string, CachedValue>();
+sourceRagGlobal.__otsSourceRagCache = cache;
 
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 8_000;
@@ -186,10 +191,6 @@ const STOPWORDS = new Set([
     'them', 'then', 'they', 'were', 'will', 'shall', 'onto', 'over', 'page', 'wiki',
     'imslp', 'work', 'piece', 'question', 'editor', 'chat',
 ]);
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-    return value && typeof value === 'object' ? value as Record<string, unknown> : null;
-}
 
 function stripHtml(html: string) {
     return html

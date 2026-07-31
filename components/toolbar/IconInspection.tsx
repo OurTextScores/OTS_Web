@@ -106,9 +106,9 @@ export const IconInspection = () => {
             <div className="mt-12 p-6 bg-white border-l-4 border-blue-600 rounded shadow-sm text-base text-slate-900">
                 <p className="font-bold mb-2">Analysis:</p>
                 <ul className="list-disc ml-5 space-y-1">
-                    <li>Lucide's <code>Music</code> is a single eighth note.</li>
-                    <li>Lucide's <code>Music2</code> is two eighth notes (what you mentioned seeing currently).</li>
-                    <li>The <strong>"Custom Clef"</strong> and <strong>"Custom KeySig"</strong> are the SVG components I just built for you.</li>
+                    <li>Lucide’s <code>Music</code> is a single eighth note.</li>
+                    <li>Lucide’s <code>Music2</code> is two eighth notes (what you mentioned seeing currently).</li>
+                    <li>The <strong>“Custom Clef”</strong> and <strong>“Custom KeySig”</strong> are the SVG components I just built for you.</li>
                 </ul>
             </div>
         </div>

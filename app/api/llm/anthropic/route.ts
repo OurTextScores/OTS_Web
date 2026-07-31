@@ -30,9 +30,21 @@ Each XPath must match exactly one node.`;
     return `${prompt}\n\n${patchSpec}`;
 };
 
-const parseAnthropicText = (data: any) => {
-    const content = Array.isArray(data?.content) ? data.content : [];
-    return content.map((part: any) => (part?.type === 'text' ? part?.text || '' : '')).join('');
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+    value && typeof value === 'object' ? value as Record<string, unknown> : null
+);
+
+const parseAnthropicText = (data: unknown) => {
+    const root = asRecord(data);
+    const content = Array.isArray(root?.content) ? root.content : [];
+    return content
+        .map((part) => {
+            const partRecord = asRecord(part);
+            return partRecord?.type === 'text' && typeof partRecord.text === 'string'
+                ? partRecord.text
+                : '';
+        })
+        .join('');
 };
 
 export async function POST(request: Request) {

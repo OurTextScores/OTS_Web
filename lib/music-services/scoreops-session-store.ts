@@ -50,9 +50,13 @@ const DEFAULT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // sweep at most once per 5 m
 const DEFAULT_MAX_CONTENT_BYTES = 25 * 1024 * 1024; // reject a single session > 25 MB
 
 // Versioned global key so a hot-reload doesn't inherit a Map of the old (unwrapped) shape.
-const sessions: Map<string, SessionEntry> =
-  (globalThis as any).scoreOpsSessionsV2 || new Map<string, SessionEntry>();
-(globalThis as any).scoreOpsSessionsV2 = sessions;
+type ScoreOpsSessionGlobal = typeof globalThis & {
+  scoreOpsSessionsV2?: Map<string, SessionEntry>;
+};
+
+const scoreOpsSessionGlobal = globalThis as ScoreOpsSessionGlobal;
+const sessions = scoreOpsSessionGlobal.scoreOpsSessionsV2 || new Map<string, SessionEntry>();
+scoreOpsSessionGlobal.scoreOpsSessionsV2 = sessions;
 
 let lastCleanupAt = 0;
 

@@ -27,9 +27,22 @@ Each XPath must match exactly one node.`;
     return `${prompt}\n\n${patchSpec}`;
 };
 
-const parseGeminiText = (data: any) => {
-    const parts = data?.candidates?.[0]?.content?.parts;
-    return Array.isArray(parts) ? parts.map((part: any) => part?.text || '').join('') : '';
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+    value && typeof value === 'object' ? value as Record<string, unknown> : null
+);
+
+const parseGeminiText = (data: unknown) => {
+    const root = asRecord(data);
+    const candidates = Array.isArray(root?.candidates) ? root.candidates : [];
+    const firstCandidate = asRecord(candidates[0]);
+    const content = asRecord(firstCandidate?.content);
+    const parts = Array.isArray(content?.parts) ? content.parts : [];
+    return parts
+        .map((part) => {
+            const partRecord = asRecord(part);
+            return typeof partRecord?.text === 'string' ? partRecord.text : '';
+        })
+        .join('');
 };
 
 const normalizeGeminiModel = (model: string) => {

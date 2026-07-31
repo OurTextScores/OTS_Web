@@ -105,10 +105,13 @@ const readJsonResponse = async <T>(response: Response): Promise<T> => {
     }
 
     if (!response.ok) {
+        const errorValue = data && typeof data === 'object'
+            ? (data as Record<string, unknown>).error
+            : null;
         const message = typeof data === 'string'
             ? data
-            : (data && typeof data === 'object' && 'error' in data && typeof (data as any).error === 'string')
-                ? (data as any).error
+            : typeof errorValue === 'string'
+                ? errorValue
                 : `Request failed with status ${response.status}`;
         throw new OurTextScoresApiError(message, response.status, data);
     }
