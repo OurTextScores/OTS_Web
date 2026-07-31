@@ -24,15 +24,23 @@ import { expect, test } from 'playwright/test';
 const SCORE = "/?score=/test_scores/four_measures.musicxml";
 
 type Box = { page: number; x: number; y: number; width: number; height: number };
+type MeasureRange = { startMeasureIndex: number; endMeasureIndex: number } | null;
+type BarSelectionWindow = typeof window & {
+  __webmscore: {
+    getSelectionBoundingBoxes: () => Promise<Box[]>;
+    selectionMeasureRange: () => Promise<MeasureRange>;
+    isSelectionRange: () => Promise<boolean>;
+  };
+};
 
 const boxes = (page: import('playwright/test').Page): Promise<Box[]> =>
-  page.evaluate(async () => (window as any).__webmscore.getSelectionBoundingBoxes());
+  page.evaluate(async () => (window as BarSelectionWindow).__webmscore.getSelectionBoundingBoxes());
 
 const measureRange = (page: import('playwright/test').Page) =>
-  page.evaluate(async () => (window as any).__webmscore.selectionMeasureRange());
+  page.evaluate(async () => (window as BarSelectionWindow).__webmscore.selectionMeasureRange());
 
 const isRange = (page: import('playwright/test').Page): Promise<boolean> =>
-  page.evaluate(async () => (window as any).__webmscore.isSelectionRange());
+  page.evaluate(async () => (window as BarSelectionWindow).__webmscore.isSelectionRange());
 
 /**
  * Clicks empty space inside bar 2 (right of its note, left of bar 3's note).
@@ -171,7 +179,7 @@ test('a bar stays selectable, with its rectangle, after a note has been clicked'
   if (!note0) return;
   await page.mouse.click(note0.x + note0.width / 2, note0.y + note0.height / 2);
   await expect.poll(async () => await page.evaluate(async () =>
-    (window as any).__webmscore.isSelectionRange()), { timeout: 30_000 }).toBe(false);
+    (window as BarSelectionWindow).__webmscore.isSelectionRange()), { timeout: 30_000 }).toBe(false);
   const noteWidth = await overlayWidth();
   expect(noteWidth).toBeLessThan(barWidth / 2);
 

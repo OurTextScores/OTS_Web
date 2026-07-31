@@ -1,5 +1,15 @@
 import { expect, test } from 'playwright/test';
 
+type NoteEntryWindow = typeof window & {
+  __webmscore?: {
+    setNoteEntryMode?: (...args: unknown[]) => Promise<unknown>;
+    setInputDurationType?: (...args: unknown[]) => Promise<unknown>;
+    addPitchByStep?: (...args: unknown[]) => Promise<unknown>;
+    saveMsc?: (format: 'mscx') => Promise<Uint8Array>;
+    inputState?: { duration?: unknown };
+  };
+};
+
 /**
  * Test that note entry mode preserves the user's selected duration across
  * multiple consecutive note entries. This is a regression test for the bug
@@ -19,7 +29,7 @@ test.skip('7D7D produces two whole notes - duration preserved across entries', a
 
   // Check if note entry APIs are available
   const hasNoteEntryApi = await page.evaluate(() => {
-    const score = (window as any).__webmscore;
+    const score = (window as NoteEntryWindow).__webmscore;
     return (
       typeof score?.setNoteEntryMode === 'function' &&
       typeof score?.setInputDurationType === 'function' &&
@@ -31,7 +41,7 @@ test.skip('7D7D produces two whole notes - duration preserved across entries', a
   // Helper to read MSCX content
   const readMscx = async (): Promise<string> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as NoteEntryWindow).__webmscore;
       if (!score?.saveMsc) {
         throw new Error('window.__webmscore.saveMsc is not available');
       }
@@ -83,7 +93,7 @@ test.skip('7D7D produces two whole notes - duration preserved across entries', a
 
   // Check the input duration after pressing 7
   const durationAfter7 = await page.evaluate(() => {
-    const score = (window as any).__webmscore;
+    const score = (window as NoteEntryWindow).__webmscore;
     return score?.inputState?.duration ?? 'unknown';
   });
   console.log('Duration after pressing 7:', durationAfter7);
@@ -104,7 +114,7 @@ test.skip('7D7D produces two whole notes - duration preserved across entries', a
 
   // Check the input duration before second D
   const durationBeforeSecondD = await page.evaluate(() => {
-    const score = (window as any).__webmscore;
+    const score = (window as NoteEntryWindow).__webmscore;
     return score?.inputState?.duration ?? 'unknown';
   });
   console.log('Duration before second D:', durationBeforeSecondD);
@@ -151,7 +161,7 @@ test.skip('7D5D produces one whole note and one quarter note', async ({ page }) 
 
   // Check if note entry APIs are available
   const hasNoteEntryApi = await page.evaluate(() => {
-    const score = (window as any).__webmscore;
+    const score = (window as NoteEntryWindow).__webmscore;
     return (
       typeof score?.setNoteEntryMode === 'function' &&
       typeof score?.setInputDurationType === 'function' &&
@@ -163,7 +173,7 @@ test.skip('7D5D produces one whole note and one quarter note', async ({ page }) 
   // Helper to read MSCX content
   const readMscx = async (): Promise<string> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as NoteEntryWindow).__webmscore;
       if (!score?.saveMsc) {
         throw new Error('window.__webmscore.saveMsc is not available');
       }

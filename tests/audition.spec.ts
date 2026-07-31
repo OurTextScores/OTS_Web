@@ -3,11 +3,28 @@ import { expect, test, Page } from '@playwright/test';
 const SCORE_URL = '/?score=/test_scores/single_note_c4.musicxml';
 const MULTI_SCORE_URL = '/?score=/test_scores/three_notes_cde.musicxml';
 
+type AuditionScore = {
+  setSoundFont?: (...args: unknown[]) => Promise<unknown>;
+  synthSelectionPreviewBatch?: (...args: unknown[]) => Promise<unknown>;
+  saveXml?: () => Promise<string>;
+};
+
+type AuditionWindow = typeof window & {
+  __webmscore?: AuditionScore;
+  __auditionPreviewCalls: unknown[][];
+  __auditionFetchPatched?: boolean;
+  __auditionOriginalFetch?: typeof window.fetch;
+};
+
+const readPreviewCallCount = (page: Page) => page.evaluate(() => (
+  window as AuditionWindow
+).__auditionPreviewCalls.length);
+
 async function installAuditionSpy(page: Page) {
-  await page.waitForFunction(() => Boolean((window as any).__webmscore), { timeout: 30_000 });
+  await page.waitForFunction(() => Boolean((window as AuditionWindow).__webmscore), { timeout: 30_000 });
 
   await page.evaluate(() => {
-    const g = window as any;
+    const g = window as AuditionWindow;
     const score = g.__webmscore;
     if (!score) {
       throw new Error('window.__webmscore is not available');
@@ -27,14 +44,14 @@ async function installAuditionSpy(page: Page) {
         if (/\.(sf2|sf3)(\?|$)/i.test(url)) {
           return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
         }
-        return originalFetch(input as any, init);
+        return originalFetch(input, init);
       };
       g.__auditionFetchPatched = true;
     }
 
     score.setSoundFont = async () => {};
 
-    score.synthSelectionPreviewBatch = async (...args: any[]) => {
+    score.synthSelectionPreviewBatch = async (...args: unknown[]) => {
       g.__auditionPreviewCalls.push(args);
       const chunk = new Uint8Array(512 * 4);
       return async (cancel?: boolean) => {
@@ -59,7 +76,6 @@ function maybeAttachDebugConsole(page: Page) {
   page.on('console', (msg) => {
     const text = msg.text();
     if (text.includes('[AUDITION]') || text.includes('[AUDIO]') || text.includes('Mutation "raise pitch"')) {
-      // eslint-disable-next-line no-console
       console.log(`[browser] ${text}`);
     }
   });
@@ -75,10 +91,10 @@ test('selection requests audition preview stream', async ({ page }) => {
   await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
 
   await expect.poll(async () => {
-    return page.evaluate(() => (window as any).__auditionPreviewCalls.length);
+    return readPreviewCallCount(page);
   }, { timeout: 10_000 }).toBeGreaterThan(0);
 
-  const firstArgs = await page.evaluate(() => (window as any).__auditionPreviewCalls[0] as number[]);
+  const firstArgs = await page.evaluate(() => (window as AuditionWindow).__auditionPreviewCalls[0]);
   expect(firstArgs[0]).toBe(1);
   expect(firstArgs[1]).toBe(350);
 });
@@ -92,15 +108,15 @@ test('mutation requests audition preview stream', async ({ page }) => {
   await page.locator('svg .Note').first().click();
   await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
   await expect.poll(async () => {
-    return page.evaluate(() => (window as any).__auditionPreviewCalls.length as number);
+    return readPreviewCallCount(page);
   }, { timeout: 10_000 }).toBeGreaterThan(0);
   await page.evaluate(() => {
-    (window as any).__auditionPreviewCalls = [];
+    (window as AuditionWindow).__auditionPreviewCalls = [];
   });
   await page.getByTestId('btn-pitch-up').click();
 
   await expect.poll(async () => {
-    return page.evaluate(() => (window as any).__auditionPreviewCalls.length as number);
+    return readPreviewCallCount(page);
   }, { timeout: 10_000 }).toBeGreaterThan(0);
 });
 
@@ -114,19 +130,19 @@ test('repeated note selections request audition preview each time', async ({ pag
   await notes.nth(0).click();
   await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
   await expect.poll(async () => {
-    return page.evaluate(() => (window as any).__auditionPreviewCalls.length as number);
+    return readPreviewCallCount(page);
   }, { timeout: 10_000 }).toBeGreaterThan(0);
 
-  const afterFirst = await page.evaluate(() => (window as any).__auditionPreviewCalls.length as number);
+  const afterFirst = await readPreviewCallCount(page);
   await notes.nth(1).click();
   await expect.poll(async () => {
-    return page.evaluate(() => (window as any).__auditionPreviewCalls.length as number);
+    return readPreviewCallCount(page);
   }, { timeout: 10_000 }).toBeGreaterThan(afterFirst);
 
-  const afterSecond = await page.evaluate(() => (window as any).__auditionPreviewCalls.length as number);
+  const afterSecond = await readPreviewCallCount(page);
   await notes.nth(2).click();
   await expect.poll(async () => {
-    return page.evaluate(() => (window as any).__auditionPreviewCalls.length as number);
+    return readPreviewCallCount(page);
   }, { timeout: 10_000 }).toBeGreaterThan(afterSecond);
 });
 
@@ -138,7 +154,7 @@ test('range selection remains intact with audition enabled', async ({ page }) =>
 
   const readXml = async (): Promise<string> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as AuditionWindow).__webmscore;
       if (!score?.saveXml) {
         throw new Error('window.__webmscore.saveXml is not available');
       }
@@ -153,7 +169,7 @@ test('range selection remains intact with audition enabled', async ({ page }) =>
   await page.waitForTimeout(300);
 
   await expect.poll(async () => {
-    return page.evaluate(() => (window as any).__auditionPreviewCalls.length as number);
+    return readPreviewCallCount(page);
   }, { timeout: 10_000 }).toBeGreaterThan(0);
 
   await page.keyboard.press('Control+C');

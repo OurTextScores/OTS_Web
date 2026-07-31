@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test';
 
+type ToolbarScoreWindow = typeof window & {
+  __webmscore?: {
+    insertMeasures?: (...args: unknown[]) => Promise<unknown>;
+    saveMsc?: (format: 'mscx') => Promise<Uint8Array>;
+  };
+};
+
 test('toolbar shows enabled add-measures apply button', async ({ page }) => {
   page.on('console', (msg) => {
     console.log('PAGE LOG:', msg.type(), msg.text());
@@ -17,11 +24,11 @@ test('toolbar shows enabled add-measures apply button', async ({ page }) => {
   });
   await page.goto('/?score=/test_scores/single_note_c4.musicxml', { waitUntil: 'networkidle' });
   await page.waitForSelector('svg', { timeout: 20000 });
-  await page.waitForFunction(() => Boolean((window as any).__webmscore), { timeout: 20000 });
-  await page.waitForFunction(() => Boolean((window as any).__webmscore?.insertMeasures), { timeout: 20000 });
-  const hasInsert = await page.evaluate(() => Boolean((window as any).__webmscore?.insertMeasures));
+  await page.waitForFunction(() => Boolean((window as ToolbarScoreWindow).__webmscore), { timeout: 20000 });
+  await page.waitForFunction(() => Boolean((window as ToolbarScoreWindow).__webmscore?.insertMeasures), { timeout: 20000 });
+  const hasInsert = await page.evaluate(() => Boolean((window as ToolbarScoreWindow).__webmscore?.insertMeasures));
   const scoreProps = await page.evaluate(() => {
-    const score = (window as any).__webmscore;
+    const score = (window as ToolbarScoreWindow).__webmscore;
     if (!score) {
       return { own: [], proto: [], hasInsert: false };
     }
@@ -45,7 +52,7 @@ test('remove trailing empty measures button works', async ({ page }) => {
 
   const readMscx = async (): Promise<string> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as ToolbarScoreWindow).__webmscore;
       if (!score?.saveMsc) {
         throw new Error('window.__webmscore.saveMsc is not available');
       }

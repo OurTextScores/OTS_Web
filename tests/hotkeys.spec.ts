@@ -1,12 +1,19 @@
 import { expect, test } from 'playwright/test';
 
+type HotkeyScoreWindow = typeof window & {
+  __webmscore?: {
+    saveMsc?: (format: 'mscx') => Promise<Uint8Array>;
+    saveXml?: () => Promise<string>;
+  };
+};
+
 test('hotkeys drive delete, undo/redo, and copy/paste', async ({ page }) => {
   await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
   await page.waitForSelector('svg .Note', { timeout: 60_000 });
 
   const readMscx = async (): Promise<string> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as HotkeyScoreWindow).__webmscore;
       if (!score?.saveMsc) {
         throw new Error('window.__webmscore.saveMsc is not available');
       }
@@ -17,7 +24,7 @@ test('hotkeys drive delete, undo/redo, and copy/paste', async ({ page }) => {
 
   const readXml = async (): Promise<string> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as HotkeyScoreWindow).__webmscore;
       if (!score?.saveXml) {
         throw new Error('window.__webmscore.saveXml is not available');
       }
@@ -66,7 +73,7 @@ test('multi-selection copy/paste with shift-click', async ({ page }) => {
 
   const readXml = async (): Promise<string> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as HotkeyScoreWindow).__webmscore;
       if (!score?.saveXml) {
         throw new Error('window.__webmscore.saveXml is not available');
       }
