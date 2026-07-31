@@ -1,17 +1,26 @@
 {
+  "_comment": "Ratchet, not a baseline. Tighten these whenever a work package lands; never raise one to make a commit pass. ScoreEditor is pinned at its current size so it can only shrink toward the TD-03 exit budget of 17500 lines / 875000 bytes. Compare module caps encode sprint AC-15 (900 lines without a written ownership justification accepted in review).",
   "scoreEditor": {
-    "maxLines": 20369,
-    "maxBytes": 995340
+    "maxLines": 19629,
+    "maxBytes": 948331
+  },
+  "modules": {
+    "components/score-editor/compare/CompareScorePane.tsx": { "maxLines": 900, "maxBytes": 36000 },
+    "components/score-editor/compare/compare-keyboard-policy.ts": { "maxLines": 900, "maxBytes": 36000 },
+    "components/score-editor/compare/compare-types.ts": { "maxLines": 200, "maxBytes": 8000 },
+    "components/score-editor/compare/useCompareEditing.ts": { "maxLines": 900, "maxBytes": 36000 },
+    "components/score-editor/compare/useCompareOperationCoordinator.ts": { "maxLines": 900, "maxBytes": 36000 },
+    "components/score-editor/compare/useCompareTransport.ts": { "maxLines": 900, "maxBytes": 36000 }
   },
   "eslint": {
-    "maxErrors": 328,
-    "maxWarnings": 90,
-    "maxFilesWithFindings": 52
+    "maxErrors": 0,
+    "maxWarnings": 0,
+    "maxFilesWithFindings": 0
   },
   "tests": {
     "maxUnconditionalSkips": 5
   },
   "suppressions": {
-    "maxLocalDirectives": 4
+    "maxLocalDirectives": 3
   }
 }

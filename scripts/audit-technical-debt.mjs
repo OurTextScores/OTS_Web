@@ -111,12 +111,30 @@ for (const file of ownedFiles) {
   ).length;
 }
 
+const moduleBudgets = budget.modules || {};
+const modules = Object.keys(moduleBudgets).map((modulePath) => {
+  const absolute = resolve(root, modulePath);
+  let text;
+  try {
+    text = readFileSync(absolute, 'utf8');
+  } catch {
+    return { path: modulePath, missing: true, lines: 0, bytes: 0 };
+  }
+  return {
+    path: modulePath,
+    missing: false,
+    lines: (text.match(/\n/g) || []).length,
+    bytes: statSync(absolute).size,
+  };
+});
+
 const report = {
   baseCommit,
   runtime: {
     node: process.version,
   },
   scoreEditor,
+  modules,
   eslint: {
     filesScanned: eslintRows.length,
     filesWithFindings,
@@ -141,8 +159,14 @@ const checks = [
   ['files with ESLint findings', report.eslint.filesWithFindings, budget.eslint.maxFilesWithFindings],
   ['unconditional test skips', report.tests.unconditionalSkips, budget.tests.maxUnconditionalSkips],
   ['local suppression directives', report.suppressions.localDirectives, budget.suppressions.maxLocalDirectives],
+  ...report.modules.flatMap((entry) => [
+    [`${entry.path} lines`, entry.lines, moduleBudgets[entry.path].maxLines],
+    [`${entry.path} bytes`, entry.bytes, moduleBudgets[entry.path].maxBytes],
+  ]),
 ];
 const failures = checks.filter(([, actual, maximum]) => actual > maximum);
+// A budgeted module that no longer exists is a silently dropped ratchet, not a pass.
+const missingModules = report.modules.filter((entry) => entry.missing);
 
 if (jsonOutput) {
   console.log(JSON.stringify({ report, budget, failures }, null, 2));
@@ -157,6 +181,14 @@ if (jsonOutput) {
   console.log(
     `[debt:audit] tests: ${report.tests.unconditionalSkips} unconditional skips; suppressions: ${report.suppressions.localDirectives} local directives`,
   );
+  if (report.modules.length > 0) {
+    console.log('[debt:audit] budgeted modules:');
+    for (const entry of report.modules) {
+      console.log(entry.missing
+        ? `  ${entry.path}: MISSING`
+        : `  ${entry.path}: ${entry.lines} lines, ${entry.bytes} bytes`);
+    }
+  }
   console.log('[debt:audit] top rules:');
   for (const rule of report.eslint.topRules) {
     console.log(`  ${rule.rule}: ${rule.errors} errors, ${rule.warnings} warnings`);
@@ -168,10 +200,13 @@ if (jsonOutput) {
 }
 
 if (checkBudget) {
-  if (failures.length > 0) {
+  if (failures.length > 0 || missingModules.length > 0) {
     console.error('[debt:audit] budget regression:');
     for (const [label, actual, maximum] of failures) {
       console.error(`  ${label}: ${actual} > ${maximum}`);
+    }
+    for (const entry of missingModules) {
+      console.error(`  ${entry.path}: budgeted module is missing`);
     }
     process.exitCode = 1;
   } else {
