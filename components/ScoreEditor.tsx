@@ -130,6 +130,7 @@ import {
 } from './score-editor/ai-assistant-types';
 import { type AiScoreBridge } from './score-editor/ai-score-bridge';
 import { useLatestCallbackFacade } from '@/lib/use-latest-callback-facade';
+import { useCompareOperationCoordinator } from './score-editor/compare/useCompareOperationCoordinator';
 import {
     buildCompareUserEditDiff,
     type CompareScoreRole,
@@ -1508,11 +1509,6 @@ export default function ScoreEditor() {
     const [compareActiveSide, setCompareActiveSide] = useState<'left' | 'right' | null>(null);
     const [compareEditBusy, setCompareEditBusy] = useState(false);
     const compareEditBusyRef = useRef(false);
-    const compareEditGenerationRef = useRef(0);
-    const comparePendingOperationsRef = useRef<Set<Promise<unknown>>>(new Set());
-    const compareScoreTeardownQueueRef = useRef<Promise<void>>(Promise.resolve());
-    const compareKeyboardQueueRef = useRef<Promise<void>>(Promise.resolve());
-    const compareKeyboardQueueEpochRef = useRef(0);
     const [compareEditedRoles, setCompareEditedRoles] = useState<CompareScoreRole[]>([]);
     const compareEditBaselinesRef = useRef<Record<CompareScoreRole, string | null>>({
         current: null,
@@ -5411,98 +5407,17 @@ ${partsBodyXml}
         }
     };
 
-    const invalidateCompareOperations = useCallback((invalidateQueuedKeyboard = true) => {
-        compareEditGenerationRef.current += 1;
-        if (invalidateQueuedKeyboard) {
-            compareKeyboardQueueEpochRef.current += 1;
-        }
-        return compareEditGenerationRef.current;
-    }, []);
-
-    const trackCompareOperation = useCallback(<T,>(operation: Promise<T>): Promise<T> => {
-        const trackedOperation = operation.finally(() => {
-            comparePendingOperationsRef.current.delete(trackedOperation);
-        });
-        comparePendingOperationsRef.current.add(trackedOperation);
-        return trackedOperation;
-    }, []);
-
-    const queueCompareKeyboardOperation = useCallback(<T,>(operation: () => Promise<T>): Promise<T | undefined> => {
-        const epoch = compareKeyboardQueueEpochRef.current;
-        // Include work started outside the keyboard queue (for example, the click
-        // that selected the note or toggled note input) so a following key cannot
-        // race it. Snapshot before tracking this queued promise to avoid waiting on
-        // ourselves.
-        const pendingAtEnqueue = Array.from(comparePendingOperationsRef.current);
-        const queued = compareKeyboardQueueRef.current
-            .catch(() => {})
-            .then(async () => {
-                if (pendingAtEnqueue.length > 0) {
-                    await Promise.allSettled(pendingAtEnqueue);
-                }
-                if (compareKeyboardQueueEpochRef.current !== epoch) {
-                    return undefined;
-                }
-                return operation();
-            });
-        const tracked = trackCompareOperation(queued);
-        compareKeyboardQueueRef.current = tracked.then(() => undefined, () => undefined);
-        return tracked;
-    }, [trackCompareOperation]);
-
-    const waitForCompareOperations = useCallback(async () => {
-        // New work is rejected once a lifecycle transition invalidates the current
-        // generation. Loop so an operation already queued from the same browser event
-        // cannot escape the first snapshot.
-        while (comparePendingOperationsRef.current.size > 0) {
-            await Promise.allSettled(Array.from(comparePendingOperationsRef.current));
-        }
-    }, []);
-
-    const queueCompareScoreTeardown = useCallback((
-        auxiliaryScore: Score | null,
-        liveScore: Score | null,
-        label: string,
-    ) => {
-        const priorTeardown = compareScoreTeardownQueueRef.current;
-        const teardown = priorTeardown
-            .catch(() => {})
-            .then(async () => {
-                await waitForCompareOperations();
-
-                const scoresToDisable = Array.from(new Set(
-                    [liveScore, auxiliaryScore].filter((entry): entry is Score => Boolean(entry)),
-                ));
-                for (const targetScore of scoresToDisable) {
-                    // A preceding teardown may already have retired the captured
-                    // auxiliary score. Never call back into a destroyed instance.
-                    if (targetScore === auxiliaryScore && compareRightScoreRef.current !== auxiliaryScore) {
-                        continue;
-                    }
-                    if (!targetScore.setNoteEntryMode) {
-                        continue;
-                    }
-                    try {
-                        await runSerializedScoreOperation(
-                            () => Promise.resolve(targetScore.setNoteEntryMode!(false)),
-                            `compare-note-input-off:${label}`,
-                        );
-                    } catch (err) {
-                        console.warn(`Failed to disable compare note input during ${label}:`, err);
-                    }
-                }
-
-                if (auxiliaryScore && compareRightScoreRef.current === auxiliaryScore) {
-                    compareRightScoreRef.current = null;
-                    auxiliaryScore.destroy();
-                }
-            });
-        const guardedTeardown = teardown.catch((err) => {
-            console.warn(`Failed to retire compare score during ${label}:`, err);
-        });
-        compareScoreTeardownQueueRef.current = guardedTeardown;
-        return guardedTeardown;
-    }, [runSerializedScoreOperation, waitForCompareOperations]);
+    const {
+        hasPendingOperations: hasPendingCompareOperations,
+        invalidateOperations: invalidateCompareOperations,
+        isGenerationCurrent: isCompareGenerationCurrent,
+        queueKeyboardOperation: queueCompareKeyboardOperation,
+        queueScoreTeardown: queueCompareScoreTeardown,
+        trackOperation: trackCompareOperation,
+    } = useCompareOperationCoordinator({
+        auxiliaryScoreRef: compareRightScoreRef,
+        runSerializedScoreOperation,
+    });
 
     const scheduleLargeScoreInteractionPrime = useCallback((
         targetScore: Score,
@@ -6944,7 +6859,7 @@ ${partsBodyXml}
         // Supersede stale work from the preceding edit without cancelling later
         // keypresses that are already serialized in the same keyboard input run.
         const generation = invalidateCompareOperations(!options?.preserveKeyboardQueue);
-        const isCurrentGeneration = () => compareEditGenerationRef.current === generation;
+        const isCurrentGeneration = () => isCompareGenerationCurrent(generation);
         setCompareActiveSide(side);
         compareEditBusyRef.current = true;
         setCompareEditBusy(true);
@@ -7028,6 +6943,7 @@ ${partsBodyXml}
         getCompareScoreRole,
         getScoreMusicXmlText,
         invalidateCompareOperations,
+        isCompareGenerationCurrent,
         persistCompareScoreEdit,
         refreshCompareNoteInputCursor,
         refreshPageCount,
@@ -7062,7 +6978,7 @@ ${partsBodyXml}
                     () => Promise.resolve(targetScore.setInputStateFromSelection!()),
                     `compare-note-input-selection:${side}`,
                 ).catch(() => {});
-                if (compareEditGenerationRef.current !== generation) {
+                if (!isCompareGenerationCurrent(generation)) {
                     return;
                 }
             }
@@ -7070,7 +6986,7 @@ ${partsBodyXml}
                 () => Promise.resolve(targetScore.setNoteEntryMode!(enabled)),
                 `compare-note-input:${side}`,
             );
-            if (compareEditGenerationRef.current !== generation) {
+            if (!isCompareGenerationCurrent(generation)) {
                 return;
             }
             if (changed === false) {
@@ -7090,7 +7006,7 @@ ${partsBodyXml}
                     targetScore,
                     role,
                     side,
-                    () => compareEditGenerationRef.current === generation,
+                    () => isCompareGenerationCurrent(generation),
                 );
             } else {
                 setCompareNoteInputCursorByRole((prev) => ({ ...prev, [role]: null }));
@@ -7099,7 +7015,7 @@ ${partsBodyXml}
         try {
             await operation;
         } catch (err) {
-            if (compareEditGenerationRef.current === generation) {
+            if (isCompareGenerationCurrent(generation)) {
                 compareNoteInputDesiredByRoleRef.current = {
                     ...compareNoteInputDesiredByRoleRef.current,
                     [role]: compareNoteInputByRoleRef.current[role],
@@ -7115,6 +7031,7 @@ ${partsBodyXml}
         compareSwapBusy,
         getCompareScoreRole,
         invalidateCompareOperations,
+        isCompareGenerationCurrent,
         refreshCompareNoteInputCursor,
         runSerializedScoreOperation,
         trackCompareOperation,
@@ -7284,7 +7201,7 @@ ${partsBodyXml}
                 ),
                 `compare-select:${side}`,
             ).then(async (selected) => {
-                if (compareEditGenerationRef.current !== generation) {
+                if (!isCompareGenerationCurrent(generation)) {
                     return;
                 }
                 if (selected === false && selectionMode === 0 && targetScore.clearSelection) {
@@ -7294,7 +7211,7 @@ ${partsBodyXml}
                     );
                 }
                 await renderEditedCompareScore(targetScore, side, true);
-                if (compareEditGenerationRef.current !== generation) {
+                if (!isCompareGenerationCurrent(generation)) {
                     return;
                 }
                 await refreshCompareSelectionGeometry(
@@ -7302,12 +7219,12 @@ ${partsBodyXml}
                     role,
                     side,
                     selected !== false,
-                    () => compareEditGenerationRef.current === generation,
+                    () => isCompareGenerationCurrent(generation),
                 );
             }),
         );
         void selectionOperation.catch((err) => {
-            if (compareEditGenerationRef.current !== generation) {
+            if (!isCompareGenerationCurrent(generation)) {
                 return;
             }
             console.warn('Failed to select an element in compare score:', err);
@@ -7327,6 +7244,7 @@ ${partsBodyXml}
         handleCompareScoreClick,
         hitTestMeasure,
         invalidateCompareOperations,
+        isCompareGenerationCurrent,
         performCompareMutation,
         refreshCompareSelectionGeometry,
         renderEditedCompareScore,
@@ -7343,7 +7261,7 @@ ${partsBodyXml}
         if (
             compareSwapBusy
             || compareEditBusyRef.current
-            || comparePendingOperationsRef.current.size > 0
+            || hasPendingCompareOperations()
         ) {
             return false;
         }
@@ -7438,6 +7356,7 @@ ${partsBodyXml}
         score,
         compareView,
         getScoreMusicXmlText,
+        hasPendingCompareOperations,
         replaceMeasuresInMusicXml,
         invalidateAiProposalExpectedCurrent,
         recordAiProposalAppliedXml,
@@ -7456,7 +7375,7 @@ ${partsBodyXml}
         if (
             compareSwapBusy
             || compareEditBusyRef.current
-            || comparePendingOperationsRef.current.size > 0
+            || hasPendingCompareOperations()
         ) {
             return;
         }
@@ -7508,6 +7427,7 @@ ${partsBodyXml}
         aiScoreBridge,
         compareView,
         compareSwapBusy,
+        hasPendingCompareOperations,
         score,
         invalidateAiProposalExpectedCurrent,
         recordAiProposalAppliedXml,
@@ -7527,7 +7447,7 @@ ${partsBodyXml}
             || !score
             || compareSwapBusy
             || compareEditBusyRef.current
-            || comparePendingOperationsRef.current.size > 0
+            || hasPendingCompareOperations()
         ) {
             return;
         }
@@ -7551,6 +7471,7 @@ ${partsBodyXml}
         compareSwapBusy,
         score,
         getScoreMusicXmlText,
+        hasPendingCompareOperations,
         captureAiProposal,
         setAiBaseXml,
         setAiError,
@@ -7852,7 +7773,7 @@ ${partsBodyXml}
             || aiBusy
             || aiDiffFeedbackBusy
             || compareEditBusyRef.current
-            || comparePendingOperationsRef.current.size > 0
+            || hasPendingCompareOperations()
         ) {
             return;
         }
@@ -8139,6 +8060,7 @@ ${partsBodyXml}
         finishAiEdit,
         getAiProposalExpectedHashes,
         getAiProposalSession,
+        hasPendingCompareOperations,
         restoreAiProposalContinuity,
         setAiBaseXml,
         setAiError,
