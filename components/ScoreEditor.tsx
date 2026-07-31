@@ -131,6 +131,7 @@ import {
 import { type AiScoreBridge } from './score-editor/ai-score-bridge';
 import { useLatestCallbackFacade } from '@/lib/use-latest-callback-facade';
 import type { CompareSide } from './score-editor/compare/compare-types';
+import { useCompareClipboard } from './score-editor/compare/useCompareClipboard';
 import { useCompareOperationCoordinator } from './score-editor/compare/useCompareOperationCoordinator';
 import { useCompareTransport } from './score-editor/compare/useCompareTransport';
 import {
@@ -1804,7 +1805,6 @@ export default function ScoreEditor() {
     const previewAudioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
     const previewStreamIteratorRef = useRef<SynthBatchIterator | null>(null);
     const previewPlaybackGenerationRef = useRef(0);
-    const clipboardRef = useRef<{ mimeType: string; data: Uint8Array } | null>(null);
     const currentPageRef = useRef(currentPage);
     const selectedPointRef = useRef<{ page: number, x: number, y: number } | null>(selectedPoint);
     // False means libmscore already owns the authoritative selection. The only
@@ -1910,6 +1910,16 @@ export default function ScoreEditor() {
             release();
         }
     }, []);
+
+    const reportClipboardUnsupported = useCallback(() => {
+        alert('This build of webmscore does not expose selection copy.');
+    }, []);
+    const compareClipboard = useCompareClipboard({
+        runSerialized: runSerializedScoreOperation,
+        reportUnsupported: reportClipboardUnsupported,
+    });
+    // The main editor shares this slot on purpose; see useCompareClipboard.
+    const { clipboardRef, copySelection: copyCompareSelection } = compareClipboard;
 
     const stopCompareSideAudio = useCallback<StopCompareSideAudio>(
         (side, options) => stopCompareSideAudioRef.current(side, options),
@@ -13051,32 +13061,6 @@ ${partsBodyXml}
         return fn(clip.mimeType, clip.data);
     }, { skipWasmReselect: true });
 
-    const copyCompareSelection = useCallback(async (
-        targetScore: Score,
-        side: 'left' | 'right',
-    ) => {
-        if (!targetScore.selectionMimeType || !targetScore.selectionMimeData) {
-            alert('This build of webmscore does not expose selection copy.');
-            return false;
-        }
-        const copied = await runSerializedScoreOperation(async () => {
-            const mimeType = await Promise.resolve(targetScore.selectionMimeType!());
-            if (!mimeType) {
-                return null;
-            }
-            const data = await Promise.resolve(targetScore.selectionMimeData!());
-            if (!data || data.byteLength === 0) {
-                return null;
-            }
-            return { mimeType, data: data.slice() };
-        }, `compare-copy-selection:${side}`);
-        if (!copied) {
-            return false;
-        }
-        clipboardRef.current = copied;
-        return true;
-    }, [runSerializedScoreOperation]);
-
     const handleCompareKeyboardShortcut = useCallback((event: KeyboardEvent) => {
         const mutate = (
             label: string,
@@ -13171,6 +13155,9 @@ ${partsBodyXml}
             setHasSelection: setCompareHasSelection,
         });
     }, [
+        // clipboardRef is a stable useRef owned by useCompareClipboard; listed because
+        // the rule cannot see through the hook's destructured return.
+        clipboardRef,
         compareActiveRole,
         compareActiveScore,
         compareActiveSide,

@@ -4,10 +4,17 @@ import { useCompareClipboard } from '../components/score-editor/compare/useCompa
 import type { Score } from '../lib/webmscore-loader';
 
 const renderClipboard = () => {
-    const runSerialized = vi.fn(<T,>(operation: () => Promise<T>) => operation());
+    const labels: string[] = [];
+    // Not vi.fn: wrapping a generic callback erases its type parameter, so the mock no
+    // longer satisfies the hook's runSerialized signature. The labels array is the
+    // observable we actually assert on.
+    const runSerialized = <T,>(operation: () => Promise<T>, label: string): Promise<T> => {
+        labels.push(label);
+        return operation();
+    };
     const reportUnsupported = vi.fn();
     const hook = renderHook(() => useCompareClipboard({ runSerialized, reportUnsupported }));
-    return { ...hook, runSerialized, reportUnsupported };
+    return { ...hook, labels, reportUnsupported };
 };
 
 const makeScore = (mimeType: unknown, data: unknown) => ({
@@ -42,10 +49,7 @@ describe('useCompareClipboard', () => {
             await clipboard.result.current.copySelection(score, 'right');
         });
 
-        expect(clipboard.runSerialized).toHaveBeenCalledWith(
-            expect.any(Function),
-            'compare-copy-selection:right',
-        );
+        expect(clipboard.labels).toEqual(['compare-copy-selection:right']);
     });
 
     it('reports an unsupported build and leaves the clipboard untouched', async () => {
