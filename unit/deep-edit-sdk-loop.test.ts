@@ -36,6 +36,23 @@ const VALID_PATCH = {
 
 type ScriptedCall = { name: string; args: Record<string, unknown> };
 
+type ProposalView = {
+  proposedXml?: unknown;
+  verification: { level?: string };
+};
+
+type DeepEditAuditView = {
+  finalizedCandidateId?: string;
+  rationale?: string;
+  counters: {
+    llmCalls?: number;
+    toolCalls?: number;
+  };
+};
+
+const proposalFrom = (body: Record<string, unknown>) => body.proposal as ProposalView;
+const auditFrom = (body: Record<string, unknown>) => body.deepEdit as DeepEditAuditView;
+
 const scriptedModel = (script: ScriptedCall[]): { model: Model; requests: ModelRequest[] } => {
   const requests: ModelRequest[] = [];
   let step = 0;
@@ -141,9 +158,9 @@ describe('deep edit through the real agents SDK loop', () => {
     const result = await runDeepEditService(request(), { modelOverride: model });
 
     expect(result.status).toBe(200);
-    expect((result.body.proposal as Record<string, any>).verification.level).toBe('engine_load');
-    expect(String((result.body.proposal as Record<string, any>).proposedXml)).toContain('<step>G</step>');
-    const audit = result.body.deepEdit as Record<string, any>;
+    expect(proposalFrom(result.body).verification.level).toBe('engine_load');
+    expect(String(proposalFrom(result.body).proposedXml)).toContain('<step>G</step>');
+    const audit = auditFrom(result.body);
     expect(audit.finalizedCandidateId).toBe('cand-1');
     expect(audit.counters).toMatchObject({ llmCalls: 4, toolCalls: 3 });
     expect(requests.length).toBe(4);
@@ -165,8 +182,8 @@ describe('deep edit through the real agents SDK loop', () => {
     const result = await runDeepEditService(request(), { modelOverride: model });
 
     expect(result.status).toBe(200);
-    expect((result.body.proposal as Record<string, any>).verification.level).toBe('engine_load');
-    expect(String((result.body.proposal as Record<string, any>).proposedXml)).toContain('Deep Edit Title');
+    expect(proposalFrom(result.body).verification.level).toBe('engine_load');
+    expect(String(proposalFrom(result.body).proposedXml)).toContain('Deep Edit Title');
   });
 
   it('recovers from an invalid finalize inside the real loop', async () => {
@@ -184,7 +201,7 @@ describe('deep edit through the real agents SDK loop', () => {
     const result = await runDeepEditService(request(), { modelOverride: model });
 
     expect(result.status).toBe(200);
-    const audit = result.body.deepEdit as Record<string, any>;
+    const audit = auditFrom(result.body);
     expect(audit.finalizedCandidateId).toBe('cand-1');
     expect(audit.rationale).toBe('corrected');
     expect(audit.counters.llmCalls).toBe(4);
@@ -210,7 +227,7 @@ describe('deep edit through the real agents SDK loop', () => {
 
     expect(result.status).toBe(422);
     expect(result.body.errorCategory).toBe('budget_exhausted');
-    const audit = result.body.deepEdit as Record<string, any>;
+    const audit = auditFrom(result.body);
     expect(audit.counters.llmCalls).toBe(2);
   });
 });

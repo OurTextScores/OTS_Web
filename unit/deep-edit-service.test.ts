@@ -46,6 +46,28 @@ import {
 import { resolveDeepEditBudgets } from '../lib/music-services/deep-edit-service';
 import type { DeepEditBudgets } from '../lib/music-services/deep-edit-capability';
 
+type ProposalView = {
+  proposedXml?: unknown;
+  verification: { level?: string };
+};
+
+type DeepEditAuditView = {
+  finalizedCandidateId?: string;
+  counters: {
+    llmCalls?: number;
+    toolCalls?: number;
+    renders?: number;
+  };
+  candidates: Array<{
+    engineError?: string;
+    diff?: unknown;
+  }>;
+  environment: { engine?: string };
+};
+
+const proposalFrom = (body: Record<string, unknown>) => body.proposal as ProposalView;
+const auditFrom = (body: Record<string, unknown>) => body.deepEdit as DeepEditAuditView;
+
 const BASE_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <score-partwise version="4.0">
   <part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
@@ -152,7 +174,7 @@ describe('runDeepEditService', () => {
     expect(String(result.body.proposalSessionId)).toMatch(/^[0-9a-f-]{36}$/);
     expect(String(result.body.continuityToken)).toMatch(/^pct-v1:/);
     expect(result.body.cycle).toBe(1);
-    const audit = result.body.deepEdit as Record<string, any>;
+    const audit = auditFrom(result.body);
     expect(audit.finalizedCandidateId).toBe('cand-1');
     expect(audit.counters.toolCalls).toBe(2);
     expect(JSON.stringify(audit.candidates)).not.toContain('<score-partwise');
@@ -185,8 +207,8 @@ describe('runDeepEditService', () => {
     const result = await runDeepEditService(request(), { driveAgent: driver });
 
     expect(result.status).toBe(200);
-    expect((result.body.proposal as Record<string, any>).verification.level).toBe('engine_load');
-    const audit = result.body.deepEdit as Record<string, any>;
+    expect(proposalFrom(result.body).verification.level).toBe('engine_load');
+    const audit = auditFrom(result.body);
     // 3 model tool calls + 1 gate-run engine check.
     expect(audit.counters.toolCalls).toBe(4);
   });
@@ -215,7 +237,7 @@ describe('runDeepEditService', () => {
     expect(result.status).toBe(422);
     expect(result.body.errorCategory).toBe('gate_failed');
     expect(String(result.body.error)).toContain('engine');
-    const audit = result.body.deepEdit as Record<string, any>;
+    const audit = auditFrom(result.body);
     expect(audit.candidates[0].engineError).toContain('corrupt beam group');
     expect(audit.environment.engine).toBe('available');
   });
@@ -237,8 +259,8 @@ describe('runDeepEditService', () => {
     const result = await runDeepEditService(request(), { driveAgent: driver });
 
     expect(result.status).toBe(200);
-    expect((result.body.proposal as Record<string, any>).verification.level).toBe('patch_apply');
-    const audit = result.body.deepEdit as Record<string, any>;
+    expect(proposalFrom(result.body).verification.level).toBe('patch_apply');
+    const audit = auditFrom(result.body);
     expect(audit.environment.engine).toBe('unavailable');
     expect(audit.candidates[0].engineError).toBeUndefined();
     expect(audit.candidates[0].diff).toMatchObject({ changedCount: 1 });
@@ -331,7 +353,7 @@ describe('runDeepEditService', () => {
     const result = await runDeepEditService(request(), { driveAgent: driver });
 
     expect(result.status).toBe(200);
-    expect((result.body.proposal as Record<string, any>).verification.level).toBe('engine_load');
+    expect(proposalFrom(result.body).verification.level).toBe('engine_load');
     expect(mocked.loadWebMscoreInProcess).toHaveBeenCalled();
   });
 
@@ -371,7 +393,7 @@ describe('runDeepEditService', () => {
 
     expect(result.status).toBe(422);
     expect(result.body.errorCategory).toBe('budget_exhausted');
-    const audit = result.body.deepEdit as Record<string, any>;
+    const audit = auditFrom(result.body);
     expect(audit.counters.toolCalls).toBe(3);
   });
 
@@ -412,8 +434,8 @@ describe('runDeepEditService', () => {
     });
 
     expect(result.status).toBe(200);
-    expect((result.body.proposal as Record<string, any>).verification.level).toBe('render');
-    const audit = result.body.deepEdit as Record<string, any>;
+    expect(proposalFrom(result.body).verification.level).toBe('render');
+    const audit = auditFrom(result.body);
     expect(audit.counters.renders).toBe(1);
   });
 
@@ -505,7 +527,7 @@ describe('runDeepEditService', () => {
     const result = await runDeepEditService(request(), { driveAgent: driver });
 
     expect(result.status).toBe(200);
-    const audit = result.body.deepEdit as Record<string, any>;
+    const audit = auditFrom(result.body);
     expect(audit.finalizedCandidateId).toBe('cand-1');
     // finalize charges no tool budget: two tool calls (patch + engine check) only.
     expect(audit.counters.toolCalls).toBe(2);
@@ -527,7 +549,7 @@ describe('runDeepEditService', () => {
 
     expect(result.status).toBe(422);
     expect(result.body.errorCategory).toBe('budget_exhausted');
-    const audit = result.body.deepEdit as Record<string, any>;
+    const audit = auditFrom(result.body);
     expect(audit.counters.renders).toBe(0);
   });
 

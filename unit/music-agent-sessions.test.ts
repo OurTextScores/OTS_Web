@@ -1,6 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createScoreOpsSession, clearScoreOpsSessions } from '../lib/music-services/scoreops-session-store';
 
+type MockAgentTool = {
+  name: string;
+  execute: (input: unknown, runContext: unknown) => Promise<unknown>;
+};
+
+type MockAgent = {
+  tools: MockAgentTool[];
+};
+
+type MockRunOptions = {
+  context: unknown;
+};
+
 const mocked = vi.hoisted(() => ({
   run: vi.fn(),
   runMusicContextService: vi.fn(),
@@ -31,65 +44,84 @@ vi.mock('@openai/agents', () => {
 });
 
 vi.mock('../lib/music-services/context-service', () => ({
-  runMusicContextService: (payload: any) => mocked.runMusicContextService(payload),
+  runMusicContextService: mocked.runMusicContextService,
 }));
 
 vi.mock('../lib/music-services/convert-service', () => ({
-  runMusicConvertService: (payload: any) => mocked.runMusicConvertService(payload),
+  runMusicConvertService: mocked.runMusicConvertService,
 }));
 
 vi.mock('../lib/music-services/diff-feedback-service', () => ({
-  runDiffFeedbackService: (payload: any) => mocked.runDiffFeedbackService(payload),
+  runDiffFeedbackService: mocked.runDiffFeedbackService,
 }));
 
 vi.mock('../lib/music-services/functional-harmony-service', () => ({
-  runFunctionalHarmonyAnalyzeService: (payload: any) => mocked.runFunctionalHarmonyAnalyzeService(payload),
+  runFunctionalHarmonyAnalyzeService: mocked.runFunctionalHarmonyAnalyzeService,
 }));
 
 vi.mock('../lib/music-services/generate-service', () => ({
-  runMusicGenerateService: (payload: any) => mocked.runMusicGenerateService(payload),
+  runMusicGenerateService: mocked.runMusicGenerateService,
 }));
 
 vi.mock('../lib/music-services/harmony-service', () => ({
-  runHarmonyAnalyzeService: (payload: any) => mocked.runHarmonyAnalyzeService(payload),
+  runHarmonyAnalyzeService: mocked.runHarmonyAnalyzeService,
 }));
 
 vi.mock('../lib/music-services/scoreops-service', () => ({
-  runMusicScoreOpsPromptService: (payload: any) => mocked.runMusicScoreOpsPromptService(payload),
-  runMusicScoreOpsPreviewService: (payload: any) => mocked.runMusicScoreOpsPreviewService(payload),
+  runMusicScoreOpsPromptService: mocked.runMusicScoreOpsPromptService,
+  runMusicScoreOpsPreviewService: mocked.runMusicScoreOpsPreviewService,
 }));
 
 vi.mock('../lib/music-services/patch-service', () => ({
-  runMusicPatchService: (payload: any) => mocked.runMusicPatchService(payload),
+  runMusicPatchService: mocked.runMusicPatchService,
 }));
 
 vi.mock('../lib/music-services/render-service', () => ({
-  runMusicRenderService: (payload: any) => mocked.runMusicRenderService(payload),
+  runMusicRenderService: mocked.runMusicRenderService,
 }));
 
 import { runMusicAgentRouter } from '../lib/music-agents/router';
 
 describe('runMusicAgentRouter Sessions', () => {
+  const priorOpenAiKey = process.env.OPENAI_API_KEY;
+  const priorAllowServerKeys = process.env.ALLOW_SERVER_LLM_KEYS;
+
   beforeEach(() => {
     vi.clearAllMocks();
     clearScoreOpsSessions();
+    process.env.OPENAI_API_KEY = 'test-key';
+    process.env.ALLOW_SERVER_LLM_KEYS = '1';
+  });
+
+  afterEach(() => {
+    if (priorOpenAiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = priorOpenAiKey;
+    }
+    if (priorAllowServerKeys === undefined) {
+      delete process.env.ALLOW_SERVER_LLM_KEYS;
+    } else {
+      process.env.ALLOW_SERVER_LLM_KEYS = priorAllowServerKeys;
+    }
   });
 
   it('passes scoreSessionId to Agent and tools', async () => {
-    process.env.OPENAI_API_KEY = 'test-key';
-    
     // Create a dummy session
     const session = createScoreOpsSession({
       content: '<score-partwise/>',
       artifactId: 'art_123',
     });
 
-    mocked.run.mockImplementation(async (agent, prompt, options) => {
+    mocked.run.mockImplementation(async (agent: MockAgent, _prompt: unknown, options: MockRunOptions) => {
       // Simulate tool call by the agent
-      const tool = agent.tools.find((t: any) => t.name === 'music.context');
+      const tool = agent.tools.find((candidate) => candidate.name === 'music.context');
+      if (!tool) {
+        throw new Error('Expected music.context tool to be registered.');
+      }
       // The SDK passes a RunContext which has the 'context' property
       // options.context IS our MusicAgentRunnerContext
-      const toolResult = await tool.execute({ include_abc: true }, { context: options.context });
+      await tool.execute({ include_abc: true }, { context: options.context });
       
       return {
         finalOutput: {
