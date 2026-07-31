@@ -120,6 +120,7 @@ import {
     type AiMeasureThread,
     type AiThreadComment,
 } from './score-editor/compare/CompareMeasureComments';
+import { buildCompareReflowPlan } from './score-editor/compare/compare-reflow-plan';
 import { CompareScorePane } from './score-editor/compare/CompareScorePane';
 import { AiDiffBlockReview } from './score-editor/AiDiffBlockReview';
 import { XmlDiffView } from './score-editor/XmlDiffView';
@@ -9261,42 +9262,15 @@ ${partsBodyXml}
             if (!compareLineBreakRestoreRef.current) {
                 compareLineBreakRestoreRef.current = { live: liveBreaks, auxiliary: auxiliaryBreaks };
             }
-            // Two different orientations meet here and must be reconciled explicitly.
-            // compareAlignments is *pane*-oriented: its left/right come from
-            // compareLeftXml/compareRightXml. The break arrays above are *score*-oriented:
-            // they were fetched from the live and auxiliary scores. Combining them by
-            // position, as this used to, applies one pane's line-break plan to the other
-            // pane's score whenever the mode maps the live score to the right pane.
-            const liveIsLeftPane = compareLeftScore === score;
-            const paneCount = (which: 'left' | 'right') => Math.max(
-                0,
-                ...compareAlignments.map((alignment) => (
-                    which === 'left' ? alignment.leftCount : alignment.rightCount
-                )),
-            );
-            const livePane = liveIsLeftPane ? 'left' : 'right';
-            const auxiliaryPane = liveIsLeftPane ? 'right' : 'left';
-
-            const liveCount = liveBreaks.length || paneCount(livePane);
-            const auxiliaryCount = auxiliaryBreaks.length || paneCount(auxiliaryPane);
-            const normalizedLive = Array.from({ length: liveCount }, (_, index) => Boolean(liveBreaks[index]));
-            const normalizedAuxiliary = Array.from({ length: auxiliaryCount }, (_, index) => Boolean(auxiliaryBreaks[index]));
-            const liveMismatch = Array.from({ length: liveCount }, () => false);
-            const auxiliaryMismatch = Array.from({ length: auxiliaryCount }, () => false);
-            compareAlignments.forEach((alignment) => {
-                buildMismatchBreaks(alignment.rows, livePane, liveCount).forEach((value, index) => {
-                    if (value) {
-                        liveMismatch[index] = true;
-                    }
-                });
-                buildMismatchBreaks(alignment.rows, auxiliaryPane, auxiliaryCount).forEach((value, index) => {
-                    if (value) {
-                        auxiliaryMismatch[index] = true;
-                    }
-                });
+            // Pane-oriented alignments and score-oriented break arrays are reconciled in
+            // buildCompareReflowPlan, which is unit tested for the swapped case.
+            const { liveReflow, auxiliaryReflow } = buildCompareReflowPlan({
+                liveBreaks,
+                auxiliaryBreaks,
+                liveIsLeftPane: compareLeftScore === score,
+                alignments: compareAlignments,
+                buildMismatchBreaks,
             });
-            const liveReflow = normalizedLive.map((value, index) => value || liveMismatch[index]);
-            const auxiliaryReflow = normalizedAuxiliary.map((value, index) => value || auxiliaryMismatch[index]);
             await applyMeasureLineBreaks(score, liveReflow);
             await applyMeasureLineBreaks(compareRightScore, auxiliaryReflow);
             if (canceled) {
