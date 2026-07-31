@@ -104,7 +104,6 @@ import {
 } from '../lib/proposal-session-client';
 import {
     AI_EDIT_EFFORT_PROFILES,
-    type AiEditEffort,
 } from '../lib/ai-edit-effort';
 import { readAiEditServiceResponse } from '../lib/ai-edit-progress-client';
 import { useAiEditController } from './score-editor/useAiEditController';
@@ -805,7 +804,6 @@ const MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_SPACE_INSTRUMENTATION = (process.env.NEX
 const MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_SPACE_ID = (process.env.NEXT_PUBLIC_MUSIC_TRANSCODA_SPACE_ID || 'jhlusko/transcoda').trim();
 const MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_MODEL = (process.env.NEXT_PUBLIC_MUSIC_TRANSCODA_MODEL_ID || 'btrkeks/transcoda-59M-zeroshot-v1').trim();
 const MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_REVISION = (process.env.NEXT_PUBLIC_MUSIC_TRANSCODA_REVISION || 'b529f8aa5d996d9224df3395b5b92d0867343c91').trim();
-const MUSIC_AGENT_DEFAULT_MODEL = (process.env.NEXT_PUBLIC_MUSIC_AGENT_DEFAULT_MODEL || 'gpt-5.5').trim();
 const CODE_EDITOR_THEME_OPTIONS: Array<{ value: CodeEditorThemeMode; label: string }> = [
     { value: 'light', label: 'Light' },
     { value: 'light-contrast', label: 'Light High Contrast' },
@@ -1359,8 +1357,6 @@ export default function ScoreEditor() {
     const [compareView, setCompareView] = useState<CompareViewState | null>(null);
     const [compareSwapped, setCompareSwapped] = useState(false);
     const aiProposalController = useAiProposalController();
-    const aiProposalApplyError = aiProposalController.applyError;
-    const aiProposalAudit = aiProposalController.audit;
     const captureAiProposal = aiProposalController.capture;
     const verifyAiProposalCurrent = aiProposalController.verifyCurrent;
     const recordAiProposalAppliedXml = aiProposalController.recordAppliedXml;
@@ -1539,18 +1535,17 @@ export default function ScoreEditor() {
     const [functionalHarmonyRntxtExport, setFunctionalHarmonyRntxtExport] = useState('');
     const aiAssistantController = useAiAssistantController();
     const {
-        aiProvider, setAiProvider,
+        aiProvider,
         aiModel, setAiModel,
         aiApiKey, setAiApiKey,
-        aiMode, setAiMode,
-        aiPrompt, setAiPrompt,
-        aiIncludeXml, setAiIncludeXml,
+        aiPrompt,
+        aiIncludeXml,
         aiIncludePdf, setAiIncludePdf,
-        aiIncludePage, setAiIncludePage,
-        aiIncludeSelection, setAiIncludeSelection,
-        aiIncludeChat, setAiIncludeChat,
-        aiDeepEdit, setAiDeepEdit,
-        aiEditEffort, setAiEditEffort,
+        aiIncludePage,
+        aiIncludeSelection,
+        aiIncludeChat,
+        aiDeepEdit,
+        aiEditEffort,
         aiIncludeRenderedImage, setAiIncludeRenderedImage,
         aiMaxTokensMode, setAiMaxTokensMode,
         aiMaxTokens, setAiMaxTokens,
@@ -1564,11 +1559,11 @@ export default function ScoreEditor() {
         aiPatchError, setAiPatchError,
         aiPatchedXml, setAiPatchedXml,
         aiBaseXml, setAiBaseXml,
-        aiError, setAiError,
-        aiModels, setAiModels,
+        setAiError,
+        setAiModels,
         aiModelDescriptors, setAiModelDescriptors,
-        aiModelsLoading, setAiModelsLoading,
-        aiModelsError, setAiModelsError,
+        setAiModelsLoading,
+        setAiModelsError,
     } = aiAssistantController;
     const [musicNotaGenBackend, setMusicNotaGenBackend] = useState<'huggingface' | 'huggingface-space'>(
         MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_BACKEND,
@@ -1579,8 +1574,6 @@ export default function ScoreEditor() {
     const [musicNotaGenSpacePeriod, setMusicNotaGenSpacePeriod] = useState(MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_SPACE_PERIOD);
     const [musicNotaGenSpaceComposer, setMusicNotaGenSpaceComposer] = useState(MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_SPACE_COMPOSER);
     const [musicNotaGenSpaceInstrumentation, setMusicNotaGenSpaceInstrumentation] = useState(MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_SPACE_INSTRUMENTATION);
-    const [musicNotaGenPrompt, setMusicNotaGenPrompt] = useState('');
-    const [musicNotaGenUseCurrentScoreSeed, setMusicNotaGenUseCurrentScoreSeed] = useState(false);
     const [musicNotaGenDryRun] = useState(false);
     const [musicNotaGenBusy, setMusicNotaGenBusy] = useState(false);
     const [musicNotaGenError, setMusicNotaGenError] = useState<string | null>(null);
@@ -1599,7 +1592,6 @@ export default function ScoreEditor() {
     const [musicTranscodaGeneratedKern, setMusicTranscodaGeneratedKern] = useState('');
     const [musicTranscodaGeneratedXml, setMusicTranscodaGeneratedXml] = useState('');
     const [musicTranscodaImageFile, setMusicTranscodaImageFile] = useState<File | null>(null);
-    const [musicTranscodaUploadBusy, setMusicTranscodaUploadBusy] = useState(false);
     const [musicTranscodaElapsedMs, setMusicTranscodaElapsedMs] = useState(0);
     const [musicTranscodaPhase, setMusicTranscodaPhase] = useState<'idle' | 'uploading' | 'transcribing'>('idle');
     const musicTranscodaStartedAtRef = useRef<number | null>(null);
@@ -2102,19 +2094,6 @@ export default function ScoreEditor() {
         const serializer = new XMLSerializer();
         return { xml: serializer.serializeToString(targetDoc), error: '' };
     }, []);
-
-    const replaceMeasureInMusicXml = useCallback((
-        sourceXml: string,
-        targetXml: string,
-        partIndex: number,
-        sourceMeasureIndex: number,
-        targetMeasureIndex: number,
-    ) => replaceMeasuresInMusicXml(
-        sourceXml,
-        targetXml,
-        partIndex,
-        [{ sourceIndex: sourceMeasureIndex, targetIndex: targetMeasureIndex }],
-    ), [replaceMeasuresInMusicXml]);
 
     const buildMismatchBlocks = useCallback((rows: MeasureAlignmentRow[]) => {
         const blocks: Array<{ start: number; end: number }> = [];
@@ -3572,7 +3551,6 @@ export default function ScoreEditor() {
     ]);
 
     const compareGutterRowHeight = 56;
-    const compareGutterRowStyle = { minHeight: `${compareGutterRowHeight}px` };
     const compareZoomStyle = {
         width: compareLeftSvgSize ? `${compareLeftSvgSize.width * compareEffectiveZoom}px` : 'auto',
         height: compareLeftSvgSize ? `${compareLeftSvgSize.height * compareEffectiveZoom}px` : 'auto',
@@ -4463,7 +4441,7 @@ ${partsBodyXml}
                     }
                 }
                 return { nodes, error: '' };
-            } catch (err) {
+            } catch {
                 return { nodes: [] as Node[], error: `XPath "${path}" could not be evaluated.` };
             }
         };
@@ -5470,7 +5448,7 @@ ${partsBodyXml}
                             });
                         });
                     }
-                } catch (err) {
+                } catch {
                     setInteractionState({ preparing: false, ready: true });
                     if (targetScore.saveAudio) {
                         queueMicrotask(() => {
@@ -7414,24 +7392,6 @@ ${partsBodyXml}
         setAiProposalApplyError,
         verifyAiProposalCurrent,
     ]);
-
-    const handleCompareOverwrite = useCallback(async (
-        sourceScore: Score | null,
-        targetScore: Score | null,
-        partIndex: number,
-        sourceMeasureIndex: number | null,
-        targetMeasureIndex: number | null,
-    ) => {
-        if (sourceMeasureIndex === null || targetMeasureIndex === null) {
-            return;
-        }
-        await handleCompareOverwriteBlock(
-            sourceScore,
-            targetScore,
-            partIndex,
-            [{ leftIndex: sourceMeasureIndex, rightIndex: targetMeasureIndex }],
-        );
-    }, [handleCompareOverwriteBlock]);
 
     const handleAcceptAllAiChanges = useCallback(async () => {
         if (!compareView || compareView.title !== 'Assistant Proposal') {
@@ -10926,7 +10886,6 @@ ${partsBodyXml}
             return;
         }
         setMusicTranscodaPhase('uploading');
-        setMusicTranscodaUploadBusy(true);
         musicTranscodaStartedAtRef.current = null;
         setMusicTranscodaBusy(true);
         setMusicTranscodaError(null);
@@ -10939,7 +10898,6 @@ ${partsBodyXml}
         let failureReason = '';
         try {
             const imageDataUrl = await fileToBase64(musicTranscodaImageFile);
-            setMusicTranscodaUploadBusy(false);
             setMusicTranscodaPhase('transcribing');
             musicTranscodaStartedAtRef.current = null;
             const payload = await postScoreEditorJson('/api/music/omr/transcribe', {
@@ -10973,7 +10931,6 @@ ${partsBodyXml}
         } finally {
             setMusicTranscodaPhase('idle');
             setMusicTranscodaBusy(false);
-            setMusicTranscodaUploadBusy(false);
             emitEditorTelemetry('score_editor_ai_request', {
                 channel: 'transcoda',
                 backend: 'huggingface-space',
@@ -14129,17 +14086,6 @@ ${partsBodyXml}
         return range;
     };
 
-    const getSelectionMeasureRange = async (targetScore: Score) => {
-        if (typeof targetScore.selectionMeasureRange !== 'function') {
-            throw new Error('Selection audio requires an updated webmscore build.');
-        }
-        const range = await Promise.resolve(targetScore.selectionMeasureRange());
-        if (!range || !Number.isFinite(range.startMeasureIndex) || !Number.isFinite(range.endMeasureIndex)) {
-            throw new Error('No measure range is selected.');
-        }
-        return range;
-    };
-
     const handleExportCurrentPageAudio = async () => {
         if (!score || !score.saveAudioForMeasureRange) {
             alert('Current-page audio export is not available in this build.');
@@ -14174,7 +14120,7 @@ ${partsBodyXml}
         sourcesRef.current.forEach(src => {
             try {
                 src.stop();
-            } catch (_) {
+            } catch {
                 // ignore
             }
         });
@@ -16266,13 +16212,11 @@ ${partsBodyXml}
 
                         // Get selection bounding boxes for keyboard/button enablement
                         let hasMeasureSelection = false;
-                        let selectionBoxCount = 0;
                         if (score.getSelectionBoundingBoxes) {
                             try {
                                 const bboxes = await score.getSelectionBoundingBoxes();
                                 if (bboxes && bboxes.length > 0) {
                                     hasMeasureSelection = true;
-                                    selectionBoxCount = bboxes.length;
                                     // Set boxes for state tracking (keyboard shortcuts, button states)
                                     // Set backend highlighting flag to skip visual rendering (backend handles it)
                                     const boxes: SelectionBox[] = bboxes.map((bb, index) => {

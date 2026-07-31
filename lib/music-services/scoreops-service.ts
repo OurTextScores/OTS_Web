@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import {
   createScoreArtifact,
-  getScoreArtifact,
   summarizeScoreArtifact,
   type ScoreArtifact,
 } from '../score-artifacts';
@@ -10,11 +9,6 @@ import { computeMusicXmlIdentityHashServer } from '../musicxml-identity-server';
 import {
   asRecord,
   errorResult,
-  looksLikeMusicXml,
-  normalizeInputArtifactId,
-  normalizeScoreSessionId,
-  readBoolean,
-  readContent,
   resolveScoreContent,
   type ServiceResult,
 } from './common';
@@ -473,15 +467,6 @@ function buildSessionMetadata(
   }
 
   return Object.keys(next).length > 0 ? next : null;
-}
-
-function errorResultWrapper(
-  status: number,
-  code: ScoreOpsErrorCode,
-  message: string,
-  details?: Record<string, unknown>,
-): ScoreOpsServiceResult {
-  return errorResult(status, code, message, details);
 }
 
 function escapeXmlText(value: string) {
@@ -3384,7 +3369,6 @@ function parsePromptStep(stepText: string): { ops: ScoreOp[]; unsupportedReasons
   // Full transpose: "transpose to key of G Major", "transpose to D minor"
   const transposeToKeyRegex = /transpos(?:e|ing)\s+to\s+(?:(?:the\s+)?key\s+(?:of\s+)?)?([A-Ga-g])[\s-]?(?:flat|b|\u266D)?\s*(?:sharp|#|\u266F)?\s*(?:major|minor)?/gi;
   for (const m of stepText.matchAll(transposeToKeyRegex)) {
-    const keyName = m[0].toLowerCase();
     const keyMap: Record<string, number> = {
       'c flat': -7, 'cb': -7, 'c\u266D': -7,
       'g flat': -6, 'gb': -6, 'g\u266D': -6,

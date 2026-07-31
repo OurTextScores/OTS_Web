@@ -91,7 +91,6 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
     onAddArpeggio,
     onAddTremolo,
     onOpenPalette,
-    onSetNoteheadGroup,
     onSetBeamMode,
     onAddFretDiagram,
     onToggleNoteInput,
