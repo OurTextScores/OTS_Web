@@ -3,7 +3,7 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('next/dynamic', () => ({
-  default: (_importer: unknown, options: any) => {
+  default: (_importer: unknown, options: { loading?: () => React.ReactNode }) => {
     // Call loading renderer so it's covered by tests.
     options?.loading?.();
 

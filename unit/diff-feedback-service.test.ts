@@ -28,6 +28,17 @@ import { computeMusicXmlIdentityHashServer } from '../lib/musicxml-identity-serv
 const SESSION_BASE_XML = '<score-partwise version="4.0"><part-list/><part id="P1"><measure number="1"/></part></score-partwise>';
 const SESSION_PROPOSED_XML = '<score-partwise version="4.0"><part-list/><part id="P1"><measure number="1"><note/></measure></part></score-partwise>';
 
+type DiffFeedbackAuditView = {
+  proposalContext: {
+    provided?: boolean;
+    lineage?: string;
+    continuity?: string;
+    previousCycleDropped?: boolean;
+  };
+};
+
+const auditFrom = (body: Record<string, unknown>) => body.audit as DiffFeedbackAuditView;
+
 const proposalSessionInput = (currentXml: string, overrides: Record<string, unknown> = {}) => ({
   id: 'sess-continuity-1',
   cycle: 1,
@@ -287,7 +298,7 @@ describe('diff-feedback-service', () => {
     });
 
     expect(result.status).toBe(200);
-    const audit = result.body.audit as Record<string, any>;
+    const audit = auditFrom(result.body);
     expect(audit.proposalContext.lineage).toBe('client_attested');
     expect(audit.proposalContext.previousCycleDropped).toBe(false);
   });
@@ -325,7 +336,7 @@ describe('diff-feedback-service', () => {
     });
 
     expect(result.status).toBe(200);
-    const audit = result.body.audit as Record<string, any>;
+    const audit = auditFrom(result.body);
     expect(audit.proposalContext.lineage).toBe('verified');
     expect(audit.proposalContext.continuity).toBe('server');
     expect(String(result.body.continuityToken)).toMatch(/^pct-v1:[0-9a-f]{64}$/);
@@ -354,7 +365,7 @@ describe('diff-feedback-service', () => {
     expect(prompt).toContain('STANDING CONSTRAINTS FROM EARLIER CYCLES');
     expect(prompt).not.toContain('PREVIOUS PROPOSAL PATCH');
     expect(prompt).not.toContain('Added the arpeggio as eighth notes.');
-    const audit = result.body.audit as Record<string, any>;
+    const audit = auditFrom(result.body);
     expect(audit.proposalContext.lineage).toBe('mismatch');
     expect(audit.proposalContext.previousCycleDropped).toBe(true);
   });
@@ -389,7 +400,7 @@ describe('diff-feedback-service', () => {
 
     expect(result.status).toBe(200);
     expect(String(result.body.proposalSessionId)).toMatch(/^[0-9a-f-]{36}$/);
-    const audit = result.body.audit as Record<string, any>;
+    const audit = auditFrom(result.body);
     expect(audit.proposalContext).toMatchObject({ provided: false, lineage: 'none' });
   });
 

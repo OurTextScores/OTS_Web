@@ -9,7 +9,7 @@ vi.mock('../lib/music-conversion', () => ({
 describe('runMusicRenderService', () => {
   it('renders a PNG snapshot from XML content', async () => {
     const mockBuffer = Buffer.from('fake-png-data');
-    (renderMusicSnapshot as any).mockResolvedValue({
+    vi.mocked(renderMusicSnapshot).mockResolvedValue({
       buffer: mockBuffer,
       mimeType: 'image/png',
     });

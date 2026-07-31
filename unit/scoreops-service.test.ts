@@ -53,7 +53,7 @@ const mocked = vi.hoisted(() => {
         // Insert a text element marker so XML changes detectably
         xml = xml.replace(/<\/score-partwise>/, `<!-- selectedText:${text} --></score-partwise>`);
       }),
-      setDurationType: vi.fn(async (_durationType: number) => {
+      setDurationType: vi.fn(async () => {
         updateSelectedMeasure((measureXml) => measureXml.replace(/<type>[^<]*<\/type>/i, '<type>quarter</type>'));
       }),
       setVoice: vi.fn(async (_voiceIndex: number) => {
@@ -62,7 +62,7 @@ const mocked = vi.hoisted(() => {
       changeSelectedElementsVoice: vi.fn(async (_voiceIndex: number) => {
         updateSelectedMeasure((measureXml) => measureXml.replace(/<voice>\d+<\/voice>/i, `<voice>${_voiceIndex + 1}</voice>`));
       }),
-      transpose: vi.fn(async (mode: number, direction: number, key: number, interval: number, _trKeys: boolean, _trChordNames: boolean, _useDoubleSharps: boolean) => {
+      transpose: vi.fn(async (mode: number, direction: number, key: number, interval: number) => {
         updateSelectedMeasure((measureXml) => measureXml.replace(/<\/note>/, `</note><!-- transposed:mode=${mode},dir=${direction},key=${key},interval=${interval} -->`));
       }),
       addTempoText: vi.fn(async (bpm: number) => {
@@ -342,7 +342,8 @@ describe('runMusicScoreOpsService', () => {
     }, 'open');
 
     expect(open.status).toBe(200);
-    expect((open.body as any).metadata?.launchContext).toMatchObject({
+    const openMetadata = open.body.metadata as { launchContext?: Record<string, unknown> } | undefined;
+    expect(openMetadata?.launchContext).toMatchObject({
       source: 'ourtextscores',
       workId: '12345',
       sourceId: 'source-1',
@@ -358,7 +359,8 @@ describe('runMusicScoreOpsService', () => {
     }, 'sync');
 
     expect(sync.status).toBe(200);
-    expect((sync.body as any).metadata?.launchContext).toMatchObject({
+    const syncMetadata = sync.body.metadata as { launchContext?: Record<string, unknown> } | undefined;
+    expect(syncMetadata?.launchContext).toMatchObject({
       source: 'ourtextscores',
       workId: '12345',
       sourceId: 'source-1',

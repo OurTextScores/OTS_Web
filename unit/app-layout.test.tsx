@@ -11,17 +11,22 @@ import RootLayout from '../app/layout';
 describe('RootLayout', () => {
   it('renders children', () => {
     const child = <div>child</div>;
-    const tree: any = RootLayout({ children: child });
+    const tree = RootLayout({ children: child });
+    const treeProps = tree.props as {
+      lang: string;
+      suppressHydrationWarning: boolean;
+      children: React.ReactNode;
+    };
 
     expect(tree.type).toBe('html');
-    expect(tree.props.lang).toBe('en');
-    expect(tree.props.suppressHydrationWarning).toBe(true);
+    expect(treeProps.lang).toBe('en');
+    expect(treeProps.suppressHydrationWarning).toBe(true);
 
-    const children: any[] = Array.isArray(tree.props.children)
-      ? tree.props.children
-      : [tree.props.children];
-    const body = children.find((c: any) => c?.type === 'body');
+    const children = React.Children.toArray(treeProps.children);
+    const body = children.find((candidate): candidate is React.ReactElement<{ children: React.ReactNode }> => (
+      React.isValidElement<{ children: React.ReactNode }>(candidate) && candidate.type === 'body'
+    ));
     expect(body).toBeDefined();
-    expect(body.props.children).toBe(child);
+    expect(body?.props.children).toBe(child);
   });
 });

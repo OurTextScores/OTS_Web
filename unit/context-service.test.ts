@@ -26,6 +26,15 @@ type ContextResponse = {
       results: unknown[];
     };
     fullXml: null | { truncated: boolean };
+    sourceContext?: {
+      source?: string;
+      workId?: string;
+      sourceId?: string;
+      revisionId?: string;
+      workTitle?: string;
+      composer?: string;
+      imslpUrl?: string;
+    };
   };
 };
 
@@ -162,7 +171,7 @@ describe('runMusicContextService', () => {
     });
 
     expect(result.status).toBe(200);
-    expect((result.body as any).context.sourceContext).toMatchObject({
+    expect((result.body as ContextResponse).context.sourceContext).toMatchObject({
       source: 'ourtextscores',
       workId: '12345',
       sourceId: 'source-1',

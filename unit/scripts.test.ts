@@ -1,13 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const loadCjs = async (path: string) => {
-  const mod: any = await import(path);
-  return mod?.default && Object.keys(mod).length === 1 ? mod.default : mod;
+type CheckWasmModule = {
+  checkWasmArtifacts: (options: Record<string, unknown>) => boolean;
+};
+
+type SyncWasmModule = {
+  syncWasmArtifacts: (options: Record<string, unknown>) => boolean;
+};
+
+const loadCjs = async <Module>(path: string): Promise<Module> => {
+  const imported: unknown = await import(path);
+  const moduleRecord = imported as Record<string, unknown>;
+  const resolved = moduleRecord.default && Object.keys(moduleRecord).length === 1
+    ? moduleRecord.default
+    : moduleRecord;
+  return resolved as Module;
 };
 
 describe('scripts', () => {
   it('check-wasm reports success when all artifacts exist', async () => {
-    const mod: any = await loadCjs('../scripts/check-wasm.js');
+    const mod = await loadCjs<CheckWasmModule>('../scripts/check-wasm.js');
 
     const files = new Map<string, Buffer>([
       ['/repo/public/a.wasm', Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00])],
@@ -40,7 +52,7 @@ describe('scripts', () => {
   });
 
   it('check-wasm reports failure when an artifact is empty', async () => {
-    const mod: any = await loadCjs('../scripts/check-wasm.js');
+    const mod = await loadCjs<CheckWasmModule>('../scripts/check-wasm.js');
 
     const fsModule = {
       existsSync: vi.fn(() => true),
@@ -59,7 +71,7 @@ describe('scripts', () => {
   });
 
   it('check-wasm reports failure when an artifact is missing', async () => {
-    const mod: any = await loadCjs('../scripts/check-wasm.js');
+    const mod = await loadCjs<CheckWasmModule>('../scripts/check-wasm.js');
 
     const fsModule = {
       existsSync: vi.fn((p: string) => !p.endsWith('missing.wasm')),
@@ -78,7 +90,7 @@ describe('scripts', () => {
   });
 
   it('sync-wasm copies artifacts when sources exist', async () => {
-    const mod: any = await loadCjs('../scripts/sync-wasm.js');
+    const mod = await loadCjs<SyncWasmModule>('../scripts/sync-wasm.js');
 
     const fsModule = {
       existsSync: vi.fn(() => true),
@@ -102,7 +114,7 @@ describe('scripts', () => {
   });
 
   it('sync-wasm respects OTS_WEB_REPO_ROOT for default paths', async () => {
-    const mod: any = await loadCjs('../scripts/sync-wasm.js');
+    const mod = await loadCjs<SyncWasmModule>('../scripts/sync-wasm.js');
 
     const originalEnv = process.env.OTS_WEB_REPO_ROOT;
     process.env.OTS_WEB_REPO_ROOT = '/envroot';
@@ -129,7 +141,7 @@ describe('scripts', () => {
   });
 
   it('sync-wasm falls back to __dirname when OTS_WEB_REPO_ROOT is unset', async () => {
-    const mod: any = await loadCjs('../scripts/sync-wasm.js');
+    const mod = await loadCjs<SyncWasmModule>('../scripts/sync-wasm.js');
 
     const originalEnv = process.env.OTS_WEB_REPO_ROOT;
     delete process.env.OTS_WEB_REPO_ROOT;
