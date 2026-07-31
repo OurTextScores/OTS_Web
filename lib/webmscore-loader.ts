@@ -173,6 +173,21 @@ export interface Score {
     toggleDot?: () => Promise<unknown> | unknown;
     toggleDoubleDot?: () => Promise<unknown> | unknown;
     setNoteEntryMode?: (enabled: boolean) => Promise<unknown> | unknown;
+    getNoteInputCursorRect?: () => Promise<{
+        page: number;
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        voice: number;
+    } | null> | {
+        page: number;
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        voice: number;
+    } | null;
     setNoteEntryMethod?: (method: number) => Promise<unknown> | unknown;
     setInputStateFromSelection?: () => Promise<unknown> | unknown;
     setInputAccidentalType?: (accidentalType: number) => Promise<unknown> | unknown;

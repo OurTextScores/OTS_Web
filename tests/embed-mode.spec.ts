@@ -309,6 +309,154 @@ test.describe('Embed Mode - External XML Comparison', () => {
         await expect(page.getByTestId('floating-palettes')).toBeVisible();
     });
 
+    test('shows and toggles the engine note-input cursor in both compare panes', async ({ page }) => {
+        await page.goto(`/?compareLeft=${encodeURIComponent('/sample-left.xml')}&compareRight=${encodeURIComponent('/sample-right.xml')}&leftLabel=Left&rightLabel=Right`);
+        await expect(page.getByTestId('compare-pane-left').locator('svg').first()).toBeVisible({ timeout: 30000 });
+        await expect(page.getByTestId('compare-pane-right').locator('svg').first()).toBeVisible({ timeout: 30000 });
+
+        const leftButton = page.getByTestId('btn-compare-note-input-left');
+        const rightButton = page.getByTestId('btn-compare-note-input-right');
+        await expect(leftButton).toBeEnabled();
+        await expect(rightButton).toBeEnabled();
+
+        await leftButton.click();
+        await expect(leftButton).toHaveAttribute('aria-pressed', 'true');
+        await expect(leftButton).toHaveText('Stop input');
+        await expect(page.getByTestId('compare-note-input-cursor-left')).toBeVisible();
+        await expect(page.getByTestId('compare-note-input-cursor-right')).toHaveCount(0);
+
+        await rightButton.click();
+        await expect(rightButton).toHaveAttribute('aria-pressed', 'true');
+        await expect(rightButton).toHaveText('Stop input');
+        await expect(page.getByTestId('compare-note-input-cursor-left')).toBeVisible();
+        await expect(page.getByTestId('compare-note-input-cursor-right')).toBeVisible();
+
+        await leftButton.click();
+        await expect(leftButton).toHaveAttribute('aria-pressed', 'false');
+        await expect(leftButton).toHaveText('Note input');
+        await expect(page.getByTestId('compare-note-input-cursor-left')).toHaveCount(0);
+        await expect(page.getByTestId('compare-note-input-cursor-right')).toBeVisible();
+
+        await rightButton.click();
+        await expect(rightButton).toHaveAttribute('aria-pressed', 'false');
+        await expect(rightButton).toHaveText('Note input');
+        await expect(page.getByTestId('compare-note-input-cursor-right')).toHaveCount(0);
+    });
+
+    test('queues burst note input without re-editing the first note', async ({ page }) => {
+        await page.goto(`/?compareLeft=${encodeURIComponent('/sample-left.xml')}&compareRight=${encodeURIComponent('/sample-right.xml')}&leftLabel=Left&rightLabel=Right`);
+        await expect(page.getByTestId('compare-pane-left').locator('svg').first()).toBeVisible({ timeout: 30000 });
+
+        await page.getByTestId('btn-compare-activate-left').click();
+        const firstNote = page.getByTestId('compare-pane-left').locator('svg .Note').first();
+        let firstNoteBox: Awaited<ReturnType<typeof firstNote.boundingBox>> = null;
+        await expect.poll(async () => {
+            firstNoteBox = await firstNote.boundingBox();
+            return firstNoteBox?.width ?? 0;
+        }, { timeout: 30000 }).toBeGreaterThan(0);
+        const renderedFirstNoteBox = firstNoteBox as {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        } | null;
+        expect(renderedFirstNoteBox).not.toBeNull();
+        if (!renderedFirstNoteBox) {
+            throw new Error('Expected the left compare score to render a clickable note.');
+        }
+        await page.mouse.click(
+            renderedFirstNoteBox.x + (renderedFirstNoteBox.width / 2),
+            renderedFirstNoteBox.y + (renderedFirstNoteBox.height / 2),
+        );
+        await expect(page.getByTestId('compare-selection-overlay-left').first()).toBeVisible();
+
+        await page.getByTestId('btn-compare-note-input-left').click();
+        await expect(page.getByTestId('btn-compare-note-input-left')).toHaveAttribute('aria-pressed', 'true');
+        const cursor = page.getByTestId('compare-note-input-cursor-left');
+        await expect(cursor).toBeVisible();
+        const initialCursorBox = await cursor.boundingBox();
+        if (!initialCursorBox) {
+            throw new Error('Expected the left compare input cursor to be measurable.');
+        }
+
+        // sample-left.xml starts C D E F G A. These keys intentionally arrive as a
+        // burst; compare persistence must serialize them rather than dropping F/G.
+        const addBarButton = page.getByTestId('btn-compare-add-bar-left');
+        await page.keyboard.type('efg');
+        await expect(addBarButton).toBeDisabled({ timeout: 15000 });
+        await expect(addBarButton).toBeEnabled({ timeout: 30000 });
+        await expect.poll(async () => (await cursor.boundingBox())?.x ?? 0, {
+            timeout: 30000,
+        }).toBeGreaterThan(initialCursorBox.x);
+
+        await page.evaluate(() => {
+            window.open = () => null;
+        });
+        await page.getByRole('button', { name: /Open in Editor/ }).first().click();
+        const pitches = await page.evaluate(() => {
+            const xml = JSON.parse(sessionStorage.getItem('openInEditor') || '{}').xml || '';
+            return [...xml.matchAll(/<step>([A-G])<\/step>/g)].map((m) => m[1]);
+        });
+
+        // Each press must land on the next note (C D E F -> E F G F), not repeatedly
+        // re-edit the first one (which would instead read G D E F or similar).
+        expect(pitches.slice(0, 4)).toEqual(['E', 'F', 'G', 'F']);
+    });
+
+    test('follows engine note-input order on a second staff', async ({ page }) => {
+        await page.goto(`/?compareLeft=${encodeURIComponent('/test_scores/two_staves_four_bars.musicxml')}&compareRight=${encodeURIComponent('/sample-right.xml')}&leftLabel=Left&rightLabel=Right`);
+        const leftPane = page.getByTestId('compare-pane-left');
+        const firstCelloNote = leftPane.locator('svg .Note').nth(4);
+        await expect(firstCelloNote).toBeVisible({ timeout: 30000 });
+
+        await page.getByTestId('btn-compare-activate-left').click();
+        let noteBox: Awaited<ReturnType<typeof firstCelloNote.boundingBox>> = null;
+        await expect.poll(async () => {
+            noteBox = await firstCelloNote.boundingBox();
+            return noteBox?.width ?? 0;
+        }, { timeout: 30000 }).toBeGreaterThan(0);
+        const renderedNoteBox = noteBox as {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        } | null;
+        if (!renderedNoteBox) {
+            throw new Error('Expected the first note on the second staff to be clickable.');
+        }
+        await page.mouse.click(
+            renderedNoteBox.x + renderedNoteBox.width / 2,
+            renderedNoteBox.y + renderedNoteBox.height / 2,
+        );
+        await expect(page.getByTestId('compare-selection-overlay-left').first()).toBeVisible();
+
+        await page.getByTestId('btn-compare-note-input-left').click();
+        await expect(page.getByTestId('btn-compare-note-input-left')).toHaveAttribute('aria-pressed', 'true');
+        await page.keyboard.type('def');
+
+        const addBarButton = page.getByTestId('btn-compare-add-bar-left');
+        await expect(addBarButton).toBeDisabled({ timeout: 15000 });
+        await expect(addBarButton).toBeEnabled({ timeout: 30000 });
+
+        await page.evaluate(() => {
+            window.open = () => null;
+        });
+        await page.getByRole('button', { name: /Open in Editor/ }).first().click();
+        const parts = await page.evaluate(() => {
+            const xml = JSON.parse(sessionStorage.getItem('openInEditor') || '{}').xml || '';
+            const documentXml = new DOMParser().parseFromString(xml, 'application/xml');
+            return Array.from(documentXml.querySelectorAll('part')).map(part => (
+                Array.from(part.querySelectorAll(':scope > measure')).map(measure => (
+                    Array.from(measure.querySelectorAll(':scope > note > pitch > step'))
+                        .map(step => step.textContent ?? '')
+                ))
+            ));
+        });
+
+        expect(parts[0]?.slice(0, 4)).toEqual([['F'], ['A'], ['C'], ['E']]);
+        expect(parts[1]?.slice(0, 4)).toEqual([['D'], ['E'], ['F'], ['E']]);
+    });
+
     test('should keep compare labels and score contents on the same side', async ({ page }) => {
         await page.goto(`/?compareLeft=${encodeURIComponent(leftXmlUrl)}&compareRight=${encodeURIComponent(rightXmlUrl)}&leftLabel=Left&rightLabel=Right`);
         await page.waitForTimeout(3000);

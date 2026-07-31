@@ -1440,6 +1440,21 @@ class WebMscore {
     }
 
     /**
+     * Get the engine-owned note input cursor in page coordinates.
+     * @returns {Promise<{page: number, x: number, y: number, width: number, height: number, voice: number} | null>}
+     */
+    async getNoteInputCursorRect() {
+        const dataptr = Module.ccall('getNoteInputCursorRect', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
+        const json = WasmRes.readText(dataptr)
+        if (!json) return null
+        try {
+            return JSON.parse(json)
+        } catch (e) {
+            return null
+        }
+    }
+
+    /**
      * Set note entry method
      * @param {number} method see engraving::NoteEntryMethod enum
      * @returns {Promise<boolean>}

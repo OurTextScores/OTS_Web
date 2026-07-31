@@ -874,6 +874,65 @@ describe('ScoreEditor', () => {
     await waitFor(() => expect(score.addTie).toHaveBeenCalled());
   });
 
+  it('shows and advances the engine note-input cursor without a prior UI selection', async () => {
+    const user = userEvent.setup();
+    let cursorX = 14;
+    const score: any = {
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg width="200" height="100"><g class="Rest selected"></g></svg>'),
+      setNoteEntryMode: vi.fn(async () => true),
+      getNoteInputCursorRect: vi.fn(async () => ({
+        page: 0,
+        x: cursorX,
+        y: 20,
+        width: 18,
+        height: 48,
+        voice: 0,
+      })),
+      getSpatium: vi.fn(async () => 10),
+      addPitchByStep: vi.fn(async () => {
+        cursorX = 46;
+        return true;
+      }),
+      relayout: vi.fn(async () => true),
+      metadata: vi.fn(async () => ({})),
+      measurePositions: vi.fn(async () => ({})),
+      segmentPositions: vi.fn(async () => ({})),
+    };
+    mocked.loadWebMscore.mockResolvedValue({
+      ready: Promise.resolve(),
+      load: vi.fn(async () => score),
+    });
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: false,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+
+    render(<ScoreEditor />);
+    const file = new File([new Uint8Array([1])], 'demo.mscz', { type: 'application/octet-stream' });
+    await user.upload(screen.getByTestId('open-score-input'), file);
+    await waitFor(() => expect(screen.getByTestId('svg-container').querySelector('svg')).toBeTruthy());
+
+    fireEvent.keyDown(window, { key: 'n' });
+    await waitFor(() => expect(screen.getByTestId('note-input-cursor')).toHaveStyle({
+      left: '14px',
+      top: '20px',
+      width: '18px',
+      height: '48px',
+      borderLeft: '3px solid #0065BF',
+    }));
+
+    fireEvent.keyDown(window, { key: 'c' });
+    await waitFor(() => expect(score.addPitchByStep).toHaveBeenCalledWith(0, false, false));
+    await waitFor(() => expect(screen.getByTestId('note-input-cursor')).toHaveStyle({
+      left: '46px',
+    }));
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('note-input-cursor')).not.toBeInTheDocument());
+    expect(score.setNoteEntryMode).toHaveBeenLastCalledWith(false);
+  });
+
   it('advances selection with left/right arrows', async () => {
     const user = userEvent.setup();
 

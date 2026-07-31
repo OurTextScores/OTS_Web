@@ -32,6 +32,10 @@ describe('ComparePaneEditorControls', () => {
     expect(screen.getByTestId('compare-editor-controls-right')).toHaveTextContent('75%');
     expect(screen.getByTestId('btn-compare-activate-right')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('btn-compare-note-input-right')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('btn-compare-note-input-right')).toHaveTextContent('Stop input');
+    expect(screen.getByTestId('btn-compare-note-input-right')).toHaveAccessibleName(
+      'Disable note input for right compare score',
+    );
 
     await user.click(screen.getByTestId('btn-compare-activate-right'));
     await user.click(screen.getByTestId('btn-compare-zoom-out-right'));
@@ -64,5 +68,26 @@ describe('ComparePaneEditorControls', () => {
     );
     expect(screen.getByTestId('btn-compare-activate-right')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('btn-compare-note-input-right')).toHaveAttribute('aria-pressed', 'true');
+
+    rerender(
+      <ComparePaneEditorControls
+        side="right"
+        active={false}
+        busy={false}
+        noteInputActive={false}
+        zoom={0.75}
+        onActivate={onActivate}
+        onZoomOut={onZoomOut}
+        onZoomIn={onZoomIn}
+        onAddBar={onAddBar}
+        onToggleNoteInput={onToggleNoteInput}
+        onOpenPalettes={onOpenPalettes}
+      />,
+    );
+    expect(screen.getByTestId('btn-compare-note-input-right')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('btn-compare-note-input-right')).toHaveTextContent('Note input');
+    expect(screen.getByTestId('btn-compare-note-input-right')).toHaveAccessibleName(
+      'Enable note input for right compare score',
+    );
   });
 });

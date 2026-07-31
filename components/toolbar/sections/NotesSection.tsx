@@ -117,7 +117,7 @@ export const NotesSection: React.FC<ToolbarSectionProps> = ({
                 aria-pressed={Boolean(noteInputActive)}
             >
                 <PenLine size={14} className="mr-2" />
-                Input
+                {noteInputActive ? 'Stop input' : 'Input'}
             </Button>
 
             <DropdownMenu modal={false}>

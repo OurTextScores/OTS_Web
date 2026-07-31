@@ -153,6 +153,15 @@ type SelectionFallback = {
     point: { page: number; x: number; y: number };
 } | null;
 
+type NoteInputCursorRect = {
+    page: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    voice: number;
+};
+
 type CompareViewState = {
     title: string;
     currentXml: string;
@@ -498,6 +507,7 @@ const LAYOUT_MODES = {
 
 const SELECTION_FILTER_STORAGE_KEY = 'ots_editor_selection_filter_v1';
 const DEFAULT_SELECTION_FILTER_MASK = 0xFFFFFF;
+const NOTE_INPUT_VOICE_COLORS = ['#0065BF', '#007F00', '#C53F00', '#C31989'] as const;
 
 type MutationMethods = Pick<
     Score,
@@ -537,6 +547,7 @@ type MutationMethods = Pick<
     | 'toggleDot'
     | 'toggleDoubleDot'
     | 'setNoteEntryMode'
+    | 'getNoteInputCursorRect'
     | 'setNoteEntryMethod'
     | 'setInputStateFromSelection'
     | 'setInputAccidentalType'
@@ -1241,6 +1252,7 @@ export default function ScoreEditor() {
     // Note-input ("N") mode: clicks place notes instead of selecting.
     const [noteInputActive, setNoteInputActive] = useState(false);
     const [noteInputMethod, setNoteInputMethod] = useState(1);
+    const [noteInputCursorRect, setNoteInputCursorRect] = useState<NoteInputCursorRect | null>(null);
     const [noteInputShadow, setNoteInputShadow] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
     const [paletteDropActive, setPaletteDropActive] = useState(false);
     const [palettesOpen, setPalettesOpen] = useState(false);
@@ -1261,10 +1273,13 @@ export default function ScoreEditor() {
     const selectionFilterMaskRef = useRef(selectionFilterMask);
     const [multiMeasureRestsEnabled, setMultiMeasureRestsEnabled] = useState(false);
     const noteInputActiveRef = useRef(false);
+    const noteInputDesiredRef = useRef(false);
     useEffect(() => {
         noteInputActiveRef.current = false;
+        noteInputDesiredRef.current = false;
         setNoteInputActive(false);
         setNoteInputMethod(1);
+        setNoteInputCursorRect(null);
         setNoteInputShadow(null);
     }, [score]);
     useEffect(() => {
@@ -1370,6 +1385,8 @@ export default function ScoreEditor() {
     const compareEditGenerationRef = useRef(0);
     const comparePendingOperationsRef = useRef<Set<Promise<unknown>>>(new Set());
     const compareScoreTeardownQueueRef = useRef<Promise<void>>(Promise.resolve());
+    const compareKeyboardQueueRef = useRef<Promise<void>>(Promise.resolve());
+    const compareKeyboardQueueEpochRef = useRef(0);
     const [compareEditedRoles, setCompareEditedRoles] = useState<CompareScoreRole[]>([]);
     const compareEditBaselinesRef = useRef<Record<CompareScoreRole, string | null>>({
         current: null,
@@ -1382,6 +1399,16 @@ export default function ScoreEditor() {
     const compareNoteInputByRoleRef = useRef<Record<CompareScoreRole, boolean>>({
         current: false,
         proposal: false,
+    });
+    const compareNoteInputDesiredByRoleRef = useRef<Record<CompareScoreRole, boolean>>({
+        current: false,
+        proposal: false,
+    });
+    const [compareNoteInputCursorByRole, setCompareNoteInputCursorByRole] = useState<
+        Record<CompareScoreRole, NoteInputCursorRect | null>
+    >({
+        current: null,
+        proposal: null,
     });
     const [compareHasSelectionByRole, setCompareHasSelectionByRole] = useState<Record<CompareScoreRole, boolean>>({
         current: false,
@@ -5326,8 +5353,11 @@ ${partsBodyXml}
         }
     }, []);
 
-    const invalidateCompareOperations = useCallback(() => {
+    const invalidateCompareOperations = useCallback((invalidateQueuedKeyboard = true) => {
         compareEditGenerationRef.current += 1;
+        if (invalidateQueuedKeyboard) {
+            compareKeyboardQueueEpochRef.current += 1;
+        }
         return compareEditGenerationRef.current;
     }, []);
 
@@ -5338,6 +5368,29 @@ ${partsBodyXml}
         comparePendingOperationsRef.current.add(trackedOperation);
         return trackedOperation;
     }, []);
+
+    const queueCompareKeyboardOperation = useCallback(<T,>(operation: () => Promise<T>): Promise<T | undefined> => {
+        const epoch = compareKeyboardQueueEpochRef.current;
+        // Include work started outside the keyboard queue (for example, the click
+        // that selected the note or toggled note input) so a following key cannot
+        // race it. Snapshot before tracking this queued promise to avoid waiting on
+        // ourselves.
+        const pendingAtEnqueue = Array.from(comparePendingOperationsRef.current);
+        const queued = compareKeyboardQueueRef.current
+            .catch(() => {})
+            .then(async () => {
+                if (pendingAtEnqueue.length > 0) {
+                    await Promise.allSettled(pendingAtEnqueue);
+                }
+                if (compareKeyboardQueueEpochRef.current !== epoch) {
+                    return undefined;
+                }
+                return operation();
+            });
+        const tracked = trackCompareOperation(queued);
+        compareKeyboardQueueRef.current = tracked.then(() => undefined, () => undefined);
+        return tracked;
+    }, [trackCompareOperation]);
 
     const waitForCompareOperations = useCallback(async () => {
         // New work is rejected once a lifecycle transition invalidates the current
@@ -6547,6 +6600,58 @@ ${partsBodyXml}
         targetScore === score ? 'current' : 'proposal'
     ), [score]);
 
+    const refreshCompareNoteInputCursor = useCallback(async (
+        targetScore: Score,
+        role: CompareScoreRole,
+        side: 'left' | 'right',
+        isCurrent: () => boolean = () => true,
+    ) => {
+        if (!targetScore.getNoteInputCursorRect) {
+            if (isCurrent()) {
+                setCompareNoteInputCursorByRole((prev) => ({ ...prev, [role]: null }));
+            }
+            return null;
+        }
+        try {
+            const cursor = await runSerializedScoreOperation(
+                () => Promise.resolve(targetScore.getNoteInputCursorRect!()),
+                `compare-note-input-cursor:${side}`,
+            );
+            if (!isCurrent()) {
+                return null;
+            }
+            if (
+                !cursor
+                || !Number.isFinite(cursor.page)
+                || !Number.isFinite(cursor.x)
+                || !Number.isFinite(cursor.y)
+                || !Number.isFinite(cursor.width)
+                || !Number.isFinite(cursor.height)
+                || cursor.width <= 0
+                || cursor.height <= 0
+            ) {
+                setCompareNoteInputCursorByRole((prev) => ({ ...prev, [role]: null }));
+                return null;
+            }
+            const normalized: NoteInputCursorRect = {
+                page: Math.max(0, Math.floor(cursor.page)),
+                x: cursor.x,
+                y: cursor.y,
+                width: cursor.width,
+                height: cursor.height,
+                voice: Math.min(3, Math.max(0, Math.floor(cursor.voice))),
+            };
+            setCompareNoteInputCursorByRole((prev) => ({ ...prev, [role]: normalized }));
+            return normalized;
+        } catch (err) {
+            if (isCurrent()) {
+                console.warn(`Failed to read ${side} compare note input cursor geometry:`, err);
+                setCompareNoteInputCursorByRole((prev) => ({ ...prev, [role]: null }));
+            }
+            return null;
+        }
+    }, [runSerializedScoreOperation]);
+
     const refreshCompareSelectionGeometry = useCallback(async (
         targetScore: Score,
         role: CompareScoreRole,
@@ -6790,7 +6895,11 @@ ${partsBodyXml}
     const performCompareMutation = useCallback(async (
         label: string,
         action: (targetScore: Score) => Promise<unknown> | unknown,
-        options?: { side?: 'left' | 'right'; skipRelayout?: boolean },
+        options?: {
+            side?: 'left' | 'right';
+            skipRelayout?: boolean;
+            preserveKeyboardQueue?: boolean;
+        },
     ) => {
         const side = options?.side ?? compareActiveSide;
         const targetScore = side === 'left'
@@ -6808,7 +6917,9 @@ ${partsBodyXml}
         ) {
             return false;
         }
-        const generation = invalidateCompareOperations();
+        // Supersede stale work from the preceding edit without cancelling later
+        // keypresses that are already serialized in the same keyboard input run.
+        const generation = invalidateCompareOperations(!options?.preserveKeyboardQueue);
         const isCurrentGeneration = () => compareEditGenerationRef.current === generation;
         setCompareActiveSide(side);
         compareEditBusyRef.current = true;
@@ -6857,7 +6968,18 @@ ${partsBodyXml}
                 beforeXml,
                 isCurrentGeneration,
             );
-            return Boolean(persistedXml && isCurrentGeneration());
+            if (!persistedXml || !isCurrentGeneration()) {
+                return false;
+            }
+            if (compareNoteInputByRoleRef.current[role]) {
+                await refreshCompareNoteInputCursor(
+                    targetScore,
+                    role,
+                    side,
+                    isCurrentGeneration,
+                );
+            }
+            return isCurrentGeneration();
         })());
         try {
             return await operation;
@@ -6883,6 +7005,7 @@ ${partsBodyXml}
         getScoreMusicXmlText,
         invalidateCompareOperations,
         persistCompareScoreEdit,
+        refreshCompareNoteInputCursor,
         refreshPageCount,
         runSerializedScoreOperation,
         score,
@@ -6905,6 +7028,10 @@ ${partsBodyXml}
         const generation = invalidateCompareOperations();
         setCompareActiveSide(side);
         const role = getCompareScoreRole(targetScore);
+        compareNoteInputDesiredByRoleRef.current = {
+            ...compareNoteInputDesiredByRoleRef.current,
+            [role]: enabled,
+        };
         const operation = trackCompareOperation((async () => {
             if (enabled && targetScore.setInputStateFromSelection) {
                 await runSerializedScoreOperation(
@@ -6915,11 +7042,18 @@ ${partsBodyXml}
                     return;
                 }
             }
-            await runSerializedScoreOperation(
+            const changed = await runSerializedScoreOperation(
                 () => Promise.resolve(targetScore.setNoteEntryMode!(enabled)),
                 `compare-note-input:${side}`,
             );
             if (compareEditGenerationRef.current !== generation) {
+                return;
+            }
+            if (changed === false) {
+                compareNoteInputDesiredByRoleRef.current = {
+                    ...compareNoteInputDesiredByRoleRef.current,
+                    [role]: compareNoteInputByRoleRef.current[role],
+                };
                 return;
             }
             compareNoteInputByRoleRef.current = {
@@ -6927,11 +7061,27 @@ ${partsBodyXml}
                 [role]: enabled,
             };
             setCompareNoteInputByRole(compareNoteInputByRoleRef.current);
+            if (enabled) {
+                await refreshCompareNoteInputCursor(
+                    targetScore,
+                    role,
+                    side,
+                    () => compareEditGenerationRef.current === generation,
+                );
+            } else {
+                setCompareNoteInputCursorByRole((prev) => ({ ...prev, [role]: null }));
+            }
         })());
         try {
             await operation;
         } catch (err) {
-            console.warn('Failed to toggle compare note input mode:', err);
+            if (compareEditGenerationRef.current === generation) {
+                compareNoteInputDesiredByRoleRef.current = {
+                    ...compareNoteInputDesiredByRoleRef.current,
+                    [role]: compareNoteInputByRoleRef.current[role],
+                };
+                console.warn('Failed to toggle compare note input mode:', err);
+            }
         }
     }, [
         aiDiffFeedbackBusy,
@@ -6941,8 +7091,24 @@ ${partsBodyXml}
         compareSwapBusy,
         getCompareScoreRole,
         invalidateCompareOperations,
+        refreshCompareNoteInputCursor,
         runSerializedScoreOperation,
         trackCompareOperation,
+    ]);
+
+    const toggleCompareNoteInputMode = useCallback((side: 'left' | 'right') => {
+        const targetScore = side === 'left' ? compareLeftScore : compareRightScoreDisplay;
+        if (!targetScore) {
+            return;
+        }
+        const role = getCompareScoreRole(targetScore);
+        const enabled = !compareNoteInputDesiredByRoleRef.current[role];
+        void setCompareNoteInputMode(enabled, side);
+    }, [
+        compareLeftScore,
+        compareRightScoreDisplay,
+        getCompareScoreRole,
+        setCompareNoteInputMode,
     ]);
 
     const handleCompareAddBar = useCallback((side: 'left' | 'right') => {
@@ -8944,7 +9110,9 @@ ${partsBodyXml}
             setCompareEditedRoles([]);
             compareEditBaselinesRef.current = { current: null, proposal: null };
             compareNoteInputByRoleRef.current = { current: false, proposal: false };
+            compareNoteInputDesiredByRoleRef.current = { current: false, proposal: false };
             setCompareNoteInputByRole({ current: false, proposal: false });
+            setCompareNoteInputCursorByRole({ current: null, proposal: null });
             setCompareHasSelectionByRole({ current: false, proposal: false });
             setCompareSelectionBoxesByRole({ current: [], proposal: [] });
             setPalettesOpen(false);
@@ -9005,7 +9173,12 @@ ${partsBodyXml}
                 ...compareNoteInputByRoleRef.current,
                 proposal: false,
             };
+            compareNoteInputDesiredByRoleRef.current = {
+                ...compareNoteInputDesiredByRoleRef.current,
+                proposal: false,
+            };
             setCompareNoteInputByRole(compareNoteInputByRoleRef.current);
+            setCompareNoteInputCursorByRole((prev) => ({ ...prev, proposal: null }));
             try {
                 const WebMscore = await loadWebMscore();
                 const data = new TextEncoder().encode(compareView.checkpointXml);
@@ -9104,6 +9277,16 @@ ${partsBodyXml}
         ) {
             setCompareSelectionBoxesByRole((prev) => ({ ...prev, current: [] }));
             setCompareHasSelectionByRole((prev) => ({ ...prev, current: false }));
+            compareNoteInputByRoleRef.current = {
+                ...compareNoteInputByRoleRef.current,
+                current: false,
+            };
+            compareNoteInputDesiredByRoleRef.current = {
+                ...compareNoteInputDesiredByRoleRef.current,
+                current: false,
+            };
+            setCompareNoteInputByRole(compareNoteInputByRoleRef.current);
+            setCompareNoteInputCursorByRole((prev) => ({ ...prev, current: null }));
         }
         prevCompareLiveSelectionScoreRef.current = score;
     }, [compareView, score]);
@@ -11609,6 +11792,49 @@ ${partsBodyXml}
         return (...args: any[]) => (fn as any).apply(activeScore, args);
     };
 
+    const refreshNoteInputCursor = async (targetScore: Score | null = score) => {
+        if (!targetScore?.getNoteInputCursorRect) {
+            setNoteInputCursorRect(null);
+            return null;
+        }
+        try {
+            const cursor = await runSerializedScoreOperation(
+                () => Promise.resolve(targetScore.getNoteInputCursorRect!()),
+                'getNoteInputCursorRect',
+            );
+            if (targetScore !== scoreRef.current) {
+                return null;
+            }
+            if (
+                !cursor
+                || !Number.isFinite(cursor.page)
+                || !Number.isFinite(cursor.x)
+                || !Number.isFinite(cursor.y)
+                || !Number.isFinite(cursor.width)
+                || !Number.isFinite(cursor.height)
+                || cursor.width <= 0
+                || cursor.height <= 0
+            ) {
+                setNoteInputCursorRect(null);
+                return null;
+            }
+            const normalized: NoteInputCursorRect = {
+                page: Math.max(0, Math.floor(cursor.page)),
+                x: cursor.x,
+                y: cursor.y,
+                width: cursor.width,
+                height: cursor.height,
+                voice: Math.min(3, Math.max(0, Math.floor(cursor.voice))),
+            };
+            setNoteInputCursorRect(normalized);
+            return normalized;
+        } catch (err) {
+            console.warn('Failed to read note input cursor geometry:', err);
+            setNoteInputCursorRect(null);
+            return null;
+        }
+    };
+
     const promptForText = (label: string, defaultValue?: string) => {
         if (typeof window === 'undefined') {
             return null;
@@ -11698,6 +11924,9 @@ ${partsBodyXml}
             }
             const refreshedPage = await refreshPageCount(score, currentPageRef.current);
             await renderScore(score, refreshedPage);
+            if (noteInputActiveRef.current) {
+                await refreshNoteInputCursor(score);
+            }
 
             // Re-establish selection inside WASM if we had a previously known point.
             if (!options?.skipWasmReselect && !preservedMultiSelection && preservedPoint && score.selectElementAtPoint) {
@@ -11723,7 +11952,15 @@ ${partsBodyXml}
             }
 
             if (shouldPlaySelectionPreview) {
-                void playSelectionPreview(`mutation:${label}`, preservedPoint ?? undefined, { reselect: true });
+                // Re-projecting the pre-mutation point while entering notes moves
+                // libmscore's InputState back to the chord just entered. The engine
+                // already owns the advancing insertion cursor, so audition its current
+                // selection without changing that cursor.
+                void playSelectionPreview(
+                    `mutation:${label}`,
+                    preservedPoint ?? undefined,
+                    { reselect: !noteInputActiveRef.current },
+                );
             }
 
             // Schedule overlay refresh after the DOM has had time to update
@@ -11993,11 +12230,19 @@ ${partsBodyXml}
 
         let targetPage = currentPageRef.current;
         const activeScore = scoreRef.current ?? score;
-        const getBBoxFn = (activeScore as MutationMethods).getSelectionBoundingBox;
-        if (typeof getBBoxFn === 'function') {
-            const bbox = await getBBoxFn.call(activeScore);
-            if (bbox && typeof bbox.page === 'number') {
-                targetPage = bbox.page;
+        if (noteInputActiveRef.current && activeScore.setInputStateFromSelection) {
+            await Promise.resolve(activeScore.setInputStateFromSelection());
+            const cursor = await refreshNoteInputCursor(activeScore);
+            if (cursor) {
+                targetPage = cursor.page;
+            }
+        } else {
+            const getBBoxFn = (activeScore as MutationMethods).getSelectionBoundingBox;
+            if (typeof getBBoxFn === 'function') {
+                const bbox = await getBBoxFn.call(activeScore);
+                if (bbox && typeof bbox.page === 'number') {
+                    targetPage = bbox.page;
+                }
             }
         }
 
@@ -12025,11 +12270,19 @@ ${partsBodyXml}
 
         let targetPage = currentPageRef.current;
         const activeScore = scoreRef.current ?? score;
-        const getBBoxFn = (activeScore as MutationMethods).getSelectionBoundingBox;
-        if (typeof getBBoxFn === 'function') {
-            const bbox = await getBBoxFn.call(activeScore);
-            if (bbox && typeof bbox.page === 'number') {
-                targetPage = bbox.page;
+        if (noteInputActiveRef.current && activeScore.setInputStateFromSelection) {
+            await Promise.resolve(activeScore.setInputStateFromSelection());
+            const cursor = await refreshNoteInputCursor(activeScore);
+            if (cursor) {
+                targetPage = cursor.page;
+            }
+        } else {
+            const getBBoxFn = (activeScore as MutationMethods).getSelectionBoundingBox;
+            if (typeof getBBoxFn === 'function') {
+                const bbox = await getBBoxFn.call(activeScore);
+                if (bbox && typeof bbox.page === 'number') {
+                    targetPage = bbox.page;
+                }
             }
         }
 
@@ -12143,55 +12396,84 @@ ${partsBodyXml}
     }, { playSelectionPreview: true });
 
     const handleAddPitchByStep = (noteIndex: number, addToChord: boolean) => {
-        const shouldAdvance = !addToChord;
+        const enteringNotes = noteInputActiveRef.current;
+        const shouldAdvanceSelection = !enteringNotes && !addToChord;
         return performMutation('add pitch', async () => {
-            await ensureSelectionInWasm();
+            if (!enteringNotes) {
+                await ensureSelectionInWasm();
+            }
             const fn = requireMutation('addPitchByStep');
             if (!fn) return;
             return fn(noteIndex, addToChord, false);
         }, {
             skipWasmReselect: true,
-            skipSelectionFallback: shouldAdvance,
-            advanceSelection: shouldAdvance,
+            skipSelectionFallback: enteringNotes || shouldAdvanceSelection,
+            advanceSelection: shouldAdvanceSelection,
             playSelectionPreview: true,
         });
     };
 
-    const handleEnterRest = () => performMutation('enter rest', async () => {
-        await ensureSelectionInWasm();
-        const fn = requireMutation('enterRest');
-        if (!fn) return;
-        return fn();
-    }, { skipWasmReselect: true, skipSelectionFallback: true, advanceSelection: true });
+    const handleEnterRest = () => {
+        const enteringNotes = noteInputActiveRef.current;
+        return performMutation('enter rest', async () => {
+            if (!enteringNotes) {
+                await ensureSelectionInWasm();
+            }
+            const fn = requireMutation('enterRest');
+            if (!fn) return;
+            return fn();
+        }, {
+            skipWasmReselect: true,
+            skipSelectionFallback: true,
+            advanceSelection: !enteringNotes,
+        });
+    };
 
     const setNoteInputMode = async (enabled: boolean) => {
-        if (!score?.setNoteEntryMode) {
+        const targetScore = score;
+        if (!targetScore?.setNoteEntryMode) {
             return;
         }
+        noteInputDesiredRef.current = enabled;
         try {
-            if (enabled && score.setInputStateFromSelection) {
+            if (enabled && targetScore.setInputStateFromSelection) {
                 // Seed the input duration/track from the selection when there is one;
                 // fails harmlessly with no selection (putNote derives position per click).
-                await Promise.resolve(score.setInputStateFromSelection()).catch(() => {});
+                await Promise.resolve(targetScore.setInputStateFromSelection()).catch(() => {});
             }
-            await Promise.resolve(score.setNoteEntryMode(enabled));
+            const changed = await Promise.resolve(targetScore.setNoteEntryMode(enabled));
+            if (targetScore !== scoreRef.current) {
+                return;
+            }
+            if (changed === false) {
+                noteInputDesiredRef.current = noteInputActiveRef.current;
+                return;
+            }
             noteInputActiveRef.current = enabled;
             setNoteInputActive(enabled);
-            if (enabled && score.getSpatium) {
-                const spatium = await Promise.resolve(score.getSpatium()).catch(() => null);
+            if (enabled && targetScore.getSpatium) {
+                const spatium = await Promise.resolve(targetScore.getSpatium()).catch(() => null);
                 scoreSpatiumRef.current = typeof spatium === 'number' && Number.isFinite(spatium) && spatium > 0
                     ? spatium
                     : null;
-            } else if (!enabled) {
+            }
+            if (enabled) {
+                await refreshSelectionFromSvg();
+                await refreshNoteInputCursor(targetScore);
+            } else {
+                setNoteInputCursorRect(null);
                 setNoteInputShadow(null);
             }
         } catch (err) {
-            console.warn('Failed to toggle note input mode:', err);
+            if (targetScore === scoreRef.current) {
+                noteInputDesiredRef.current = noteInputActiveRef.current;
+                console.warn('Failed to toggle note input mode:', err);
+            }
         }
     };
 
     const toggleNoteInputMode = () => {
-        void setNoteInputMode(!noteInputActiveRef.current);
+        void setNoteInputMode(!noteInputDesiredRef.current);
     };
 
     // Input-state setters only touch the engine InputState — no relayout needed.
@@ -12238,6 +12520,7 @@ ${partsBodyXml}
         }
         try {
             await Promise.resolve(fn.call(score, voiceIndex));
+            await refreshNoteInputCursor(score);
         } catch (err) {
             console.warn('setVoice for note input failed:', err);
         }
@@ -12927,29 +13210,29 @@ ${partsBodyXml}
             args: unknown[] = [],
             skipRelayout = false,
         ) => {
-            void performCompareMutation(label, (targetScore) => {
-                const fn = (targetScore as MutationMethods)[methodName];
-                if (typeof fn !== 'function') {
-                    alert(`This build of webmscore does not expose "${String(methodName)}".`);
-                    return false;
-                }
-                return (fn as (...values: unknown[]) => unknown).apply(targetScore, args);
-            }, { skipRelayout });
+            void queueCompareKeyboardOperation(() => performCompareMutation(label, (targetScore) => {
+                    const fn = (targetScore as MutationMethods)[methodName];
+                    if (typeof fn !== 'function') {
+                        alert(`This build of webmscore does not expose "${String(methodName)}".`);
+                        return false;
+                    }
+                    return (fn as (...values: unknown[]) => unknown).apply(targetScore, args);
+                }, { skipRelayout, preserveKeyboardQueue: true }))
+                .catch((err) => {
+                    console.warn(`Compare keyboard mutation "${label}" failed:`, err);
+                });
         };
         const updateInputState = (methodName: keyof MutationMethods, args: unknown[] = []) => {
             const fn = (compareActiveScore as MutationMethods)[methodName];
             if (typeof fn === 'function') {
-                const generation = compareEditGenerationRef.current;
-                const operation = trackCompareOperation(runSerializedScoreOperation(
-                    () => Promise.resolve(
-                        (fn as (...values: unknown[]) => unknown).apply(compareActiveScore, args),
-                    ),
-                    `compare-input:${String(methodName)}`,
-                ));
-                void operation.catch((err) => {
-                    if (compareEditGenerationRef.current === generation) {
+                void queueCompareKeyboardOperation(() => runSerializedScoreOperation(
+                        () => Promise.resolve(
+                            (fn as (...values: unknown[]) => unknown).apply(compareActiveScore, args),
+                        ),
+                        `compare-input:${String(methodName)}`,
+                    ))
+                    .catch((err) => {
                         console.warn(`Compare input shortcut "${String(methodName)}" failed:`, err);
-                    }
                 });
             }
         };
@@ -12980,7 +13263,7 @@ ${partsBodyXml}
         }
         if (!isMod && key === 'n' && !event.altKey && !event.shiftKey) {
             event.preventDefault();
-            void setCompareNoteInputMode(!noteMode, compareActiveSide);
+            toggleCompareNoteInputMode(compareActiveSide);
             return true;
         }
 
@@ -13010,6 +13293,11 @@ ${partsBodyXml}
             return true;
         }
         const noteMap: Record<string, number> = { c: 0, d: 1, e: 2, f: 3, g: 4, a: 5, b: 6 };
+        if (noteMode && rawKey === '0') {
+            event.preventDefault();
+            mutate('enter a rest', 'enterRest');
+            return true;
+        }
         if (noteMode && !isMod && !event.altKey && key in noteMap) {
             event.preventDefault();
             mutate('add a pitch', 'addPitchByStep', [noteMap[key], event.shiftKey, false]);
@@ -13095,9 +13383,10 @@ ${partsBodyXml}
         compareHasSelectionByRole,
         compareView,
         performCompareMutation,
+        queueCompareKeyboardOperation,
         runSerializedScoreOperation,
         setCompareNoteInputMode,
-        trackCompareOperation,
+        toggleCompareNoteInputMode,
     ]);
 
     const isEditableTarget = (target: EventTarget | null) => {
@@ -13208,6 +13497,16 @@ ${partsBodyXml}
                         event.preventDefault();
                         const accidentalType = rawKey === '+' ? 3 : rawKey === '-' ? 1 : 2;
                         void handleSetInputAccidental(accidentalType);
+                        return;
+                    }
+                    if (rawKey === '0') {
+                        event.preventDefault();
+                        handleEnterRest();
+                        return;
+                    }
+                    if (!event.altKey && key in noteMap) {
+                        event.preventDefault();
+                        handleAddPitchByStep(noteMap[key], event.shiftKey);
                         return;
                     }
                 }
@@ -16285,6 +16584,37 @@ ${partsBodyXml}
             ? 'Load branch base'
             : 'Load branch head';
 
+    const noteInputCursorColor = NOTE_INPUT_VOICE_COLORS[noteInputCursorRect?.voice ?? 0]
+        ?? NOTE_INPUT_VOICE_COLORS[0];
+    const compareLeftNoteInputCursor = compareLeftRole
+        ? compareNoteInputCursorByRole[compareLeftRole]
+        : null;
+    const compareRightNoteInputCursor = compareRightRole
+        ? compareNoteInputCursorByRole[compareRightRole]
+        : null;
+    const compareLeftNoteInputCursorColor = NOTE_INPUT_VOICE_COLORS[compareLeftNoteInputCursor?.voice ?? 0]
+        ?? NOTE_INPUT_VOICE_COLORS[0];
+    const compareRightNoteInputCursorColor = NOTE_INPUT_VOICE_COLORS[compareRightNoteInputCursor?.voice ?? 0]
+        ?? NOTE_INPUT_VOICE_COLORS[0];
+    const compareLeftNoteInputCursorVisible = Boolean(
+        compareLeftRole
+        && compareNoteInputByRole[compareLeftRole]
+        && compareLeftNoteInputCursor
+        && (
+            compareContinuousMode
+            || compareLeftNoteInputCursor.page === getCompareTargetPage(compareLeftScore)
+        ),
+    );
+    const compareRightNoteInputCursorVisible = Boolean(
+        compareRightRole
+        && compareNoteInputByRole[compareRightRole]
+        && compareRightNoteInputCursor
+        && (
+            compareContinuousMode
+            || compareRightNoteInputCursor.page === getCompareTargetPage(compareRightScoreDisplay)
+        ),
+    );
+
     return (
         <div className="flex flex-col h-screen">
             {!isEmbedMode && (
@@ -16716,6 +17046,26 @@ ${partsBodyXml}
                             )}
                         </div>
                     )}
+
+                    {noteInputActive
+                        && noteInputCursorRect
+                        && noteInputCursorRect.page === currentPage
+                        && (
+                            <div
+                                data-testid="note-input-cursor"
+                                data-voice={noteInputCursorRect.voice}
+                                aria-hidden="true"
+                                className="absolute pointer-events-none z-10"
+                                style={{
+                                    left: noteInputCursorRect.x,
+                                    top: noteInputCursorRect.y,
+                                    width: noteInputCursorRect.width,
+                                    height: noteInputCursorRect.height,
+                                    backgroundColor: `${noteInputCursorColor}32`,
+                                    borderLeft: `3px solid ${noteInputCursorColor}`,
+                                }}
+                            />
+                        )}
 
                     {noteInputActive && noteInputShadow && (
                         <div
@@ -18923,9 +19273,7 @@ ${partsBodyXml}
                                             onAddBar={() => handleCompareAddBar('left')}
                                             onToggleNoteInput={() => {
                                                 setCompareActiveSide('left');
-                                                if (compareLeftRole) {
-                                                    void setCompareNoteInputMode(!compareNoteInputByRoleRef.current[compareLeftRole], 'left');
-                                                }
+                                                toggleCompareNoteInputMode('left');
                                             }}
                                             onOpenPalettes={() => {
                                                 setCompareActiveSide('left');
@@ -19011,6 +19359,22 @@ ${partsBodyXml}
                                                             }}
                                                         />
                                                     ))}
+                                                    {compareLeftNoteInputCursorVisible && compareLeftNoteInputCursor && (
+                                                        <div
+                                                            data-testid="compare-note-input-cursor-left"
+                                                            data-voice={compareLeftNoteInputCursor.voice}
+                                                            aria-hidden="true"
+                                                            className="pointer-events-none absolute z-10"
+                                                            style={{
+                                                                left: compareLeftNoteInputCursor.x,
+                                                                top: compareLeftNoteInputCursor.y,
+                                                                width: compareLeftNoteInputCursor.width,
+                                                                height: compareLeftNoteInputCursor.height,
+                                                                backgroundColor: `${compareLeftNoteInputCursorColor}32`,
+                                                                borderLeft: `3px solid ${compareLeftNoteInputCursorColor}`,
+                                                            }}
+                                                        />
+                                                    )}
                                                     {compareFocusedHighlights.left && (
                                                         <div
                                                             className="absolute rounded-sm border-2 border-blue-500 ring-2 ring-blue-300/50"
@@ -19756,9 +20120,7 @@ ${partsBodyXml}
                                             onAddBar={() => handleCompareAddBar('right')}
                                             onToggleNoteInput={() => {
                                                 setCompareActiveSide('right');
-                                                if (compareRightRole) {
-                                                    void setCompareNoteInputMode(!compareNoteInputByRoleRef.current[compareRightRole], 'right');
-                                                }
+                                                toggleCompareNoteInputMode('right');
                                             }}
                                             onOpenPalettes={() => {
                                                 setCompareActiveSide('right');
@@ -19844,6 +20206,22 @@ ${partsBodyXml}
                                                             }}
                                                         />
                                                     ))}
+                                                    {compareRightNoteInputCursorVisible && compareRightNoteInputCursor && (
+                                                        <div
+                                                            data-testid="compare-note-input-cursor-right"
+                                                            data-voice={compareRightNoteInputCursor.voice}
+                                                            aria-hidden="true"
+                                                            className="pointer-events-none absolute z-10"
+                                                            style={{
+                                                                left: compareRightNoteInputCursor.x,
+                                                                top: compareRightNoteInputCursor.y,
+                                                                width: compareRightNoteInputCursor.width,
+                                                                height: compareRightNoteInputCursor.height,
+                                                                backgroundColor: `${compareRightNoteInputCursorColor}32`,
+                                                                borderLeft: `3px solid ${compareRightNoteInputCursorColor}`,
+                                                            }}
+                                                        />
+                                                    )}
                                                     {compareFocusedHighlights.right && (
                                                         <div
                                                             className="absolute rounded-sm border-2 border-blue-500 ring-2 ring-blue-300/50"

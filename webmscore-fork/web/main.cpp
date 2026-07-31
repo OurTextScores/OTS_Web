@@ -93,6 +93,7 @@
 #include "engraving/libmscore/engravingobject.h"
 #include "engraving/libmscore/segment.h"
 #include "engraving/libmscore/staff.h"
+#include "engraving/libmscore/stafftype.h"
 #include "engraving/libmscore/stafflines.h"
 #include "engraving/libmscore/spannermap.h"
 #include "engraving/layout/layoutoptions.h"
@@ -5098,12 +5099,80 @@ bool _setDurationType(uintptr_t score_ptr, int durationType, int excerptId)
     return true;
 }
 
+static engraving::ChordRest* chordRestForNoteInputStart(engraving::EngravingItem* item)
+{
+    if (!item) {
+        return nullptr;
+    }
+    if (item->isNote()) {
+        return engraving::toNote(item)->chord();
+    }
+    return item->isChordRest() ? engraving::toChordRest(item) : nullptr;
+}
+
+// Resolve note input's starting position using the same priority as
+// NotationNoteInput::resolveNoteInputStartPosition(): selection, prior input
+// position, then the first voice-1 chord/rest at or after the selected tick.
+static engraving::ChordRest* resolveNoteInputStartPosition(MainScore& score)
+{
+    auto& inputState = score->inputState();
+    engraving::EngravingItem* selected = score->selection().element();
+    engraving::ChordRest* chordRest = chordRestForNoteInputStart(selected);
+    if (!chordRest) {
+        chordRest = score->selection().firstChordRest();
+    }
+
+    engraving::track_idx_t track = inputState.track();
+    if (track == mu::nidx) {
+        track = selected && selected->staffIdx() != mu::nidx
+            ? selected->staffIdx() * engraving::VOICES
+            : 0;
+    }
+
+    if (!chordRest && inputState.segment()) {
+        chordRest = chordRestForNoteInputStart(inputState.segment()->element(track));
+    }
+    if (!chordRest && inputState.lastSegment()) {
+        chordRest = chordRestForNoteInputStart(inputState.lastSegment()->element(track));
+    }
+    if (!chordRest) {
+        track = engraving::trackZeroVoice(track);
+        const engraving::Fraction tick = selected
+            ? selected->tick()
+            : engraving::Fraction(0, 1);
+        chordRest = score->searchNote(tick, track);
+        if (!chordRest) {
+            chordRest = score->searchNote(engraving::Fraction(0, 1), track);
+        }
+    }
+    return chordRest;
+}
+
 
 bool _setNoteEntryMode(uintptr_t score_ptr, bool enabled, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
     auto& inputState = score->inputState();
     if (enabled) {
+        engraving::ChordRest* start = resolveNoteInputStartPosition(score);
+        if (!start) {
+            LOGW() << "setNoteEntryMode: no logical note input start position";
+            return false;
+        }
+
+        engraving::EngravingItem* selectionItem = start;
+        if (start->isChord()) {
+            selectionItem = engraving::toChord(start)->upNote();
+        }
+        score->select(selectionItem, engraving::SelectType::SINGLE, start->staffIdx());
+        inputState.setTrack(start->track());
+        inputState.setSegment(start->segment());
+        auto duration = start->durationType();
+        if (duration.isMeasure()) {
+            duration = engraving::TDuration(start->measure()->timesig());
+        }
+        inputState.setDuration(duration);
+
         // Match NotationNoteInput::startNoteInput(): entering note input always
         // starts in note (not rest) mode with no carried accidental.
         inputState.setRest(false);
@@ -5117,6 +5186,75 @@ bool _setNoteEntryMode(uintptr_t score_ptr, bool enabled, int excerptId)
         inputState.setDuration(engraving::TDuration(engraving::DurationType::V_QUARTER));
     }
     return true;
+}
+
+WasmRes _getNoteInputCursorRect(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    const auto& inputState = score->inputState();
+    if (!inputState.noteEntryMode() || !inputState.segment()) {
+        return WasmRes(String());
+    }
+
+    const engraving::Segment* segment = inputState.segment();
+    const engraving::System* system = segment->measure()->system();
+    if (!system || !system->page()) {
+        return WasmRes(String());
+    }
+
+    const engraving::track_idx_t track = inputState.track() == mu::nidx ? 0 : inputState.track();
+    const engraving::staff_idx_t staffIdx = track / engraving::VOICES;
+    const engraving::Staff* staff = score->staff(staffIdx);
+    if (!staff) {
+        return WasmRes(String());
+    }
+
+    // Ported from NotationNoteInput::cursorRect(). The notation view returns
+    // canvas coordinates; the web renderer exports one SVG page at a time, so
+    // retain page-local coordinates and include the page index in the result.
+    constexpr int sideMargin = 4;
+    constexpr int skylineMargin = 20;
+    const mu::RectF segmentContentRect = segment->contentRect();
+    double x = segmentContentRect.translated(segment->pagePos()).x() - sideMargin;
+    double y = system->staffYpage(staffIdx);
+    double width = segmentContentRect.width() + 2 * sideMargin;
+    double height = 0.0;
+
+    const engraving::StaffType* staffType = staff->staffType(inputState.tick());
+    if (!staffType) {
+        return WasmRes(String());
+    }
+    const double spatium = score->spatium();
+    const double lineDistance = staffType->lineDistance().val() * spatium;
+    const int lines = staffType->lines();
+    const int inputString = inputState.string();
+    const int instrumentStrings = static_cast<int>(staff->part()->instrument()->stringData()->strings());
+    if (staff->isTabStaff(inputState.tick()) && inputString >= 0 && inputString <= instrumentStrings) {
+        height = lineDistance;
+        y += staffType->physStringToYOffset(inputString) * spatium;
+        y -= staffType->onLines() ? lineDistance * 0.5 : lineDistance;
+    } else {
+        height = (lines - 1) * lineDistance + 2 * skylineMargin;
+        y -= skylineMargin;
+    }
+
+    int pageNumber = 0;
+    const auto& pages = score->pages();
+    for (size_t i = 0; i < pages.size(); ++i) {
+        if (pages[i] == system->page()) {
+            pageNumber = static_cast<int>(i);
+            break;
+        }
+    }
+
+    QJsonObject result;
+    result.insert(QStringLiteral("page"), pageNumber);
+    result.insert(QStringLiteral("x"), x);
+    result.insert(QStringLiteral("y"), y);
+    result.insert(QStringLiteral("width"), width);
+    result.insert(QStringLiteral("height"), height);
+    result.insert(QStringLiteral("voice"), static_cast<int>(track % engraving::VOICES));
+    return WasmRes(QJsonDocument(result).toJson(QJsonDocument::Compact));
 }
 
 bool _setNoteEntryMethod(uintptr_t score_ptr, int method, int excerptId)
@@ -5243,9 +5381,12 @@ bool _addPitchByStep(uintptr_t score_ptr, int note, bool addToChord, bool insert
         LOGW() << "addPitchByStep: input track invalid";
         return false;
     }
-    // Always sync input state from selection to ensure duration matches the selected element.
-    // This prevents re-pitching a note from also changing its duration.
-    if (!_setInputStateFromSelection(score_ptr, excerptId)) {
+    // Normal-mode pitch replacement starts from the selection. In note-entry
+    // mode, however, InputState::segment() is the insertion cursor and advances
+    // after each note; re-seeding it from the selected note would keep replacing
+    // the same location instead of entering left-to-right.
+    if ((!is.noteEntryMode() || is.track() == mu::nidx || !is.segment())
+        && !_setInputStateFromSelection(score_ptr, excerptId)) {
         if (!is.segment()) {
             LOGW() << "addPitchByStep: no input segment";
             return false;
@@ -7650,6 +7791,11 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool setNoteEntryMode(uintptr_t score_ptr, bool enabled, int excerptId = -1) {
         return _setNoteEntryMode(score_ptr, enabled, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    WasmResBytes getNoteInputCursorRect(uintptr_t score_ptr, int excerptId = -1) {
+        return _getNoteInputCursorRect(score_ptr, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

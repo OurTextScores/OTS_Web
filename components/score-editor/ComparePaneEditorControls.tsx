@@ -79,12 +79,13 @@ export function ComparePaneEditorControls({
                 type="button"
                 data-testid={`btn-compare-note-input-${side}`}
                 aria-pressed={noteInputActive}
+                aria-label={`${noteInputActive ? 'Disable' : 'Enable'} note input for ${side} compare score`}
                 disabled={busy}
                 onClick={onToggleNoteInput}
                 className={`${buttonClass} ${noteInputActive ? 'border-blue-500 bg-blue-50 text-blue-700' : ''}`}
                 title="Toggle note input for this score (N)"
             >
-                Note input
+                {noteInputActive ? 'Stop input' : 'Note input'}
             </button>
             <button
                 type="button"

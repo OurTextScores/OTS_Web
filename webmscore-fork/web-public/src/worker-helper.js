@@ -947,6 +947,10 @@ class WebMscoreW {
         return this.rpc('setNoteEntryMode', [enabled ? 1 : 0])
     }
 
+    getNoteInputCursorRect() {
+        return this.rpc('getNoteInputCursorRect')
+    }
+
     setNoteEntryMethod(method) {
         return this.rpc('setNoteEntryMethod', [method])
     }
