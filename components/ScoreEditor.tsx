@@ -132,6 +132,7 @@ import { type AiScoreBridge } from './score-editor/ai-score-bridge';
 import { useLatestCallbackFacade } from '@/lib/use-latest-callback-facade';
 import { useCompareOperationCoordinator } from './score-editor/compare/useCompareOperationCoordinator';
 import { useCompareTransport } from './score-editor/compare/useCompareTransport';
+import { useCompareEditing } from './score-editor/compare/useCompareEditing';
 import {
     buildCompareUserEditDiff,
     type CompareScoreRole,
@@ -1508,39 +1509,35 @@ export default function ScoreEditor() {
     const [compareFitZoom, setCompareFitZoom] = useState(0.5);
     const [compareZoom, setCompareZoom] = useState<number | null>(null);
     const [compareActiveSide, setCompareActiveSide] = useState<'left' | 'right' | null>(null);
-    const [compareEditBusy, setCompareEditBusy] = useState(false);
-    const compareEditBusyRef = useRef(false);
-    const [compareEditedRoles, setCompareEditedRoles] = useState<CompareScoreRole[]>([]);
-    const compareEditBaselinesRef = useRef<Record<CompareScoreRole, string | null>>({
-        current: null,
-        proposal: null,
-    });
-    const [compareNoteInputByRole, setCompareNoteInputByRole] = useState<Record<CompareScoreRole, boolean>>({
-        current: false,
-        proposal: false,
-    });
-    const compareNoteInputByRoleRef = useRef<Record<CompareScoreRole, boolean>>({
-        current: false,
-        proposal: false,
-    });
-    const compareNoteInputDesiredByRoleRef = useRef<Record<CompareScoreRole, boolean>>({
-        current: false,
-        proposal: false,
-    });
-    const [compareNoteInputCursorByRole, setCompareNoteInputCursorByRole] = useState<
-        Record<CompareScoreRole, NoteInputCursorRect | null>
-    >({
-        current: null,
-        proposal: null,
-    });
-    const [compareHasSelectionByRole, setCompareHasSelectionByRole] = useState<Record<CompareScoreRole, boolean>>({
-        current: false,
-        proposal: false,
-    });
-    const [compareSelectionBoxesByRole, setCompareSelectionBoxesByRole] = useState<Record<CompareScoreRole, SelectionBox[]>>({
-        current: [],
-        proposal: [],
-    });
+    const compareEditing = useCompareEditing<SelectionBox, NoteInputCursorRect>();
+    const {
+        busy: compareEditBusy,
+        editedRoles: compareEditedRoles,
+        noteInputByRole: compareNoteInputByRole,
+        noteInputCursorByRole: compareNoteInputCursorByRole,
+        hasSelectionByRole: compareHasSelectionByRole,
+        selectionBoxesByRole: compareSelectionBoxesByRole,
+    } = compareEditing.state;
+    const {
+        beginBusy: beginCompareEdit,
+        captureEditCycle: captureCompareEditCycle,
+        clearEditCycle: clearCompareEditCycle,
+        commitNoteInput: commitCompareNoteInput,
+        endBusy: endCompareEdit,
+        getBaseline: getCompareEditBaseline,
+        isBusy: isCompareEditBusy,
+        isNoteInputCommitted: isCompareNoteInputCommitted,
+        isNoteInputDesired: isCompareNoteInputDesired,
+        recordEdit: recordCompareEdit,
+        requestNoteInput: requestCompareNoteInput,
+        resetAll: resetCompareEditing,
+        resetRole: resetCompareEditingRole,
+        restoreEditCycle: restoreCompareEditCycle,
+        rollbackNoteInputRequest: rollbackCompareNoteInputRequest,
+        setHasSelection: setCompareHasSelection,
+        setNoteInputCursor: setCompareNoteInputCursor,
+        setSelection: setCompareSelection,
+    } = compareEditing;
     const [compareLeftSvgSize, setCompareLeftSvgSize] = useState<{ width: number; height: number } | null>(null);
     const [compareRightSvgSize, setCompareRightSvgSize] = useState<{ width: number; height: number } | null>(null);
     const [compareLeftMeasurePositions, setCompareLeftMeasurePositions] = useState<Positions | null>(null);
@@ -6531,7 +6528,7 @@ ${partsBodyXml}
     ) => {
         if (!targetScore.getNoteInputCursorRect) {
             if (isCurrent()) {
-                setCompareNoteInputCursorByRole((prev) => ({ ...prev, [role]: null }));
+                setCompareNoteInputCursor(role, null);
             }
             return null;
         }
@@ -6553,7 +6550,7 @@ ${partsBodyXml}
                 || cursor.width <= 0
                 || cursor.height <= 0
             ) {
-                setCompareNoteInputCursorByRole((prev) => ({ ...prev, [role]: null }));
+                setCompareNoteInputCursor(role, null);
                 return null;
             }
             const normalized: NoteInputCursorRect = {
@@ -6564,16 +6561,16 @@ ${partsBodyXml}
                 height: cursor.height,
                 voice: Math.min(3, Math.max(0, Math.floor(cursor.voice))),
             };
-            setCompareNoteInputCursorByRole((prev) => ({ ...prev, [role]: normalized }));
+            setCompareNoteInputCursor(role, normalized);
             return normalized;
         } catch (err) {
             if (isCurrent()) {
                 console.warn(`Failed to read ${side} compare note input cursor geometry:`, err);
-                setCompareNoteInputCursorByRole((prev) => ({ ...prev, [role]: null }));
+                setCompareNoteInputCursor(role, null);
             }
             return null;
         }
-    }, [runSerializedScoreOperation]);
+    }, [runSerializedScoreOperation, setCompareNoteInputCursor]);
 
     const refreshCompareSelectionGeometry = useCallback(async (
         targetScore: Score,
@@ -6586,8 +6583,7 @@ ${partsBodyXml}
             return [] as SelectionBox[];
         }
         if (selected === false) {
-            setCompareSelectionBoxesByRole((prev) => ({ ...prev, [role]: [] }));
-            setCompareHasSelectionByRole((prev) => ({ ...prev, [role]: false }));
+            setCompareSelection(role, [], false);
             return [] as SelectionBox[];
         }
 
@@ -6690,17 +6686,18 @@ ${partsBodyXml}
         if (isCurrent && !isCurrent()) {
             return [] as SelectionBox[];
         }
-        setCompareSelectionBoxesByRole((prev) => ({ ...prev, [role]: visibleBoxes }));
-        setCompareHasSelectionByRole((prev) => ({
-            ...prev,
-            [role]: boxes.length > 0 || (selected === true && !hasGeometryBinding),
-        }));
+        setCompareSelection(
+            role,
+            visibleBoxes,
+            boxes.length > 0 || (selected === true && !hasGeometryBinding),
+        );
         return visibleBoxes;
     }, [
         compareContinuousMode,
         compareEffectiveZoom,
         getCompareTargetPage,
         runSerializedScoreOperation,
+        setCompareSelection,
     ]);
 
     const renderEditedCompareScore = useCallback(async (
@@ -6748,14 +6745,7 @@ ${partsBodyXml}
             );
             return isCurrentGeneration() ? afterXml : null;
         }
-        const editBaseline = compareEditBaselinesRef.current[role] ?? beforeXml;
-        if (afterXml === editBaseline) {
-            compareEditBaselinesRef.current[role] = null;
-            setCompareEditedRoles((prev) => prev.filter((entry) => entry !== role));
-        } else {
-            compareEditBaselinesRef.current[role] = editBaseline;
-            setCompareEditedRoles((prev) => prev.includes(role) ? prev : [...prev, role]);
-        }
+        recordCompareEdit(role, beforeXml, afterXml);
         if (role === 'proposal') {
             // This update came from the already-loaded auxiliary Score. Mark the
             // exported XML as loaded so the compare lifecycle does not destroy and
@@ -6809,6 +6799,7 @@ ${partsBodyXml}
         invalidateAiProposalExpectedCurrent,
         isAiCompareMode,
         recordAiProposalAppliedXml,
+        recordCompareEdit,
         refreshCompareSelectionGeometry,
         renderScore,
         renderEditedCompareScore,
@@ -6834,7 +6825,7 @@ ${partsBodyXml}
             !compareView
             || !side
             || !targetScore
-            || compareEditBusyRef.current
+            || isCompareEditBusy()
             || compareSwapBusy
             || aiDiffFeedbackBusy
         ) {
@@ -6845,8 +6836,7 @@ ${partsBodyXml}
         const generation = invalidateCompareOperations(!options?.preserveKeyboardQueue);
         const isCurrentGeneration = () => isCompareGenerationCurrent(generation);
         setCompareActiveSide(side);
-        compareEditBusyRef.current = true;
-        setCompareEditBusy(true);
+        beginCompareEdit();
         const operation = trackCompareOperation((async () => {
             const role = getCompareScoreRole(targetScore);
             const fallbackXml = role === 'current' ? compareView.currentXml : compareView.checkpointXml;
@@ -6894,7 +6884,7 @@ ${partsBodyXml}
             if (!persistedXml || !isCurrentGeneration()) {
                 return false;
             }
-            if (compareNoteInputByRoleRef.current[role]) {
+            if (isCompareNoteInputCommitted(role)) {
                 await refreshCompareNoteInputCursor(
                     targetScore,
                     role,
@@ -6914,11 +6904,11 @@ ${partsBodyXml}
             alert(`Unable to ${label} in the compare score. Check the console for details.`);
             return false;
         } finally {
-            compareEditBusyRef.current = false;
-            setCompareEditBusy(false);
+            endCompareEdit();
         }
     }, [
         aiDiffFeedbackBusy,
+        beginCompareEdit,
         compareActiveSide,
         compareLeftScore,
         compareRightScoreDisplay,
@@ -6927,7 +6917,10 @@ ${partsBodyXml}
         getCompareScoreRole,
         getScoreMusicXmlText,
         invalidateCompareOperations,
+        isCompareEditBusy,
         isCompareGenerationCurrent,
+        isCompareNoteInputCommitted,
+        endCompareEdit,
         persistCompareScoreEdit,
         refreshCompareNoteInputCursor,
         refreshPageCount,
@@ -6943,7 +6936,7 @@ ${partsBodyXml}
         const targetScore = side === 'left' ? compareLeftScore : compareRightScoreDisplay;
         if (
             !targetScore?.setNoteEntryMode
-            || compareEditBusyRef.current
+            || isCompareEditBusy()
             || compareSwapBusy
             || aiDiffFeedbackBusy
         ) {
@@ -6952,10 +6945,7 @@ ${partsBodyXml}
         const generation = invalidateCompareOperations();
         setCompareActiveSide(side);
         const role = getCompareScoreRole(targetScore);
-        compareNoteInputDesiredByRoleRef.current = {
-            ...compareNoteInputDesiredByRoleRef.current,
-            [role]: enabled,
-        };
+        requestCompareNoteInput(role, enabled);
         const operation = trackCompareOperation((async () => {
             if (enabled && targetScore.setInputStateFromSelection) {
                 await runSerializedScoreOperation(
@@ -6974,17 +6964,10 @@ ${partsBodyXml}
                 return;
             }
             if (changed === false) {
-                compareNoteInputDesiredByRoleRef.current = {
-                    ...compareNoteInputDesiredByRoleRef.current,
-                    [role]: compareNoteInputByRoleRef.current[role],
-                };
+                rollbackCompareNoteInputRequest(role);
                 return;
             }
-            compareNoteInputByRoleRef.current = {
-                ...compareNoteInputByRoleRef.current,
-                [role]: enabled,
-            };
-            setCompareNoteInputByRole(compareNoteInputByRoleRef.current);
+            commitCompareNoteInput(role, enabled);
             if (enabled) {
                 await refreshCompareNoteInputCursor(
                     targetScore,
@@ -6993,17 +6976,14 @@ ${partsBodyXml}
                     () => isCompareGenerationCurrent(generation),
                 );
             } else {
-                setCompareNoteInputCursorByRole((prev) => ({ ...prev, [role]: null }));
+                setCompareNoteInputCursor(role, null);
             }
         })());
         try {
             await operation;
         } catch (err) {
             if (isCompareGenerationCurrent(generation)) {
-                compareNoteInputDesiredByRoleRef.current = {
-                    ...compareNoteInputDesiredByRoleRef.current,
-                    [role]: compareNoteInputByRoleRef.current[role],
-                };
+                rollbackCompareNoteInputRequest(role);
                 console.warn('Failed to toggle compare note input mode:', err);
             }
         }
@@ -7013,11 +6993,16 @@ ${partsBodyXml}
         compareLeftScore,
         compareRightScoreDisplay,
         compareSwapBusy,
+        commitCompareNoteInput,
         getCompareScoreRole,
         invalidateCompareOperations,
+        isCompareEditBusy,
         isCompareGenerationCurrent,
         refreshCompareNoteInputCursor,
+        requestCompareNoteInput,
+        rollbackCompareNoteInputRequest,
         runSerializedScoreOperation,
+        setCompareNoteInputCursor,
         trackCompareOperation,
     ]);
 
@@ -7027,12 +7012,13 @@ ${partsBodyXml}
             return;
         }
         const role = getCompareScoreRole(targetScore);
-        const enabled = !compareNoteInputDesiredByRoleRef.current[role];
+        const enabled = !isCompareNoteInputDesired(role);
         void setCompareNoteInputMode(enabled, side);
     }, [
         compareLeftScore,
         compareRightScoreDisplay,
         getCompareScoreRole,
+        isCompareNoteInputDesired,
         setCompareNoteInputMode,
     ]);
 
@@ -7114,7 +7100,7 @@ ${partsBodyXml}
             return;
         }
         setCompareActiveSide(side);
-        if (compareEditBusyRef.current || compareSwapBusy || aiDiffFeedbackBusy) {
+        if (isCompareEditBusy() || compareSwapBusy || aiDiffFeedbackBusy) {
             return;
         }
         const role = getCompareScoreRole(targetScore);
@@ -7150,7 +7136,7 @@ ${partsBodyXml}
         const page = compareContinuousMode ? (measure?.page ?? renderedPage) : renderedPage;
         const y = compareContinuousMode && usesPageOffset ? absoluteY - page * pageHeight : absoluteY;
 
-        if (compareNoteInputByRoleRef.current[role]) {
+        if (isCompareNoteInputCommitted(role)) {
             void performCompareMutation('place a note', async (activeScore) => {
                 if (!activeScore.putNote) {
                     alert('This build of webmscore does not expose "putNote".');
@@ -7158,7 +7144,7 @@ ${partsBodyXml}
                 }
                 const result = await activeScore.putNote(page, x, y);
                 if (result !== false) {
-                    setCompareHasSelectionByRole((prev) => ({ ...prev, [role]: true }));
+                    setCompareHasSelection(role, true);
                 }
                 return result;
             }, { side });
@@ -7228,11 +7214,14 @@ ${partsBodyXml}
         handleCompareScoreClick,
         hitTestMeasure,
         invalidateCompareOperations,
+        isCompareEditBusy,
         isCompareGenerationCurrent,
+        isCompareNoteInputCommitted,
         performCompareMutation,
         refreshCompareSelectionGeometry,
         renderEditedCompareScore,
         runSerializedScoreOperation,
+        setCompareHasSelection,
         trackCompareOperation,
     ]);
 
@@ -7244,7 +7233,7 @@ ${partsBodyXml}
     ): Promise<boolean> => {
         if (
             compareSwapBusy
-            || compareEditBusyRef.current
+            || isCompareEditBusy()
             || hasPendingCompareOperations()
         ) {
             return false;
@@ -7341,6 +7330,7 @@ ${partsBodyXml}
         compareView,
         getScoreMusicXmlText,
         hasPendingCompareOperations,
+        isCompareEditBusy,
         replaceMeasuresInMusicXml,
         invalidateAiProposalExpectedCurrent,
         recordAiProposalAppliedXml,
@@ -7358,7 +7348,7 @@ ${partsBodyXml}
         }
         if (
             compareSwapBusy
-            || compareEditBusyRef.current
+            || isCompareEditBusy()
             || hasPendingCompareOperations()
         ) {
             return;
@@ -7412,6 +7402,7 @@ ${partsBodyXml}
         compareView,
         compareSwapBusy,
         hasPendingCompareOperations,
+        isCompareEditBusy,
         score,
         invalidateAiProposalExpectedCurrent,
         recordAiProposalAppliedXml,
@@ -7430,7 +7421,7 @@ ${partsBodyXml}
             || compareView.title !== 'Assistant Proposal'
             || !score
             || compareSwapBusy
-            || compareEditBusyRef.current
+            || isCompareEditBusy()
             || hasPendingCompareOperations()
         ) {
             return;
@@ -7456,6 +7447,7 @@ ${partsBodyXml}
         score,
         getScoreMusicXmlText,
         hasPendingCompareOperations,
+        isCompareEditBusy,
         captureAiProposal,
         setAiBaseXml,
         setAiError,
@@ -7756,7 +7748,7 @@ ${partsBodyXml}
             || !isAiCompareMode
             || aiBusy
             || aiDiffFeedbackBusy
-            || compareEditBusyRef.current
+            || isCompareEditBusy()
             || hasPendingCompareOperations()
         ) {
             return;
@@ -7841,7 +7833,7 @@ ${partsBodyXml}
             || compareView.checkpointXml;
         const userEditDiffs = compareEditedRoles
             .map((role): CompareUserEditDiff | null => {
-                const beforeXml = compareEditBaselinesRef.current[role];
+                const beforeXml = getCompareEditBaseline(role);
                 const afterXml = role === 'current' ? currentXml : proposalXml;
                 if (!beforeXml) {
                     return null;
@@ -7856,8 +7848,7 @@ ${partsBodyXml}
         }
         const previousCheckpointXml = compareView.checkpointXml;
         const previousContinuity = snapshotAiProposalContinuity();
-        const previousEditBaselines = { ...compareEditBaselinesRef.current };
-        const previousEditedRoles = [...compareEditedRoles];
+        const previousEditCycle = captureCompareEditCycle();
         const editRequest = beginAiEdit('feedback', 'Preparing feedback context');
         const requestController = editRequest.controller;
         let requestOutcome: 'success' | 'failure' | 'cancelled' = 'failure';
@@ -7953,8 +7944,7 @@ ${partsBodyXml}
             // A successful response begins a new proposal cycle. Do this explicitly
             // rather than relying on the transient closed-modal effect so a second
             // edit cannot diff against the prior proposal generation.
-            compareEditBaselinesRef.current = { current: null, proposal: null };
-            setCompareEditedRoles([]);
+            clearCompareEditCycle();
             // Keep the standard orientation (Current left/red, Proposal right/green) so Apply
             // writes the proposal into the document. See openAiProposalCompare.
             setCompareSwapped(true);
@@ -8024,8 +8014,7 @@ ${partsBodyXml}
                 currentLabel: 'Current',
                 checkpointLabel: 'Assistant Proposal',
             });
-            compareEditBaselinesRef.current = previousEditBaselines;
-            setCompareEditedRoles(previousEditedRoles);
+            restoreCompareEditCycle(previousEditCycle);
             restoreAiProposalContinuity({
                 ...previousContinuity,
                 baseXml: previousContinuity.baseXml || currentXml,
@@ -8040,12 +8029,17 @@ ${partsBodyXml}
         isAiCompareMode,
         aiDiffFeedbackBusy,
         beginAiEdit,
+        captureCompareEditCycle,
         captureAiProposal,
+        clearCompareEditCycle,
         finishAiEdit,
         getAiProposalExpectedHashes,
         getAiProposalSession,
+        getCompareEditBaseline,
         hasPendingCompareOperations,
+        isCompareEditBusy,
         restoreAiProposalContinuity,
+        restoreCompareEditCycle,
         setAiBaseXml,
         setAiError,
         setAiOutput,
@@ -9039,17 +9033,7 @@ ${partsBodyXml}
             setCompareFitZoom(0.5);
             setCompareZoom(null);
             setCompareActiveSide(null);
-            if (!compareEditBusyRef.current) {
-                setCompareEditBusy(false);
-            }
-            setCompareEditedRoles([]);
-            compareEditBaselinesRef.current = { current: null, proposal: null };
-            compareNoteInputByRoleRef.current = { current: false, proposal: false };
-            compareNoteInputDesiredByRoleRef.current = { current: false, proposal: false };
-            setCompareNoteInputByRole({ current: false, proposal: false });
-            setCompareNoteInputCursorByRole({ current: null, proposal: null });
-            setCompareHasSelectionByRole({ current: false, proposal: false });
-            setCompareSelectionBoxesByRole({ current: [], proposal: [] });
+            resetCompareEditing();
             setPalettesOpen(false);
             setPaletteCategory(null);
             setCompareLeftSvgSize(null);
@@ -9102,18 +9086,7 @@ ${partsBodyXml}
                 return;
             }
             setCompareRightScore(null);
-            setCompareSelectionBoxesByRole((prev) => ({ ...prev, proposal: [] }));
-            setCompareHasSelectionByRole((prev) => ({ ...prev, proposal: false }));
-            compareNoteInputByRoleRef.current = {
-                ...compareNoteInputByRoleRef.current,
-                proposal: false,
-            };
-            compareNoteInputDesiredByRoleRef.current = {
-                ...compareNoteInputDesiredByRoleRef.current,
-                proposal: false,
-            };
-            setCompareNoteInputByRole(compareNoteInputByRoleRef.current);
-            setCompareNoteInputCursorByRole((prev) => ({ ...prev, proposal: null }));
+            resetCompareEditingRole('proposal');
             try {
                 const WebMscore = await loadWebMscore();
                 const data = new TextEncoder().encode(compareView.checkpointXml);
@@ -9164,6 +9137,8 @@ ${partsBodyXml}
         clearAiProposal,
         invalidateCompareOperations,
         queueCompareScoreTeardown,
+        resetCompareEditing,
+        resetCompareEditingRole,
         runSerializedScoreOperation,
         stopCompareSideAudio,
     ]);
@@ -9189,21 +9164,10 @@ ${partsBodyXml}
             && prevCompareLiveSelectionScoreRef.current
             && prevCompareLiveSelectionScoreRef.current !== score
         ) {
-            setCompareSelectionBoxesByRole((prev) => ({ ...prev, current: [] }));
-            setCompareHasSelectionByRole((prev) => ({ ...prev, current: false }));
-            compareNoteInputByRoleRef.current = {
-                ...compareNoteInputByRoleRef.current,
-                current: false,
-            };
-            compareNoteInputDesiredByRoleRef.current = {
-                ...compareNoteInputDesiredByRoleRef.current,
-                current: false,
-            };
-            setCompareNoteInputByRole(compareNoteInputByRoleRef.current);
-            setCompareNoteInputCursorByRole((prev) => ({ ...prev, current: null }));
+            resetCompareEditingRole('current');
         }
         prevCompareLiveSelectionScoreRef.current = score;
-    }, [compareView, score]);
+    }, [compareView, resetCompareEditingRole, score]);
 
     useEffect(() => {
         if (!compareView || !compareLeftScore) {
@@ -13192,7 +13156,7 @@ ${partsBodyXml}
         const key = rawKey.toLowerCase();
         const isMod = event.ctrlKey || event.metaKey;
         const hasSelection = compareHasSelectionByRole[compareActiveRole];
-        const noteMode = compareNoteInputByRoleRef.current[compareActiveRole];
+        const noteMode = isCompareNoteInputCommitted(compareActiveRole);
         const mutate = (
             label: string,
             methodName: keyof MutationMethods,
@@ -13240,7 +13204,7 @@ ${partsBodyXml}
             if (key === 'a') {
                 event.preventDefault();
                 mutate('select all', 'selectAll', [], true);
-                setCompareHasSelectionByRole((prev) => ({ ...prev, [compareActiveRole]: true }));
+                setCompareHasSelection(compareActiveRole, true);
                 return true;
             }
             if (key === 'c') {
@@ -13398,7 +13362,7 @@ ${partsBodyXml}
         if (key === 'delete' || key === 'backspace') {
             event.preventDefault();
             mutate('delete selection', 'deleteSelection');
-            setCompareHasSelectionByRole((prev) => ({ ...prev, [compareActiveRole]: false }));
+            setCompareHasSelection(compareActiveRole, false);
             return true;
         }
         return false;
@@ -13409,9 +13373,11 @@ ${partsBodyXml}
         compareHasSelectionByRole,
         compareView,
         copyCompareSelection,
+        isCompareNoteInputCommitted,
         performCompareMutation,
         queueCompareKeyboardOperation,
         runSerializedScoreOperation,
+        setCompareHasSelection,
         setCompareNoteInputMode,
         toggleCompareNoteInputMode,
     ]);
