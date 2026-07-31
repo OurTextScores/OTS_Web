@@ -5,12 +5,30 @@
     "maxBytes": 948331
   },
   "modules": {
-    "components/score-editor/compare/CompareScorePane.tsx": { "maxLines": 900, "maxBytes": 36000 },
-    "components/score-editor/compare/compare-keyboard-policy.ts": { "maxLines": 900, "maxBytes": 36000 },
-    "components/score-editor/compare/compare-types.ts": { "maxLines": 200, "maxBytes": 8000 },
-    "components/score-editor/compare/useCompareEditing.ts": { "maxLines": 900, "maxBytes": 36000 },
-    "components/score-editor/compare/useCompareOperationCoordinator.ts": { "maxLines": 900, "maxBytes": 36000 },
-    "components/score-editor/compare/useCompareTransport.ts": { "maxLines": 900, "maxBytes": 36000 }
+    "components/score-editor/compare/CompareScorePane.tsx": {
+      "maxLines": 900,
+      "maxBytes": 36000
+    },
+    "components/score-editor/compare/compare-keyboard-policy.ts": {
+      "maxLines": 900,
+      "maxBytes": 36000
+    },
+    "components/score-editor/compare/compare-types.ts": {
+      "maxLines": 200,
+      "maxBytes": 8000
+    },
+    "components/score-editor/compare/useCompareEditing.ts": {
+      "maxLines": 900,
+      "maxBytes": 36000
+    },
+    "components/score-editor/compare/useCompareOperationCoordinator.ts": {
+      "maxLines": 900,
+      "maxBytes": 36000
+    },
+    "components/score-editor/compare/useCompareTransport.ts": {
+      "maxLines": 900,
+      "maxBytes": 36000
+    }
   },
   "eslint": {
     "maxErrors": 0,
@@ -18,7 +36,7 @@
     "maxFilesWithFindings": 0
   },
   "tests": {
-    "maxUnconditionalSkips": 5
+    "maxUnconditionalSkips": 3
   },
   "suppressions": {
     "maxLocalDirectives": 3

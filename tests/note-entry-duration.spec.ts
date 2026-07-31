@@ -16,6 +16,17 @@ type NoteEntryWindow = typeof window & {
  * where pressing 7D7D (whole note D, then another D) would only produce one
  * whole note because the duration was reset after each note entry.
  */
+// TD-04 / AC-06: kept skipped with an owner rather than deleted. Both cases in this
+// file already carry an inner conditional guard for builds without the note-entry
+// exports, so the outer unconditional skip is what makes them dead. They need a real
+// browser, a dev server, and real WASM to validate, and they read note-entry state
+// through window.__webmscore, which SECURITY_CORRECTNESS_FINDINGS L2 is scheduled to
+// dev/test-gate. Enabling them without a green browser run would assert a pass nobody
+// has observed.
+//
+// Owner/decision: TD-07 L2 re-gates the debug global; enable and confirm these two in the
+// same packet, as part of the deterministic Playwright matrix in section 7. Do not delete
+// them and do not relax their MSCX assertions.
 test.skip('7D7D produces two whole notes - duration preserved across entries', async ({ page }) => {
   // Capture console logs from the page
   page.on('console', (msg) => {
@@ -155,6 +166,7 @@ test.skip('7D7D produces two whole notes - duration preserved across entries', a
  * Test that changing duration mid-entry works correctly.
  * Press 7D5D should produce one whole note D and one quarter note D.
  */
+// TD-04 / AC-06: see the note on the first case above. Same owner, same precondition.
 test.skip('7D5D produces one whole note and one quarter note', async ({ page }) => {
   await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
   await page.waitForSelector('svg .Note', { timeout: 60_000 });
