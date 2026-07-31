@@ -223,6 +223,40 @@ test.describe('Embed Mode - External XML Comparison', () => {
             (notes) => notes.filter((note) => getComputedStyle(note).fill === 'rgb(0, 101, 191)').length,
         );
         await expect.poll(selectedNoteCount).toBe(1);
+        const finishAnnotationButton = page.getByRole('button', { name: 'Done' });
+        if (await finishAnnotationButton.isVisible()) {
+            await finishAnnotationButton.click();
+        }
+
+        // Navigation must continue to use the engine selection after a pitch mutation
+        // rerenders the active compare score.
+        const selectionOverlay = page.getByTestId('compare-selection-overlay-left').first();
+        const firstSelectionBox = await selectionOverlay.boundingBox();
+        if (!firstSelectionBox) {
+            throw new Error('Expected the first compare selection to be measurable.');
+        }
+        await page.keyboard.press('ArrowRight');
+        await expect.poll(async () => (await selectionOverlay.boundingBox())?.x ?? 0, {
+            timeout: 20000,
+        }).toBeGreaterThan(firstSelectionBox.x);
+        const secondSelectionBox = await selectionOverlay.boundingBox();
+        if (!secondSelectionBox) {
+            throw new Error('Expected the second compare selection to be measurable.');
+        }
+        await page.keyboard.press('ArrowUp');
+        await expect.poll(selectedNoteCount, { timeout: 20000 }).toBe(1);
+        await page.keyboard.press('ArrowRight');
+        await expect.poll(async () => (await selectionOverlay.boundingBox())?.x ?? 0, {
+            timeout: 20000,
+        }).toBeGreaterThan(secondSelectionBox.x);
+        const thirdSelectionBox = await selectionOverlay.boundingBox();
+        if (!thirdSelectionBox) {
+            throw new Error('Expected the third compare selection to be measurable.');
+        }
+        await page.keyboard.press('ArrowLeft');
+        await expect.poll(async () => (await selectionOverlay.boundingBox())?.x ?? Number.POSITIVE_INFINITY, {
+            timeout: 20000,
+        }).toBeLessThan(thirdSelectionBox.x);
 
         const zoomValue = page.getByTestId('compare-zoom-value-left');
         const wrapper = page.getByTestId('compare-score-wrapper-left');
@@ -349,6 +383,7 @@ test.describe('Embed Mode - External XML Comparison', () => {
         await rightButton.click();
         await expect(rightButton).toHaveAttribute('aria-pressed', 'true');
         await expect(rightButton).toHaveText('Stop input');
+        await expect(leftButton).toHaveAttribute('aria-pressed', 'true');
         await expect(page.getByTestId('compare-note-input-cursor-left')).toBeVisible();
         await expect(page.getByTestId('compare-note-input-cursor-right')).toBeVisible();
 

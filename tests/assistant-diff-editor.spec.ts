@@ -12,6 +12,30 @@ const OPENAI_MODELS_RESPONSE = {
 const SCORE_SESSION_ID = 'sess_assistant_diff_test';
 const scoreHash = (xml: string) => `sha256:${createHash('sha256').update(xml, 'utf8').digest('hex')}`;
 
+type FeedbackProposalSession = {
+  id?: unknown;
+  cycle?: unknown;
+  originalInstruction?: unknown;
+  previousCycle?: {
+    cycle?: unknown;
+    patch?: { format?: unknown };
+    expectedCurrentContentHash?: unknown;
+    baseContentHash?: unknown;
+    continuityToken?: unknown;
+  };
+  constraints?: Array<{ kind?: unknown; text?: unknown }>;
+};
+
+type DiffFeedbackRequest = {
+  content?: unknown;
+  blocks?: Array<{ status?: unknown; comment?: unknown }>;
+  editEffort?: unknown;
+  iteration?: unknown;
+  userEdits?: unknown;
+  chatHistory?: unknown;
+  proposalSession?: FeedbackProposalSession;
+};
+
 const PATCH_RESPONSE: {
   patch: MusicXmlPatch;
   annotations: unknown[];
@@ -204,6 +228,22 @@ const countHighlights = async (page: Page) => (
   await page.getByTestId('compare-left-highlight').count()
   + await page.getByTestId('compare-right-highlight').count()
 );
+
+const proposalUserEditDiff = (request: { userEdits?: unknown }): string => {
+  const edits = request.userEdits;
+  if (!Array.isArray(edits)) {
+    throw new Error('Expected feedback request to contain userEdits.');
+  }
+  const proposalEdit = edits.find((entry): entry is Record<string, unknown> => (
+    typeof entry === 'object'
+    && entry !== null
+    && (entry as Record<string, unknown>).side === 'proposal'
+  ));
+  if (!proposalEdit || typeof proposalEdit.diff !== 'string') {
+    throw new Error('Expected feedback request to contain a proposal edit diff.');
+  }
+  return proposalEdit.diff;
+};
 
 const waitForDiffReviewReady = async (page: Page) => {
   await page.getByTestId('checkpoint-compare-modal').waitFor({ timeout: 20_000 });
@@ -595,7 +635,7 @@ test.describe('Assistant diff editor flow', () => {
 
   test('send feedback closes diff while request is running and reopens with new proposal', async ({ page }) => {
     let feedbackCalls = 0;
-    let lastFeedbackPayload: any = null;
+    const feedbackRequests: DiffFeedbackRequest[] = [];
     let releaseFeedback: (() => void) | null = null;
     const feedbackPaused = new Promise<void>((resolve) => {
       releaseFeedback = resolve;
@@ -604,14 +644,15 @@ test.describe('Assistant diff editor flow', () => {
     await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
     await page.route('**/api/music/diff/feedback', async (route) => {
       feedbackCalls += 1;
-      lastFeedbackPayload = route.request().postDataJSON();
+      const feedbackPayload = route.request().postDataJSON() as DiffFeedbackRequest;
+      feedbackRequests.push(feedbackPayload);
       await feedbackPaused;
       await route.fulfill({
         status: 200,
         body: JSON.stringify(buildDiffFeedbackResponse(
           'A',
           1,
-          String(lastFeedbackPayload?.content || ''),
+          String(feedbackPayload.content || ''),
           { effort: 'thorough' },
         )),
       });
@@ -629,9 +670,9 @@ test.describe('Assistant diff editor flow', () => {
     await expect(page.getByTestId('ai-diff-feedback-working')).toContainText('up to 5 min');
     (releaseFeedback as (() => void) | null)?.();
     await expect.poll(() => feedbackCalls, { timeout: 20_000 }).toBe(1);
-    expect(lastFeedbackPayload?.blocks?.[0]?.status).toBe('comment');
-    expect(lastFeedbackPayload?.blocks?.[0]?.comment).toContain('use A');
-    expect(lastFeedbackPayload?.editEffort).toBe('thorough');
+    expect(feedbackRequests[0]?.blocks?.[0]?.status).toBe('comment');
+    expect(feedbackRequests[0]?.blocks?.[0]?.comment).toContain('use A');
+    expect(feedbackRequests[0]?.editEffort).toBe('thorough');
     await waitForDiffReviewReady(page);
     await expect(page.getByTestId('ai-diff-feedback-working')).toHaveCount(0);
     await expect(page.getByText('Iteration 2 review')).toBeVisible({ timeout: 20_000 });
@@ -644,13 +685,15 @@ test.describe('Assistant diff editor flow', () => {
 
   test('feedback can be cancelled without losing the current proposal', async ({ page }) => {
     let releaseFeedback: (() => void) | null = null;
+    const feedbackRequests: DiffFeedbackRequest[] = [];
     const feedbackPaused = new Promise<void>((resolve) => {
       releaseFeedback = resolve;
     });
 
     await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
     await page.route('**/api/music/diff/feedback', async (route) => {
-      const payload = route.request().postDataJSON();
+      const payload = route.request().postDataJSON() as DiffFeedbackRequest;
+      feedbackRequests.push(payload);
       await feedbackPaused;
       try {
         await route.fulfill({
@@ -663,13 +706,15 @@ test.describe('Assistant diff editor flow', () => {
     });
 
     await openAssistantProposalCompare(page);
-    await page.getByRole('button', { name: 'Comment' }).first().click();
-    await page.getByPlaceholder('Describe the revision needed...').first().fill('Please use A instead.');
-    await page.getByRole('button', { name: 'Enter' }).first().click();
-    await page.getByRole('button', { name: /Send Feedback/ }).first().click();
+    await page.getByTestId('btn-compare-add-bar-right').click();
+    const editOnlyFeedback = page.getByRole('button', { name: /Send Feedback \(1 edited score\)/ });
+    await expect(editOnlyFeedback).toBeEnabled({ timeout: 20_000 });
+    await editOnlyFeedback.click();
 
     const working = page.getByTestId('ai-diff-feedback-working');
     await expect(working).toBeVisible({ timeout: 5_000 });
+    await expect.poll(() => feedbackRequests.length, { timeout: 20_000 }).toBe(1);
+    expect(proposalUserEditDiff(feedbackRequests[0])).toContain('measure number="2"');
     await working.getByRole('button', { name: 'Cancel AI edit' }).click();
     (releaseFeedback as (() => void) | null)?.();
 
@@ -679,6 +724,60 @@ test.describe('Assistant diff editor flow', () => {
     await expect(page.getByText('Iteration 1 review')).toBeVisible();
     await expect(page.getByText('Iteration 2 review')).toHaveCount(0);
     await expect(page.getByText(/Diff feedback failed:/)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Send Feedback \(1 edited score\)/ })).toBeEnabled();
+  });
+
+  test('successful edit-only feedback starts a clean proposal baseline', async ({ page }) => {
+    const requests: DiffFeedbackRequest[] = [];
+
+    await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
+    await page.route('**/api/music/diff/feedback', async (route) => {
+      const payload = route.request().postDataJSON() as DiffFeedbackRequest;
+      requests.push(payload);
+      const step = requests.length === 1 ? 'A' : 'B';
+      await route.fulfill({
+        status: 200,
+        body: JSON.stringify(buildDiffFeedbackResponse(
+          step,
+          requests.length,
+          String(payload.content || ''),
+        )),
+      });
+    });
+
+    await openAssistantProposalCompare(page);
+
+    // Activation and engine selection alone must not create a manual edit cycle.
+    await page.getByTestId('btn-compare-activate-right').click();
+    await page.keyboard.press('Control+A');
+    await expect(page.getByTestId('compare-selection-overlay-right').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Send Feedback', exact: true })).toBeDisabled();
+
+    const editProposalAndSend = async () => {
+      await page.getByTestId('btn-compare-add-bar-right').click();
+      const send = page.getByRole('button', { name: /Send Feedback \(1 edited score\)/ });
+      await expect(send).toBeEnabled({ timeout: 20_000 });
+      await send.click();
+    };
+
+    await editProposalAndSend();
+    await expect.poll(() => requests.length, { timeout: 20_000 }).toBe(1);
+    await waitForDiffReviewReady(page);
+    await expect(page.getByText('Iteration 2 review')).toBeVisible({ timeout: 20_000 });
+
+    await editProposalAndSend();
+    await expect.poll(() => requests.length, { timeout: 20_000 }).toBe(2);
+
+    const firstDiff = proposalUserEditDiff(requests[0]);
+    const secondDiff = proposalUserEditDiff(requests[1]);
+    expect(firstDiff).toContain('measure number="2"');
+    expect(String(requests[0].content || '')).not.toContain('measure number="2"');
+    expect(secondDiff).toContain('measure number="2"');
+    // The first generated proposal used G. A stale baseline would make the second
+    // cycle report that old G-to-A regeneration as a user edit.
+    expect(secondDiff).not.toMatch(/^-\s*<step>G<\/step>$/m);
+    await waitForDiffReviewReady(page);
+    await expect(page.getByText('Iteration 3 review')).toBeVisible({ timeout: 20_000 });
   });
 
   test('global comment is sent in diff feedback request', async ({ page }) => {
@@ -706,12 +805,12 @@ test.describe('Assistant diff editor flow', () => {
 
   test('diff feedback request carries iteration and advances review state', async ({ page }) => {
     let callCount = 0;
-    const requests: any[] = [];
+    const requests: DiffFeedbackRequest[] = [];
 
     await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
     await page.route('**/api/music/diff/feedback', async (route) => {
       callCount += 1;
-      const payload = route.request().postDataJSON();
+      const payload = route.request().postDataJSON() as DiffFeedbackRequest;
       requests.push(payload);
       const step = callCount === 1 ? 'A' : 'B';
       await route.fulfill({
@@ -735,12 +834,12 @@ test.describe('Assistant diff editor flow', () => {
 
   test('proposal-session continuity flows through consecutive feedback cycles', async ({ page }) => {
     let callCount = 0;
-    const requests: any[] = [];
+    const requests: DiffFeedbackRequest[] = [];
 
     await page.route('**/api/music/patch', fulfillPatchFromRequestBase);
     await page.route('**/api/music/diff/feedback', async (route) => {
       callCount += 1;
-      const payload = route.request().postDataJSON();
+      const payload = route.request().postDataJSON() as DiffFeedbackRequest;
       requests.push(payload);
       const step = callCount === 1 ? 'A' : 'B';
       await route.fulfill({
@@ -786,8 +885,8 @@ test.describe('Assistant diff editor flow', () => {
     expect(secondSession?.originalInstruction).toBe('Change the first note to G.');
     expect(secondSession?.previousCycle?.cycle).toBe(2);
     const constraints = secondSession?.constraints ?? [];
-    expect(constraints.some((entry: any) => entry.kind === 'rejected')).toBe(true);
-    expect(constraints.some((entry: any) => entry.kind === 'note' && entry.text === 'No slurs anywhere.')).toBe(true);
+    expect(constraints.some((entry) => entry.kind === 'rejected')).toBe(true);
+    expect(constraints.some((entry) => entry.kind === 'note' && entry.text === 'No slurs anywhere.')).toBe(true);
   });
 
   test('deep edit toggle routes to the deep endpoint and surfaces the deep audit', async ({ page }) => {
@@ -862,7 +961,7 @@ test.describe('Assistant diff editor flow', () => {
   test('feedback on a deep-edit proposal preserves Phase 2 continuity', async ({ page }) => {
     const deepSessionId = 'sess-deep-continuity-1';
     const deepToken = `pct-v1:${'ab'.repeat(32)}`;
-    let feedbackPayload: Record<string, unknown> | null = null;
+    const feedbackPayloads: DiffFeedbackRequest[] = [];
 
     await page.route('**/api/music/patch/deep', async (route) => {
       const requestBody = route.request().postDataJSON();
@@ -905,7 +1004,8 @@ test.describe('Assistant diff editor flow', () => {
       });
     });
     await page.route('**/api/music/diff/feedback', async (route) => {
-      feedbackPayload = route.request().postDataJSON();
+      const feedbackPayload = route.request().postDataJSON() as DiffFeedbackRequest;
+      feedbackPayloads.push(feedbackPayload);
       await route.fulfill({
         status: 200,
         body: JSON.stringify(buildDiffFeedbackResponse('A', 1, String(feedbackPayload?.content || ''), {
@@ -932,7 +1032,7 @@ test.describe('Assistant diff editor flow', () => {
 
     await waitForDiffReviewReady(page);
     await expect(page.getByText('Iteration 2 review')).toBeVisible({ timeout: 20_000 });
-    const session = (feedbackPayload as Record<string, any> | null)?.proposalSession;
+    const session = feedbackPayloads[0]?.proposalSession;
     expect(session?.id).toBe(deepSessionId);
     expect(session?.cycle).toBe(1);
     expect(session?.originalInstruction).toBe('Change the first note to G.');

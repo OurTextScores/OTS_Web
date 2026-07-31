@@ -368,6 +368,88 @@ describe('ScoreEditor', () => {
       .toBeLessThan(auxiliaryScore.destroy.mock.invocationCallOrder[0]);
   });
 
+  it('does not start compare audio after close cancels soundfont setup', async () => {
+    const user = userEvent.setup();
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list>
+  <part id="P1"><measure number="1"><note><rest/><duration>4</duration><type>whole</type></note></measure></part>
+</score-partwise>`;
+    let releaseAuxiliarySoundFont!: () => void;
+    const auxiliarySoundFontPending = new Promise<void>((resolve) => {
+      releaseAuxiliarySoundFont = resolve;
+    });
+    const commonScoreMethods = {
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg width="100" height="40"></svg>'),
+      saveXml: vi.fn(async () => new TextEncoder().encode(xml)),
+      metadata: vi.fn(async () => ({ parts: [{ name: 'Music' }] })),
+      measurePositions: vi.fn(async () => ({
+        elements: [{ id: 0, x: 0, y: 0, sx: 100, sy: 40, page: 0 }],
+        events: [],
+        pageSize: { width: 100, height: 40 },
+      })),
+      segmentPositions: vi.fn(async () => ({})),
+      npages: vi.fn(async () => 1),
+      setNoteEntryMode: vi.fn(async () => true),
+    };
+    const mainScore = {
+      ...commonScoreMethods,
+      destroy: vi.fn(),
+      setSoundFont: vi.fn(async () => {}),
+    };
+    const auxiliaryScore = {
+      ...commonScoreMethods,
+      destroy: vi.fn(),
+      setSoundFont: vi.fn(() => auxiliarySoundFontPending),
+      synthAudioBatch: vi.fn(async () => vi.fn(async () => [])),
+    };
+
+    searchParamValues = {
+      compareLeft: '/left.musicxml',
+      compareRight: '/right.musicxml',
+    };
+    mocked.loadWebMscore.mockResolvedValue({
+      ready: Promise.resolve(),
+      load: vi.fn()
+        .mockResolvedValueOnce(mainScore)
+        .mockResolvedValueOnce(auxiliaryScore),
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/left.musicxml') || url.endsWith('/right.musicxml')) {
+        return {
+          ok: true,
+          text: async () => xml,
+          arrayBuffer: async () => new TextEncoder().encode(xml).buffer,
+        };
+      }
+      if (url.includes('/soundfonts/')) {
+        return {
+          ok: true,
+          text: async () => '',
+          arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+        };
+      }
+      return {
+        ok: false,
+        text: async () => '',
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    }));
+
+    const { unmount } = render(<ScoreEditor />);
+    await waitFor(() => expect(auxiliaryScore.saveSvg).toHaveBeenCalled());
+    await user.click(await screen.findByTestId('btn-compare-play-left'));
+    await waitFor(() => expect(auxiliaryScore.setSoundFont).toHaveBeenCalledOnce());
+
+    unmount();
+    releaseAuxiliarySoundFont();
+
+    await waitFor(() => expect(auxiliaryScore.destroy).toHaveBeenCalledOnce());
+    expect(auxiliaryScore.synthAudioBatch).not.toHaveBeenCalled();
+  });
+
   it('ignores compare mutations before activation and routes shortcuts to the displayed score', async () => {
     const user = userEvent.setup();
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
