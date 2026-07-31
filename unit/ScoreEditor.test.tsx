@@ -13,6 +13,7 @@ type ScoreEditorTestGlobals = {
   };
   Audio: unknown;
   AudioContext: unknown;
+  open: unknown;
 };
 
 const testGlobals = globalThis as unknown as ScoreEditorTestGlobals;
@@ -275,6 +276,62 @@ describe('ScoreEditor', () => {
     await waitFor(() => expect(score.setClef).toHaveBeenCalledWith(0));
     expect(score.relayout).toHaveBeenCalled();
     expect(score.selectElementAtPoint.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // Regression: handleOpenScoreInEditor hardcoded '/score-editor/index.html', which only
+  // exists in the embed build (next.config.ts sets that basePath for BUILD_MODE=embed and
+  // exports a static index.html). Every other deployment serves the app at the root, so
+  // "Open in Editor" opened a 404. Found by the deterministic browser matrix.
+  it.each([
+    ['embed', 'embed', '/score-editor/index.html'],
+    ['a root deployment', undefined, '/'],
+  ])('opens the full editor at the deployed base path in %s', async (_label, buildMode, expectedUrl) => {
+    vi.stubEnv('NEXT_PUBLIC_BUILD_MODE', buildMode as string);
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list>
+  <part id="P1"><measure number="1"><note><rest/><duration>4</duration><type>whole</type></note></measure></part>
+</score-partwise>`;
+    const makeScore = () => ({
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
+      saveMusicXml: vi.fn(async () => xml),
+      metadata: vi.fn(async () => ({ parts: [{ name: 'Music' }] })),
+      measurePositions: vi.fn(async () => ({
+        elements: [{ id: 0, x: 0, y: 0, sx: 100, sy: 40, page: 0 }],
+        events: [],
+        pageSize: { width: 100, height: 40 },
+      })),
+      segmentPositions: vi.fn(async () => ({})),
+      npages: vi.fn(async () => 1),
+    });
+    const auxiliaryScore = makeScore();
+    const webmscore = {
+      ready: Promise.resolve(),
+      load: vi.fn().mockResolvedValueOnce(makeScore()).mockResolvedValueOnce(auxiliaryScore),
+    };
+
+    searchParamValues = {
+      compareLeft: '/left.musicxml',
+      compareRight: '/right.musicxml',
+    };
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    testGlobals.fetch = vi.fn(async () => ({
+      ok: true,
+      text: async () => xml,
+      arrayBuffer: async () => new TextEncoder().encode(xml).buffer,
+    }));
+    const openSpy = vi.fn(() => null);
+    testGlobals.open = openSpy;
+
+    render(<ScoreEditor />);
+    await waitFor(() => expect(auxiliaryScore.saveSvg).toHaveBeenCalled());
+
+    const openButtons = await screen.findAllByTitle('Open this score in the full editor');
+    fireEvent.click(openButtons[0]);
+
+    expect(openSpy).toHaveBeenCalledWith(expectedUrl, '_blank');
+    vi.unstubAllEnvs();
   });
 
   it('highlights a compare selection and retires its score safely during an in-flight edit', async () => {

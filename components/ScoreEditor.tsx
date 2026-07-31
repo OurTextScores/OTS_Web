@@ -8841,9 +8841,14 @@ ${partsBodyXml}
             launchContext: activeLaunchContext || undefined,
         }));
 
-        // Open a new tab with the full editor
-        // Use absolute path to avoid base tag interference when embedded
-        window.open('/score-editor/index.html', '_blank');
+        // Open a new tab with the full editor. Only the embed build is served under the
+        // /score-editor basePath (next.config.ts) as a static export with an index.html;
+        // every other deployment serves the app at the root, where that URL is a 404.
+        // Mirrors the same guard in components/toolbar/sections/HelpSection.tsx.
+        window.open(
+            process.env.NEXT_PUBLIC_BUILD_MODE === 'embed' ? '/score-editor/index.html' : '/',
+            '_blank',
+        );
     }, [activeLaunchContext, compareView, compareLeftXml, compareRightXml, compareLeftLabel, compareRightLabel]);
 
     const handleCloseCompareView = useCallback(() => {
