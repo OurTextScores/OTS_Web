@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { BrowserScoreWindow } from './browser-score-types';
 
 test('compare overwrite applies left measure to right', async ({ page }) => {
   await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
@@ -11,10 +12,33 @@ test('compare overwrite applies left measure to right', async ({ page }) => {
   const checkpointCard = page.locator('div').filter({ hasText: checkpointLabel }).first();
   await expect(checkpointCard).toBeVisible({ timeout: 15_000 });
 
+  // Full pitch signature, not just <step>: btn-pitch-up raises by a semitone, so C becomes
+  // C sharp -- <step> stays "C" and only <alter> changes.
+  const readFirstPitch = async (): Promise<string> => page.evaluate(async () => {
+    const score = (window as BrowserScoreWindow).__webmscore;
+    if (!score?.saveXml) {
+      throw new Error('window.__webmscore.saveXml is not available');
+    }
+    const xml: string = await score.saveXml();
+    const pitch = xml.match(/<pitch>[\s\S]*?<\/pitch>/)?.[0] ?? '';
+    const step = pitch.match(/<step>([A-G])<\/step>/)?.[1] ?? '';
+    const alter = pitch.match(/<alter>(-?\d+)<\/alter>/)?.[1] ?? '0';
+    const octave = pitch.match(/<octave>(\d+)<\/octave>/)?.[1] ?? '';
+    return `${step}${alter}/${octave}`;
+  });
+
+  const pitchBeforeEdit = await readFirstPitch();
+
   const firstNote = page.locator('svg .Note').first();
   await firstNote.click();
   await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
   await page.getByTestId('btn-pitch-up').click();
+
+  // Wait for the mutation to reach the engine before opening compare. Without this the
+  // workspace can snapshot currentXml while the pitch-up is still in flight, leaving the
+  // two sides identical, so no diff highlights are ever produced and the poll below times
+  // out. That was the flake: it reproduced under load and passed otherwise.
+  await expect.poll(readFirstPitch, { timeout: 20_000 }).not.toBe(pitchBeforeEdit);
 
   await checkpointCard.getByRole('button', { name: 'Compare' }).click();
   await page.getByTestId('checkpoint-compare-modal').waitFor({ timeout: 20_000 });

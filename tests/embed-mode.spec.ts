@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { test, expect } from '@playwright/test';
 
 /**
@@ -108,27 +110,34 @@ test.describe('Embed Mode - External XML Comparison', () => {
     });
 
     test('should show loading state while fetching external files', async ({ page }) => {
-        // Intercept local file requests to add delay
-        await page.route(leftXmlUrl, async route => {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            await route.continue();
-        });
-
-        await page.route(rightXmlUrl, async route => {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            await route.continue();
-        });
+        // Serve the fixtures from the test process instead of proxying to the dev server.
+        // route.continue() made this depend on dev-server latency, and a slow response was
+        // surfacing as "Failed to fetch files" -- the error state, not the loading state.
+        const bodyFor = (url: string) => readFileSync(
+            resolve(process.cwd(), 'public', url.replace(/^\//, '')),
+            'utf8',
+        );
+        const holdMs = 4000;
+        for (const url of [leftXmlUrl, rightXmlUrl]) {
+            await page.route(url, async route => {
+                await new Promise(done => setTimeout(done, holdMs));
+                await route.fulfill({
+                    status: 200,
+                    contentType: 'application/xml',
+                    body: bodyFor(url),
+                });
+            });
+        }
 
         await page.goto(`/?compareLeft=${encodeURIComponent(leftXmlUrl)}&compareRight=${encodeURIComponent(rightXmlUrl)}`);
 
-        // Loading indicator should be visible initially
-        await expect(page.getByText('Loading comparison...')).toBeVisible({ timeout: 1000 });
+        // The hold is long enough that the loading state is still up even when hydration
+        // is slow, so this no longer races a 1s budget against a 1s delay.
+        const loading = page.getByText('Loading comparison...');
+        await expect(loading).toBeVisible({ timeout: holdMs });
 
-        // Wait for loading to complete
-        await page.waitForTimeout(3000);
-
-        // Loading should be gone
-        await expect(page.getByText('Loading comparison...')).not.toBeVisible();
+        // Wait on the observable transition rather than sleeping past it.
+        await expect(loading).toBeHidden({ timeout: 30_000 });
     });
 
     test('should handle fetch errors gracefully', async ({ page }) => {
