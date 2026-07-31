@@ -11,36 +11,10 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Embed Mode - External XML Comparison', () => {
     // Use local sample files served from public directory
-    const baseUrl = 'http://localhost:3000';
-    const leftXmlUrl = `${baseUrl}/sample-left.xml`;
-    const rightXmlUrl = `${baseUrl}/sample-right.xml`;
+    const leftXmlUrl = '/sample-left.xml';
+    const rightXmlUrl = '/sample-right.xml';
 
     // For mocked external URL tests
-    const testXmlLeft = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
-<score-partwise version="3.1">
-  <part-list>
-    <score-part id="P1">
-      <part-name>Music</part-name>
-    </score-part>
-  </part-list>
-  <part id="P1">
-    <measure number="1">
-      <attributes>
-        <divisions>1</divisions>
-        <key><fifths>0</fifths></key>
-        <time><beats>4</beats><beat-type>4</beat-type></time>
-        <clef><sign>G</sign><line>2</line></clef>
-      </attributes>
-      <note>
-        <pitch><step>C</step><octave>4</octave></pitch>
-        <duration>4</duration>
-        <type>whole</type>
-      </note>
-    </measure>
-  </part>
-</score-partwise>`;
-
     const testXmlRight = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
 <score-partwise version="3.1">
@@ -176,24 +150,29 @@ test.describe('Embed Mode - External XML Comparison', () => {
 
     test('should allow swapping sides in embed mode', async ({ page }) => {
         await page.goto(`/?compareLeft=${encodeURIComponent(leftXmlUrl)}&compareRight=${encodeURIComponent(rightXmlUrl)}&leftLabel=Old&rightLabel=New`);
-        await page.waitForTimeout(3000);
-
-        // Initial state
         const leftPane = page.getByTestId('compare-pane-left');
         const rightPane = page.getByTestId('compare-pane-right');
+        await expect(leftPane.locator('svg').first()).toBeVisible({ timeout: 30000 });
+        await expect(rightPane.locator('svg').first()).toBeVisible({ timeout: 30000 });
+        const oldLabel = page.getByText('Old', { exact: true });
+        const newLabel = page.getByText('New', { exact: true });
+        const oldInitialX = (await oldLabel.boundingBox())?.x ?? Number.NaN;
+        const newInitialX = (await newLabel.boundingBox())?.x ?? Number.NaN;
+        expect(oldInitialX).toBeLessThan(newInitialX);
 
-        await expect(leftPane).toBeVisible();
-        await expect(rightPane).toBeVisible();
-
-        // Find and click swap button
         const swapButton = page.getByRole('button', { name: /Swap sides/i });
         await swapButton.click();
+        await expect.poll(async () => (await newLabel.boundingBox())?.x ?? Number.POSITIVE_INFINITY)
+            .toBeLessThan((await oldLabel.boundingBox())?.x ?? Number.NEGATIVE_INFINITY);
 
-        await page.waitForTimeout(1000);
-
-        // After swap, labels should be reversed
-        // The "Old" label should now be on the right, "New" on the left
-        // (This assumes the labels move with the content)
+        await page.evaluate(() => {
+            window.open = () => null;
+        });
+        const openButtons = page.getByRole('button', { name: /Open in Editor/ });
+        await openButtons.first().click();
+        const swappedLeft = await page.evaluate(() => JSON.parse(sessionStorage.getItem('openInEditor') || '{}'));
+        expect(swappedLeft.filename).toBe('New.xml');
+        expect(swappedLeft.xml).toContain('<step>E</step>');
     });
 
     test('should not activate embed mode with only one URL parameter', async ({ page }) => {

@@ -115,6 +115,7 @@ import {
     AiCompareWorkspaceActions,
 } from './score-editor/AiCompareWorkspace';
 import { ComparePaneEditorControls } from './score-editor/ComparePaneEditorControls';
+import { CompareSwapButton } from './score-editor/CompareSwapButton';
 import { AiDiffBlockReview } from './score-editor/AiDiffBlockReview';
 import { XmlDiffView } from './score-editor/XmlDiffView';
 import {
@@ -2939,30 +2940,10 @@ export default function ScoreEditor() {
     const comparePartCount = Math.max(scoreParts.length, compareRightParts.length, 1);
     const compareCheckpointTitle = compareView?.checkpointLabel || compareView?.title || 'Checkpoint';
     const compareCurrentTitle = compareView?.currentLabel || 'Current';
-    const compareLeftScore = useMemo(
-        () => (isEmbedMode
-            ? (compareSwapped ? score : compareRightScore)
-            : (compareSwapped ? score : compareRightScore)),
-        [compareSwapped, compareRightScore, isEmbedMode, score],
-    );
-    const compareRightScoreDisplay = useMemo(
-        () => (isEmbedMode
-            ? (compareSwapped ? compareRightScore : score)
-            : (compareSwapped ? compareRightScore : score)),
-        [compareSwapped, score, compareRightScore, isEmbedMode],
-    );
-    const compareLeftParts = useMemo(
-        () => (isEmbedMode
-            ? (compareSwapped ? scoreParts : compareRightParts)
-            : (compareSwapped ? scoreParts : compareRightParts)),
-        [compareSwapped, compareRightParts, scoreParts, isEmbedMode],
-    );
-    const compareRightPartsDisplay = useMemo(
-        () => (isEmbedMode
-            ? (compareSwapped ? compareRightParts : scoreParts)
-            : (compareSwapped ? compareRightParts : scoreParts)),
-        [compareSwapped, scoreParts, compareRightParts, isEmbedMode],
-    );
+    const compareLeftScore = compareSwapped ? score : compareRightScore;
+    const compareRightScoreDisplay = compareSwapped ? compareRightScore : score;
+    const compareLeftParts = compareSwapped ? scoreParts : compareRightParts;
+    const compareRightPartsDisplay = compareSwapped ? compareRightParts : scoreParts;
     const compareLeftLabel = isEmbedMode
         ? (compareSwapped ? rightLabel : leftLabel)
         : (compareSwapped ? compareCurrentTitle : compareCheckpointTitle);
@@ -2970,14 +2951,10 @@ export default function ScoreEditor() {
         ? (compareSwapped ? leftLabel : rightLabel)
         : (compareSwapped ? compareCheckpointTitle : compareCurrentTitle);
     const compareLeftXml = compareView
-        ? (isEmbedMode
-            ? (compareSwapped ? compareView.currentXml : compareView.checkpointXml)
-            : (compareSwapped ? compareView.currentXml : compareView.checkpointXml))
+        ? (compareSwapped ? compareView.currentXml : compareView.checkpointXml)
         : '';
     const compareRightXml = compareView
-        ? (isEmbedMode
-            ? (compareSwapped ? compareView.checkpointXml : compareView.currentXml)
-            : (compareSwapped ? compareView.checkpointXml : compareView.currentXml))
+        ? (compareSwapped ? compareView.checkpointXml : compareView.currentXml)
         : '';
     const compareLeftIsCurrent = compareLeftScore === score;
     const compareRightIsCurrent = compareRightScoreDisplay === score;
@@ -9081,6 +9058,20 @@ ${partsBodyXml}
         // Use absolute path to avoid base tag interference when embedded
         window.open('/score-editor/index.html', '_blank');
     }, [activeLaunchContext, compareView, compareLeftXml, compareRightXml, compareLeftLabel, compareRightLabel]);
+
+    const handleSwapCompareSides = async () => {
+        if (!compareView || compareEditBusyRef.current || compareSwapBusy || aiDiffFeedbackBusy) return;
+        setCompareSwapBusy(true);
+        invalidateCompareOperations();
+        try {
+            await waitForCompareOperations();
+            await stopCompareSideAudio('left', { awaitCancel: true });
+            await stopCompareSideAudio('right', { awaitCancel: true });
+            setCompareSwapped((swapped) => !swapped);
+        } finally {
+            setCompareSwapBusy(false);
+        }
+    };
 
     const handleCloseCompareView = useCallback(() => {
         // Invalidate synchronously in the click event; waiting for the effect that
@@ -19291,6 +19282,10 @@ ${partsBodyXml}
                                     rebaseBusy={compareSwapBusy || compareEditBusy}
                                 />
                             )}
+                            <CompareSwapButton
+                                busy={compareSwapBusy || compareEditBusy || aiDiffFeedbackBusy || !compareLeftScore || !compareRightScoreDisplay}
+                                onSwap={() => void handleSwapCompareSides()}
+                            />
                             <div className="flex min-w-0 flex-none overflow-x-hidden" style={{ height: '100dvh' }}>
                                 <div className="flex min-h-0 min-w-0 flex-1 gap-4">
                                     <div className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col gap-3">
