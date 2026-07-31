@@ -1702,6 +1702,11 @@ export default function ScoreEditor() {
     const clipboardRef = useRef<{ mimeType: string; data: Uint8Array } | null>(null);
     const currentPageRef = useRef(currentPage);
     const selectedPointRef = useRef<{ page: number, x: number, y: number } | null>(selectedPoint);
+    // False means libmscore already owns the authoritative selection. The only
+    // normal path that moves the overlay without moving the engine is letter-key
+    // pitch replacement outside note-input mode, which deliberately previews the
+    // next note. Its next selection-dependent command must project that point once.
+    const selectionProjectionNeededRef = useRef(false);
     const progressivePageLoadInFlightRef = useRef(false);
     const pageNavigationInFlightRef = useRef(false);
     const largeScoreSessionRef = useRef(false);
@@ -2261,6 +2266,7 @@ export default function ScoreEditor() {
 
     useEffect(() => {
         scoreRef.current = score;
+        selectionProjectionNeededRef.current = false;
     }, [score]);
 
     useEffect(() => {
@@ -11450,15 +11456,27 @@ ${partsBodyXml}
             const { page, x, y } = selectedPoint;
             const preferTextSelection = hasTextElementClass(selectedElementClasses) || Boolean(textEditorPosition);
             if (preferTextSelection && score.selectTextElementAtPoint) {
-                await score.selectTextElementAtPoint(page, x, y);
+                const selected = await score.selectTextElementAtPoint(page, x, y);
+                if (selected !== false) {
+                    selectionProjectionNeededRef.current = false;
+                }
                 return;
             }
             if (!score.selectElementAtPoint) {
                 return;
             }
-            await score.selectElementAtPoint(page, x, y);
+            const selected = await score.selectElementAtPoint(page, x, y);
+            if (selected !== false) {
+                selectionProjectionNeededRef.current = false;
+            }
         } catch (err) {
             console.warn('Re-select in WASM failed; continuing anyway', err);
+        }
+    };
+
+    const projectSelectionInWasmIfNeeded = async () => {
+        if (selectionProjectionNeededRef.current) {
+            await ensureSelectionInWasm();
         }
     };
 
@@ -11673,6 +11691,7 @@ ${partsBodyXml}
         setSelectedElement({ x, y, w, h });
         setSelectedPoint({ page, x: centerX, y: centerY });
         setSelectedIndex(nextIndex);
+        selectionProjectionNeededRef.current = true;
     };
 
     const goToPage = async (targetPage: number) => {
@@ -11907,10 +11926,14 @@ ${partsBodyXml}
                 setSelectedIndex(null);
                 setSelectedElementClasses('');
                 setSelectedLayoutBreakSubtype(null);
+                selectionProjectionNeededRef.current = false;
             }
 
             if (!mutated) {
                 return;
+            }
+            if (options?.skipWasmReselect && !options.advanceSelection) {
+                selectionProjectionNeededRef.current = false;
             }
             setScoreDirtySinceCheckpoint(true);
             setScoreDirtySinceXml(true);
@@ -11959,7 +11982,14 @@ ${partsBodyXml}
                 void playSelectionPreview(
                     `mutation:${label}`,
                     preservedPoint ?? undefined,
-                    { reselect: !noteInputActiveRef.current },
+                    {
+                        // Mutations such as pitch changes and transposition keep their
+                        // selection inside libmscore. Re-selecting from the old SVG
+                        // point after relayout can hit staff lines because the note has
+                        // moved vertically, leaving the overlay and engine selection
+                        // out of sync.
+                        reselect: !noteInputActiveRef.current && !options?.skipWasmReselect,
+                    },
                 );
             }
 
@@ -12125,17 +12155,17 @@ ${partsBodyXml}
         return result;
     } : undefined);
     const handlePitchUp = () => performMutation('raise pitch', async () => {
-        // Don't call ensureSelectionInWasm - it would replace multi-selections with single element
+        await projectSelectionInWasmIfNeeded();
         const fn = requireMutation('pitchUp');
         if (!fn) return;
         return fn();
-    }, { playSelectionPreview: true });
+    }, { skipWasmReselect: true, playSelectionPreview: true });
     const handlePitchDown = () => performMutation('lower pitch', async () => {
-        // Don't call ensureSelectionInWasm - it would replace multi-selections with single element
+        await projectSelectionInWasmIfNeeded();
         const fn = requireMutation('pitchDown');
         if (!fn) return;
         return fn();
-    }, { playSelectionPreview: true });
+    }, { skipWasmReselect: true, playSelectionPreview: true });
     const handleTranspose = (semitones: number) => performMutation(`transpose ${semitones} semitones`, async () => {
         const fn = requireMutation('transpose');
         if (!fn) return;
@@ -12217,7 +12247,7 @@ ${partsBodyXml}
     }, { clearSelection: true, skipWasmReselect: true });
     const handleSelectNextChord = async () => {
         if (!score) return;
-        await ensureSelectionInWasm();
+        await projectSelectionInWasmIfNeeded();
         const selectFn = requireMutation('selectNextChord');
         if (!selectFn) {
             return;
@@ -12227,6 +12257,7 @@ ${partsBodyXml}
         if (!result) {
             return;
         }
+        selectionProjectionNeededRef.current = false;
 
         let targetPage = currentPageRef.current;
         const activeScore = scoreRef.current ?? score;
@@ -12257,7 +12288,7 @@ ${partsBodyXml}
     };
     const handleSelectPrevChord = async () => {
         if (!score) return;
-        await ensureSelectionInWasm();
+        await projectSelectionInWasmIfNeeded();
         const selectFn = requireMutation('selectPrevChord');
         if (!selectFn) {
             return;
@@ -12267,6 +12298,7 @@ ${partsBodyXml}
         if (!result) {
             return;
         }
+        selectionProjectionNeededRef.current = false;
 
         let targetPage = currentPageRef.current;
         const activeScore = scoreRef.current ?? score;
@@ -12310,7 +12342,7 @@ ${partsBodyXml}
         anchor: 'first' | 'last',
     ) => {
         if (!score) return;
-        await ensureSelectionInWasm();
+        await projectSelectionInWasmIfNeeded();
         const extendFn = requireMutation(method);
         const getBBoxesFn = requireMutation('getSelectionBoundingBoxes');
         if (!extendFn || !getBBoxesFn) {
@@ -12319,6 +12351,7 @@ ${partsBodyXml}
 
         const result = await extendFn.call(score);
         if (!result) return;
+        selectionProjectionNeededRef.current = false;
 
         const bboxes = await getBBoxesFn.call(score);
         await renderScore(score, currentPageRef.current);
