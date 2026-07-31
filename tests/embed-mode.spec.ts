@@ -91,18 +91,20 @@ test.describe('Embed Mode - External XML Comparison', () => {
         await page.goto(`/?compareLeft=${encodeURIComponent(leftXmlUrl)}&compareRight=${encodeURIComponent(rightXmlUrl)}&leftLabel=Version%201&rightLabel=Version%202`);
         await page.waitForTimeout(3000);
 
-        // Custom labels should be visible in the compare view
-        await expect(page.getByText('Version 1')).toBeVisible();
-        await expect(page.getByText('Version 2')).toBeVisible();
+        // exact:true so these do not also match XmlDiffView's
+        // "MusicXML Diff (Version 1 -> Version 2)" summary, which contains both labels.
+        await expect(page.getByText('Version 1', { exact: true })).toBeVisible();
+        await expect(page.getByText('Version 2', { exact: true })).toBeVisible();
     });
 
     test('should use default labels when not specified', async ({ page }) => {
         await page.goto(`/?compareLeft=${encodeURIComponent(leftXmlUrl)}&compareRight=${encodeURIComponent(rightXmlUrl)}`);
         await page.waitForTimeout(3000);
 
-        // Default labels should be visible
-        await expect(page.getByText('Left')).toBeVisible();
-        await expect(page.getByText('Right')).toBeVisible();
+        // exact:true so these do not also match XmlDiffView's
+        // "MusicXML Diff (Left -> Right)" summary, which contains both labels.
+        await expect(page.getByText('Left', { exact: true })).toBeVisible();
+        await expect(page.getByText('Right', { exact: true })).toBeVisible();
     });
 
     test('should show loading state while fetching external files', async ({ page }) => {
@@ -153,9 +155,9 @@ test.describe('Embed Mode - External XML Comparison', () => {
         await page.goto(`/?compareLeft=${encodeURIComponent(leftXmlUrl)}`);
         await page.waitForTimeout(1000);
 
-        // Toolbar should be visible (not embed mode)
-        const toolbar = page.locator('div').filter({ has: page.getByText('New Score') });
-        await expect(toolbar).toBeVisible();
+        // Assert on the control itself rather than on an ancestor div: every enclosing
+        // div also "has" the text, so the old locator matched seven nested elements.
+        await expect(page.getByText('New Score', { exact: true })).toBeVisible();
 
         // Compare modal should not be visible
         const compareModal = page.getByTestId('checkpoint-compare-modal');
@@ -557,12 +559,17 @@ test.describe('Embed Mode - External XML Comparison', () => {
         await openInEditorButtons.first().click();
         const leftStored = await page.evaluate(() => JSON.parse(sessionStorage.getItem('openInEditor') || '{}'));
         expect(leftStored.filename).toBe('Left.xml');
-        expect(leftStored.xml).toContain('<step>C</step>');
+        // Assert on content unique to each fixture. <step>C</step> appears in both, so it
+        // could not tell the sides apart; <step>D</step> exists only in sample-left.xml
+        // and <step>B</step> only in sample-right.xml.
+        expect(leftStored.xml).toContain('Sample Score - Version 1');
+        expect(leftStored.xml).toContain('<step>D</step>');
 
         await openInEditorButtons.nth(1).click();
         const rightStored = await page.evaluate(() => JSON.parse(sessionStorage.getItem('openInEditor') || '{}'));
         expect(rightStored.filename).toBe('Right.xml');
-        expect(rightStored.xml).toContain('<step>D</step>');
+        expect(rightStored.xml).toContain('Sample Score - Version 2');
+        expect(rightStored.xml).toContain('<step>B</step>');
     });
 
     test('should open left score in full editor in new tab when clicking "Open in Editor"', async ({ page, context }) => {
@@ -586,8 +593,7 @@ test.describe('Embed Mode - External XML Comparison', () => {
         await expect(compareModal).toBeVisible();
 
         // New tab should show full editor
-        const toolbar = newPage.locator('div').filter({ has: newPage.getByText('New Score') });
-        await expect(toolbar).toBeVisible();
+        await expect(newPage.getByText('New Score', { exact: true })).toBeVisible();
 
         // Sidebar should be visible in new tab
         await expect(newPage.getByTestId('checkpoint-sidebar')).toBeVisible();
@@ -620,8 +626,7 @@ test.describe('Embed Mode - External XML Comparison', () => {
         await expect(compareModal).toBeVisible();
 
         // New tab should show full editor
-        const toolbar = newPage.locator('div').filter({ has: newPage.getByText('New Score') });
-        await expect(toolbar).toBeVisible();
+        await expect(newPage.getByText('New Score', { exact: true })).toBeVisible();
 
         // Sidebar should be visible in new tab
         await expect(newPage.getByTestId('checkpoint-sidebar')).toBeVisible();

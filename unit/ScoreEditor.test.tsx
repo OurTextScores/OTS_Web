@@ -24,6 +24,7 @@ const originalTestGlobals = {
   revokeObjectURL: testGlobals.URL.revokeObjectURL,
   Audio: testGlobals.Audio,
   AudioContext: testGlobals.AudioContext,
+  open: testGlobals.open,
 };
 
 const mocked = vi.hoisted(() => ({
@@ -226,6 +227,12 @@ describe('ScoreEditor', () => {
     testGlobals.URL.revokeObjectURL = originalTestGlobals.revokeObjectURL;
     testGlobals.Audio = originalTestGlobals.Audio;
     testGlobals.AudioContext = originalTestGlobals.AudioContext;
+    testGlobals.open = originalTestGlobals.open;
+    vi.unstubAllEnvs();
+    // jsdom keeps sessionStorage across tests, and ScoreEditor consumes an
+    // 'openInEditor' handoff on mount -- leaving one behind makes the next test load
+    // that score instead of its own fixture.
+    sessionStorage.clear();
     suppressConsole();
   });
 
@@ -324,14 +331,14 @@ describe('ScoreEditor', () => {
     const openSpy = vi.fn(() => null);
     testGlobals.open = openSpy;
 
-    render(<ScoreEditor />);
+    const { unmount } = render(<ScoreEditor />);
     await waitFor(() => expect(auxiliaryScore.saveSvg).toHaveBeenCalled());
 
     const openButtons = await screen.findAllByTitle('Open this score in the full editor');
     fireEvent.click(openButtons[0]);
 
     expect(openSpy).toHaveBeenCalledWith(expectedUrl, '_blank');
-    vi.unstubAllEnvs();
+    unmount();
   });
 
   it('highlights a compare selection and retires its score safely during an in-flight edit', async () => {
