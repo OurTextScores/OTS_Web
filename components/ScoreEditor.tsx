@@ -3422,6 +3422,8 @@ export default function ScoreEditor() {
             : 'Send Feedback';
     }, [aiDiffCommentTotal, aiDiffRejectedCount, hasGlobalNote, compareManualEditCount, aiDiffPendingCount, aiDiffAcceptedCount]);
     const compareEffectiveZoom = compareZoom ?? compareFitZoom;
+    const compareEffectiveZoomRef = useRef(compareEffectiveZoom);
+    compareEffectiveZoomRef.current = compareEffectiveZoom;
 
     const compareGutterRegionRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -6494,12 +6496,12 @@ ${partsBodyXml}
         if (!(svg instanceof SVGSVGElement)) {
             return;
         }
-        const size = getSvgNaturalSize(svg, compareEffectiveZoom);
+        const size = getSvgNaturalSize(svg, compareEffectiveZoomRef.current);
         if (!size) {
             return;
         }
         setSize(size);
-    }, [compareEffectiveZoom]);
+    }, []);
 
     const getCompareTargetPage = useCallback((targetScore: Score | null) => {
         if (compareContinuousMode) {
