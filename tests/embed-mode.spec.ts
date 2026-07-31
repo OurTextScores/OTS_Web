@@ -311,55 +311,88 @@ test.describe('Embed Mode - External XML Comparison', () => {
             await openButtons.nth(index).click();
             return page.evaluate(() => JSON.parse(sessionStorage.getItem('openInEditor') || '{}').xml || '');
         };
+        const pitches = (xml: string) => [...xml.matchAll(/<step>([A-G])<\/step>/g)].map((match) => match[1]);
+        const selectedIndexBySide: Record<'left' | 'right', number | null> = {
+            left: null,
+            right: null,
+        };
         const selectNote = async (side: 'left' | 'right', noteIndex: number) => {
             await page.getByTestId(`btn-compare-activate-${side}`).click();
-            const note = page.getByTestId(`compare-pane-${side}`).locator('svg .Note').nth(noteIndex);
-            let noteBox: Awaited<ReturnType<typeof note.boundingBox>> = null;
-            await expect.poll(async () => {
-                noteBox = await note.boundingBox();
-                return noteBox?.width ?? 0;
-            }, { timeout: 30000 }).toBeGreaterThan(0);
-            const renderedNoteBox = noteBox as {
-                x: number;
-                y: number;
-                width: number;
-                height: number;
-            } | null;
-            if (!renderedNoteBox) {
-                throw new Error(`Expected a clickable note in the ${side} compare score.`);
+            // SVG .Note groups can include stems/flags outside the notehead, so the
+            // geometric centre of an arbitrary nth group is not necessarily an engine
+            // hit point. Click the known-selectable first note once per score, then let
+            // libmscore own navigation and preserve that role-owned selection.
+            const note = page.getByTestId(`compare-pane-${side}`).locator('svg .Note').first();
+            const selectionOverlay = page.getByTestId(`compare-selection-overlay-${side}`).first();
+            if (selectedIndexBySide[side] === null) {
+                let noteBox: Awaited<ReturnType<typeof note.boundingBox>> = null;
+                await expect.poll(async () => {
+                    noteBox = await note.boundingBox();
+                    return noteBox?.width ?? 0;
+                }, { timeout: 30000 }).toBeGreaterThan(0);
+                const renderedNoteBox = noteBox as {
+                    x: number;
+                    y: number;
+                    width: number;
+                    height: number;
+                } | null;
+                if (!renderedNoteBox) {
+                    throw new Error(`Expected a clickable note in the ${side} compare score.`);
+                }
+                await page.mouse.click(
+                    renderedNoteBox.x + renderedNoteBox.width / 2,
+                    renderedNoteBox.y + renderedNoteBox.height / 2,
+                );
+                await expect(selectionOverlay).toBeVisible();
+                const finishAnnotationButton = page.getByRole('button', { name: 'Done' });
+                if (await finishAnnotationButton.isVisible()) {
+                    await finishAnnotationButton.click();
+                }
+                selectedIndexBySide[side] = 0;
+            } else {
+                await expect(selectionOverlay).toBeVisible();
             }
-            await page.mouse.click(
-                renderedNoteBox.x + renderedNoteBox.width / 2,
-                renderedNoteBox.y + renderedNoteBox.height / 2,
-            );
-            await expect(page.getByTestId(`compare-selection-overlay-${side}`).first()).toBeVisible();
-            const finishAnnotationButton = page.getByRole('button', { name: 'Done' });
-            if (await finishAnnotationButton.isVisible()) {
-                await finishAnnotationButton.click();
+            const currentIndex = selectedIndexBySide[side] ?? 0;
+            const direction = noteIndex >= currentIndex ? 'ArrowRight' : 'ArrowLeft';
+            const distance = Math.abs(noteIndex - currentIndex);
+            if (distance > 0) {
+                let previousSelectionBox = await selectionOverlay.boundingBox();
+                for (let index = 0; index < distance; index += 1) {
+                    await page.keyboard.press(direction);
+                    await expect.poll(async () => {
+                        const nextSelectionBox = await selectionOverlay.boundingBox();
+                        return Boolean(
+                            previousSelectionBox
+                            && nextSelectionBox
+                            && (
+                                nextSelectionBox.x !== previousSelectionBox.x
+                                || nextSelectionBox.y !== previousSelectionBox.y
+                            )
+                        );
+                    }, { timeout: 20000 }).toBe(true);
+                    previousSelectionBox = await selectionOverlay.boundingBox();
+                }
             }
-            return renderedNoteBox;
+            selectedIndexBySide[side] = noteIndex;
         };
         await selectNote('left', 1);
         await page.keyboard.press('Control+C');
-        const rightTargetBeforePaste = await selectNote('right', 0);
-        const rightTarget = page.getByTestId('compare-pane-right').locator('svg .Note').first();
+        await selectNote('right', 0);
         await page.keyboard.press('Control+V');
-        await expect.poll(async () => (await rightTarget.boundingBox())?.y ?? rightTargetBeforePaste.y, {
+        await expect.poll(async () => pitches(await readPaneXml(1))[0], {
             timeout: 30000,
-        }).not.toBe(rightTargetBeforePaste.y);
+        }).toBe('D');
 
         await selectNote('right', 2);
         await page.keyboard.press('Control+C');
-        const leftTargetBeforePaste = await selectNote('left', 0);
-        const leftTarget = page.getByTestId('compare-pane-left').locator('svg .Note').first();
+        await selectNote('left', 0);
         await page.keyboard.press('Control+V');
-        await expect.poll(async () => (await leftTarget.boundingBox())?.y ?? leftTargetBeforePaste.y, {
+        await expect.poll(async () => pitches(await readPaneXml(0))[0], {
             timeout: 30000,
-        }).not.toBe(leftTargetBeforePaste.y);
+        }).toBe('G');
 
         const leftXml = await readPaneXml(0);
         const rightXml = await readPaneXml(1);
-        const pitches = (xml: string) => [...xml.matchAll(/<step>([A-G])<\/step>/g)].map((match) => match[1]);
         expect(pitches(leftXml).slice(0, 4)).toEqual(['G', 'D', 'E', 'F']);
         expect(pitches(rightXml).slice(0, 4)).toEqual(['D', 'E', 'G', 'C']);
     });
