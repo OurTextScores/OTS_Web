@@ -114,6 +114,12 @@ import {
     AiCompareWorkspace,
     AiCompareWorkspaceActions,
 } from './score-editor/AiCompareWorkspace';
+import {
+    CompareMeasureComments,
+    type AiMeasureAnchor,
+    type AiMeasureThread,
+    type AiThreadComment,
+} from './score-editor/compare/CompareMeasureComments';
 import { CompareScorePane } from './score-editor/compare/CompareScorePane';
 import { AiDiffBlockReview } from './score-editor/AiDiffBlockReview';
 import { XmlDiffView } from './score-editor/XmlDiffView';
@@ -693,25 +699,7 @@ type BlockReview = {
     commentCommitted: boolean;
 };
 
-// Measure-level discussion threads on the AI proposal diff (ephemeral, in-session).
-type AiThreadComment = {
-    id: string;
-    author: 'you' | 'assistant';
-    text: string;
-    createdAt: string;
-};
 
-type AiMeasureAnchor = {
-    key: string;
-    partIndex: number;
-    measureNumber: number;
-    leftIndex: number | null;
-    rightIndex: number | null;
-};
-
-type AiMeasureThread = AiMeasureAnchor & {
-    comments: AiThreadComment[];
-};
 
 type AiDiffBlockRef = Pick<BlockReview, 'partIndex' | 'blockIndex' | 'blockKey' | 'measureRange' | 'contentSignature'>;
 
@@ -18807,97 +18795,20 @@ ${partsBodyXml}
                                         className={`flex min-h-0 flex-none flex-col items-stretch gap-2 ${(isAiCompareMode || isChangeReviewCompareMode) ? '' : 'w-44'}`}
                                         style={(isAiCompareMode || isChangeReviewCompareMode) ? { width: `${aiDiffGutterWidth}px` } : undefined}
                                     >
-                                        {isAiCompareMode && (aiFocusedMeasureAnchor || Object.keys(aiMeasureThreads).length > 0) && (
-                                            <div className="flex-none rounded border border-sky-200 bg-sky-50 p-2 text-[10px] text-gray-600">
-                                                <div className="mb-1 flex items-center justify-between">
-                                                    <span className="font-semibold text-sky-700">Measure comments</span>
-                                                    {aiFocusedMeasureAnchor && (
-                                                        <button
-                                                            type="button"
-                                                            className="text-sky-600 hover:underline"
-                                                            onClick={() => { setAiFocusedMeasureAnchor(null); setAiMeasureThreadDraft(''); }}
-                                                        >
-                                                            Close
-                                                        </button>
-                                                    )}
-                                                </div>
-                                                {aiFocusedMeasureAnchor ? (
-                                                    <div className="space-y-1">
-                                                        <div className="text-[10px] text-gray-500">
-                                                            Part {aiFocusedMeasureAnchor.partIndex + 1} · Measure {aiFocusedMeasureAnchor.measureNumber}
-                                                        </div>
-                                                        {(aiMeasureThreads[aiFocusedMeasureAnchor.key]?.comments ?? []).map((entry) => (
-                                                            <div key={entry.id} className="rounded border border-gray-200 bg-white px-2 py-1">
-                                                                <div className="flex items-center justify-between text-[9px] text-gray-400">
-                                                                    <span className={entry.author === 'assistant' ? 'text-emerald-600' : 'text-sky-600'}>
-                                                                        {entry.author === 'assistant' ? 'Assistant' : 'You'}
-                                                                    </span>
-                                                                    <button
-                                                                        type="button"
-                                                                        className="text-gray-400 hover:text-rose-500"
-                                                                        onClick={() => handleRemoveAiMeasureComment(aiFocusedMeasureAnchor.key, entry.id)}
-                                                                        aria-label="Remove comment"
-                                                                    >
-                                                                        ×
-                                                                    </button>
-                                                                </div>
-                                                                <div className="whitespace-pre-wrap text-[10px] text-gray-700">{entry.text}</div>
-                                                            </div>
-                                                        ))}
-                                                        <textarea
-                                                            value={aiMeasureThreadDraft}
-                                                            onChange={(event) => setAiMeasureThreadDraft(event.target.value)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                                                                    event.preventDefault();
-                                                                    handleAddAiMeasureComment();
-                                                                }
-                                                            }}
-                                                            placeholder="Add a comment for this measure…"
-                                                            className="w-full rounded border border-gray-200 px-2 py-1 text-[10px]"
-                                                            rows={2}
-                                                        />
-                                                        <button
-                                                            type="button"
-                                                            disabled={!aiMeasureThreadDraft.trim()}
-                                                            onClick={handleAddAiMeasureComment}
-                                                            className="w-full rounded border border-sky-300 bg-white px-2 py-1 text-[10px] text-sky-700 hover:bg-sky-100 disabled:opacity-50"
-                                                        >
-                                                            Add comment
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <div className="text-[10px] text-gray-500">Click a measure in either pane to add a comment.</div>
-                                                )}
-                                                {Object.keys(aiMeasureThreads).length > 0 && (
-                                                    <div className="mt-2 border-t border-sky-200 pt-1">
-                                                        <div className="mb-1 text-[9px] uppercase tracking-wide text-gray-400">Threads</div>
-                                                        <div className="flex flex-wrap gap-1">
-                                                            {Object.values(aiMeasureThreads)
-                                                                .sort((a, b) => a.measureNumber - b.measureNumber)
-                                                                .map((thread) => (
-                                                                    <button
-                                                                        key={thread.key}
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            setAiFocusedMeasureAnchor({
-                                                                                key: thread.key,
-                                                                                partIndex: thread.partIndex,
-                                                                                measureNumber: thread.measureNumber,
-                                                                                leftIndex: thread.leftIndex,
-                                                                                rightIndex: thread.rightIndex,
-                                                                            });
-                                                                            setAiMeasureThreadDraft('');
-                                                                        }}
-                                                                        className={`rounded border px-1 py-0.5 text-[9px] ${aiFocusedMeasureAnchor?.key === thread.key ? 'border-sky-400 bg-sky-100 text-sky-700' : 'border-gray-200 bg-white text-gray-600'}`}
-                                                                    >
-                                                                        m{thread.measureNumber} · {thread.comments.length}
-                                                                    </button>
-                                                                ))}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
+                                        {isAiCompareMode && (
+                                            <CompareMeasureComments
+                                                model={{
+                                                    threads: aiMeasureThreads,
+                                                    focusedAnchor: aiFocusedMeasureAnchor,
+                                                    draft: aiMeasureThreadDraft,
+                                                }}
+                                                actions={{
+                                                    focusAnchor: setAiFocusedMeasureAnchor,
+                                                    changeDraft: setAiMeasureThreadDraft,
+                                                    addComment: handleAddAiMeasureComment,
+                                                    removeComment: handleRemoveAiMeasureComment,
+                                                }}
+                                            />
                                         )}
                                         <div
                                             ref={compareGutterScrollRef}
