@@ -1581,7 +1581,9 @@ export default function ScoreEditor() {
     const [compareContinuousMode, setCompareContinuousMode] = useState(false);
     const [compareReflowMode, setCompareReflowMode] = useState(false);
     const compareLayoutRestoreRef = useRef<number | null>(null);
-    const compareLineBreakRestoreRef = useRef<{ left: boolean[]; right: boolean[] } | null>(null);
+    // Keyed by score identity (live vs auxiliary), NOT by pane. The close path restores
+    // the live score's original breaks and has no pane mapping available at that point.
+    const compareLineBreakRestoreRef = useRef<{ live: boolean[]; auxiliary: boolean[] } | null>(null);
     const compareLeftContainerRef = useRef<HTMLDivElement>(null);
     const compareRightContainerRef = useRef<HTMLDivElement>(null);
     const compareLeftWrapperRef = useRef<HTMLDivElement>(null);
@@ -9183,7 +9185,7 @@ ${partsBodyXml}
             const restore = compareLineBreakRestoreRef.current;
             compareLineBreakRestoreRef.current = null;
             if (restore && score) {
-                void applyMeasureLineBreaks(score, restore.left);
+                void applyMeasureLineBreaks(score, restore.live);
             }
             return;
         }
@@ -9206,8 +9208,8 @@ ${partsBodyXml}
                 return;
             }
             void Promise.all([
-                applyMeasureLineBreaks(score, restore.left),
-                applyMeasureLineBreaks(compareRightScore, restore.right),
+                applyMeasureLineBreaks(score, restore.live),
+                applyMeasureLineBreaks(compareRightScore, restore.auxiliary),
             ]).then(() => {
                 const targetPage = compareContinuousMode ? 0 : currentPageRef.current;
                 // Pane content must follow the orientation mapping, not the raw
@@ -9245,10 +9247,10 @@ ${partsBodyXml}
         let canceled = false;
         const applyReflow = async () => {
             const cached = compareLineBreakRestoreRef.current;
-            let leftBreaks = cached?.left ?? [];
-            let rightBreaks = cached?.right ?? [];
+            let liveBreaks = cached?.live ?? [];
+            let auxiliaryBreaks = cached?.auxiliary ?? [];
             if (!cached) {
-                [leftBreaks, rightBreaks] = await Promise.all([
+                [liveBreaks, auxiliaryBreaks] = await Promise.all([
                     fetchMeasureLineBreaks(score),
                     fetchMeasureLineBreaks(compareRightScore),
                 ]);
@@ -9257,34 +9259,46 @@ ${partsBodyXml}
                 return;
             }
             if (!compareLineBreakRestoreRef.current) {
-                compareLineBreakRestoreRef.current = { left: leftBreaks, right: rightBreaks };
+                compareLineBreakRestoreRef.current = { live: liveBreaks, auxiliary: auxiliaryBreaks };
             }
-            const leftMeasureCount = leftBreaks.length
-                || Math.max(0, ...compareAlignments.map((alignment) => alignment.leftCount));
-            const rightMeasureCount = rightBreaks.length
-                || Math.max(0, ...compareAlignments.map((alignment) => alignment.rightCount));
-            const normalizedLeft = Array.from({ length: leftMeasureCount }, (_, index) => Boolean(leftBreaks[index]));
-            const normalizedRight = Array.from({ length: rightMeasureCount }, (_, index) => Boolean(rightBreaks[index]));
-            const leftMismatch = Array.from({ length: leftMeasureCount }, () => false);
-            const rightMismatch = Array.from({ length: rightMeasureCount }, () => false);
+            // Two different orientations meet here and must be reconciled explicitly.
+            // compareAlignments is *pane*-oriented: its left/right come from
+            // compareLeftXml/compareRightXml. The break arrays above are *score*-oriented:
+            // they were fetched from the live and auxiliary scores. Combining them by
+            // position, as this used to, applies one pane's line-break plan to the other
+            // pane's score whenever the mode maps the live score to the right pane.
+            const liveIsLeftPane = compareLeftScore === score;
+            const paneCount = (which: 'left' | 'right') => Math.max(
+                0,
+                ...compareAlignments.map((alignment) => (
+                    which === 'left' ? alignment.leftCount : alignment.rightCount
+                )),
+            );
+            const livePane = liveIsLeftPane ? 'left' : 'right';
+            const auxiliaryPane = liveIsLeftPane ? 'right' : 'left';
+
+            const liveCount = liveBreaks.length || paneCount(livePane);
+            const auxiliaryCount = auxiliaryBreaks.length || paneCount(auxiliaryPane);
+            const normalizedLive = Array.from({ length: liveCount }, (_, index) => Boolean(liveBreaks[index]));
+            const normalizedAuxiliary = Array.from({ length: auxiliaryCount }, (_, index) => Boolean(auxiliaryBreaks[index]));
+            const liveMismatch = Array.from({ length: liveCount }, () => false);
+            const auxiliaryMismatch = Array.from({ length: auxiliaryCount }, () => false);
             compareAlignments.forEach((alignment) => {
-                const leftPartBreaks = buildMismatchBreaks(alignment.rows, 'left', leftMeasureCount);
-                const rightPartBreaks = buildMismatchBreaks(alignment.rows, 'right', rightMeasureCount);
-                leftPartBreaks.forEach((value, index) => {
+                buildMismatchBreaks(alignment.rows, livePane, liveCount).forEach((value, index) => {
                     if (value) {
-                        leftMismatch[index] = true;
+                        liveMismatch[index] = true;
                     }
                 });
-                rightPartBreaks.forEach((value, index) => {
+                buildMismatchBreaks(alignment.rows, auxiliaryPane, auxiliaryCount).forEach((value, index) => {
                     if (value) {
-                        rightMismatch[index] = true;
+                        auxiliaryMismatch[index] = true;
                     }
                 });
             });
-            const leftReflow = normalizedLeft.map((value, index) => value || leftMismatch[index]);
-            const rightReflow = normalizedRight.map((value, index) => value || rightMismatch[index]);
-            await applyMeasureLineBreaks(score, leftReflow);
-            await applyMeasureLineBreaks(compareRightScore, rightReflow);
+            const liveReflow = normalizedLive.map((value, index) => value || liveMismatch[index]);
+            const auxiliaryReflow = normalizedAuxiliary.map((value, index) => value || auxiliaryMismatch[index]);
+            await applyMeasureLineBreaks(score, liveReflow);
+            await applyMeasureLineBreaks(compareRightScore, auxiliaryReflow);
             if (canceled) {
                 return;
             }
