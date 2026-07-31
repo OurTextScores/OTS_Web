@@ -9200,20 +9200,31 @@ ${partsBodyXml}
             if (!compareSupportsReflow) {
                 return;
             }
+            const restoreLeftPaneScore = compareLeftScore;
+            const restoreRightPaneScore = compareRightScoreDisplay;
+            if (!restoreLeftPaneScore || !restoreRightPaneScore) {
+                return;
+            }
             void Promise.all([
                 applyMeasureLineBreaks(score, restore.left),
                 applyMeasureLineBreaks(compareRightScore, restore.right),
             ]).then(() => {
                 const targetPage = compareContinuousMode ? 0 : currentPageRef.current;
-                void renderScoreToContainer(score, compareLeftContainerRef.current, targetPage, true)
+                // Pane content must follow the orientation mapping, not the raw
+                // live/auxiliary scores: which pane holds the live score depends on the
+                // compare mode, so rendering `score` straight into the left container puts
+                // each score in the other pane and writes the wrong score's measure
+                // positions into the state that click hit-testing reads. Same rule as the
+                // continuous-layout path above, which already says so.
+                void renderScoreToContainer(restoreLeftPaneScore, compareLeftContainerRef.current, targetPage, true)
                     .then(() => {
                         syncCompareSvgSize(compareLeftContainerRef.current, setCompareLeftSvgSize);
-                        void refreshMeasurePositions(score, setCompareLeftMeasurePositions);
+                        void refreshMeasurePositions(restoreLeftPaneScore, setCompareLeftMeasurePositions);
                     });
-                void renderScoreToContainer(compareRightScore, compareRightContainerRef.current, targetPage, true)
+                void renderScoreToContainer(restoreRightPaneScore, compareRightContainerRef.current, targetPage, true)
                     .then(() => {
                         syncCompareSvgSize(compareRightContainerRef.current, setCompareRightSvgSize);
-                        void refreshMeasurePositions(compareRightScore, setCompareRightMeasurePositions)
+                        void refreshMeasurePositions(restoreRightPaneScore, setCompareRightMeasurePositions)
                             .then((ok) => {
                                 if (!ok) {
                                     setCompareRightError((prev) => prev ?? 'Unable to compute compare highlights for checkpoint score.');
@@ -9277,13 +9288,24 @@ ${partsBodyXml}
             if (canceled) {
                 return;
             }
+            const reflowLeftPaneScore = compareLeftScore;
+            const reflowRightPaneScore = compareRightScoreDisplay;
+            if (!reflowLeftPaneScore || !reflowRightPaneScore) {
+                return;
+            }
             const targetPage = compareContinuousMode ? 0 : currentPageRef.current;
-            await renderScoreToContainer(score, compareLeftContainerRef.current, targetPage, true);
+            // Pane content must follow the orientation mapping, not the raw
+            // live/auxiliary scores: which pane holds the live score depends on the
+            // compare mode, so rendering `score` straight into the left container puts
+            // each score in the other pane and writes the wrong score's measure
+            // positions into the state that click hit-testing reads. Same rule as the
+            // continuous-layout path above, which already says so.
+            await renderScoreToContainer(reflowLeftPaneScore, compareLeftContainerRef.current, targetPage, true);
             syncCompareSvgSize(compareLeftContainerRef.current, setCompareLeftSvgSize);
-            await refreshMeasurePositions(score, setCompareLeftMeasurePositions);
-            await renderScoreToContainer(compareRightScore, compareRightContainerRef.current, targetPage, true);
+            await refreshMeasurePositions(reflowLeftPaneScore, setCompareLeftMeasurePositions);
+            await renderScoreToContainer(reflowRightPaneScore, compareRightContainerRef.current, targetPage, true);
             syncCompareSvgSize(compareRightContainerRef.current, setCompareRightSvgSize);
-            const rightPositionsOk = await refreshMeasurePositions(compareRightScore, setCompareRightMeasurePositions);
+            const rightPositionsOk = await refreshMeasurePositions(reflowRightPaneScore, setCompareRightMeasurePositions);
             if (!rightPositionsOk) {
                 setCompareRightError((prev) => prev ?? 'Unable to compute compare highlights for checkpoint score.');
             }
@@ -9299,6 +9321,8 @@ ${partsBodyXml}
         compareSupportsReflow,
         score,
         compareRightScore,
+        compareLeftScore,
+        compareRightScoreDisplay,
         compareContinuousMode,
         applyMeasureLineBreaks,
         fetchMeasureLineBreaks,
