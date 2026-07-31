@@ -115,7 +115,6 @@ import {
     AiCompareWorkspaceActions,
 } from './score-editor/AiCompareWorkspace';
 import { ComparePaneEditorControls } from './score-editor/ComparePaneEditorControls';
-import { CompareSwapButton } from './score-editor/CompareSwapButton';
 import { AiDiffBlockReview } from './score-editor/AiDiffBlockReview';
 import { XmlDiffView } from './score-editor/XmlDiffView';
 import {
@@ -9058,20 +9057,6 @@ ${partsBodyXml}
         // Use absolute path to avoid base tag interference when embedded
         window.open('/score-editor/index.html', '_blank');
     }, [activeLaunchContext, compareView, compareLeftXml, compareRightXml, compareLeftLabel, compareRightLabel]);
-
-    const handleSwapCompareSides = async () => {
-        if (!compareView || compareEditBusyRef.current || compareSwapBusy || aiDiffFeedbackBusy) return;
-        setCompareSwapBusy(true);
-        invalidateCompareOperations();
-        try {
-            await waitForCompareOperations();
-            await stopCompareSideAudio('left', { awaitCancel: true });
-            await stopCompareSideAudio('right', { awaitCancel: true });
-            setCompareSwapped((swapped) => !swapped);
-        } finally {
-            setCompareSwapBusy(false);
-        }
-    };
 
     const handleCloseCompareView = useCallback(() => {
         // Invalidate synchronously in the click event; waiting for the effect that
@@ -19282,10 +19267,6 @@ ${partsBodyXml}
                                     rebaseBusy={compareSwapBusy || compareEditBusy}
                                 />
                             )}
-                            <CompareSwapButton
-                                busy={compareSwapBusy || compareEditBusy || aiDiffFeedbackBusy || !compareLeftScore || !compareRightScoreDisplay}
-                                onSwap={() => void handleSwapCompareSides()}
-                            />
                             <div className="flex min-w-0 flex-none overflow-x-hidden" style={{ height: '100dvh' }}>
                                 <div className="flex min-h-0 min-w-0 flex-1 gap-4">
                                     <div className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col gap-3">

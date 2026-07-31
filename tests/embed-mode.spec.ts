@@ -49,6 +49,7 @@ test.describe('Embed Mode - External XML Comparison', () => {
 
         // Verify compare modal is visible
         await expect(page.getByTestId('checkpoint-compare-modal')).toBeVisible();
+        await expect(page.getByRole('button', { name: /Swap sides/i })).toHaveCount(0);
     });
 
     test('should hide toolbar in embed mode', async ({ page }) => {
@@ -146,33 +147,6 @@ test.describe('Embed Mode - External XML Comparison', () => {
 
         await page.goto('/?compareLeft=https://example.com/left.xml&compareRight=https://example.com/right.xml');
         await page.waitForTimeout(2000);
-    });
-
-    test('should allow swapping sides in embed mode', async ({ page }) => {
-        await page.goto(`/?compareLeft=${encodeURIComponent(leftXmlUrl)}&compareRight=${encodeURIComponent(rightXmlUrl)}&leftLabel=Old&rightLabel=New`);
-        const leftPane = page.getByTestId('compare-pane-left');
-        const rightPane = page.getByTestId('compare-pane-right');
-        await expect(leftPane.locator('svg').first()).toBeVisible({ timeout: 30000 });
-        await expect(rightPane.locator('svg').first()).toBeVisible({ timeout: 30000 });
-        const oldLabel = page.getByText('Old', { exact: true });
-        const newLabel = page.getByText('New', { exact: true });
-        const oldInitialX = (await oldLabel.boundingBox())?.x ?? Number.NaN;
-        const newInitialX = (await newLabel.boundingBox())?.x ?? Number.NaN;
-        expect(oldInitialX).toBeLessThan(newInitialX);
-
-        const swapButton = page.getByRole('button', { name: /Swap sides/i });
-        await swapButton.click();
-        await expect.poll(async () => (await newLabel.boundingBox())?.x ?? Number.POSITIVE_INFINITY)
-            .toBeLessThan((await oldLabel.boundingBox())?.x ?? Number.NEGATIVE_INFINITY);
-
-        await page.evaluate(() => {
-            window.open = () => null;
-        });
-        const openButtons = page.getByRole('button', { name: /Open in Editor/ });
-        await openButtons.first().click();
-        const swappedLeft = await page.evaluate(() => JSON.parse(sessionStorage.getItem('openInEditor') || '{}'));
-        expect(swappedLeft.filename).toBe('New.xml');
-        expect(swappedLeft.xml).toContain('<step>E</step>');
     });
 
     test('should not activate embed mode with only one URL parameter', async ({ page }) => {
