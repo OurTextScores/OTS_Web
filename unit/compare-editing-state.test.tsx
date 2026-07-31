@@ -3,8 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     routeCompareKeyboardShortcut,
     useCompareEditing,
+    useCompareMutationController,
     type CompareKeyboardShortcutContext,
+    type CompareMutationControllerOptions,
 } from '../components/score-editor/compare/useCompareEditing';
+import type { Score } from '../lib/webmscore-loader';
 
 type Box = { x: number };
 type Cursor = { voice: number };
@@ -117,5 +120,99 @@ describe('routeCompareKeyboardShortcut', () => {
         expect(context.pasteSelection).toHaveBeenCalledOnce();
         expect(context.mutate).toHaveBeenLastCalledWith('delete selection', 'deleteSelection');
         expect(context.setHasSelection).toHaveBeenCalledWith('proposal', false);
+    });
+});
+
+const deferred = <T,>() => {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    const promise = new Promise<T>((nextResolve) => {
+        resolve = nextResolve;
+    });
+    return { promise, resolve };
+};
+
+const mutationOptions = (
+    overrides: Partial<CompareMutationControllerOptions> = {},
+): CompareMutationControllerOptions => {
+    const auxiliaryScore = {
+        relayout: vi.fn(async () => true),
+        npages: vi.fn(async () => 3),
+    } as unknown as Score;
+    const liveScore = {} as Score;
+    return {
+        view: { currentXml: '<current/>', checkpointXml: '<proposal/>' },
+        activeSide: 'left',
+        leftScore: auxiliaryScore,
+        rightScore: liveScore,
+        liveScore,
+        swapBusy: false,
+        feedbackBusy: false,
+        beginBusy: vi.fn(),
+        endBusy: vi.fn(),
+        isBusy: () => false,
+        isNoteInputCommitted: (role) => role === 'proposal',
+        setActiveSide: vi.fn(),
+        snapshotScore: vi.fn(async (_score, fallback) => fallback),
+        runSerialized: async (operation) => operation(),
+        invalidateOperations: vi.fn(() => 1),
+        isGenerationCurrent: () => true,
+        trackOperation: (operation) => operation,
+        persistEdit: vi.fn(async () => '<persisted/>'),
+        refreshLivePageCount: vi.fn(async () => {}),
+        setAuxiliaryPageCount: vi.fn(),
+        refreshNoteInputCursor: vi.fn(async () => null),
+        reportError: vi.fn(),
+        ...overrides,
+    };
+};
+
+describe('useCompareMutationController', () => {
+    it('resolves role from live score identity and persists the explicit side target', async () => {
+        const options = mutationOptions();
+        const action = vi.fn(async () => true);
+        const { result } = renderHook(() => useCompareMutationController(options));
+
+        await act(async () => {
+            await expect(result.current('add a bar', action)).resolves.toBe(true);
+        });
+
+        expect(action).toHaveBeenCalledWith(options.leftScore);
+        expect(options.refreshLivePageCount).not.toHaveBeenCalled();
+        expect(options.setAuxiliaryPageCount).toHaveBeenCalledWith(3);
+        expect(options.persistEdit).toHaveBeenCalledWith(
+            options.leftScore,
+            'left',
+            '<proposal/>',
+            expect.any(Function),
+        );
+        expect(options.refreshNoteInputCursor).toHaveBeenCalledWith(
+            options.leftScore,
+            'proposal',
+            'left',
+            expect.any(Function),
+        );
+    });
+
+    it('drops a mutation invalidated while its score snapshot is in flight', async () => {
+        const snapshot = deferred<string | null>();
+        let currentGeneration = 1;
+        const action = vi.fn(async () => true);
+        const options = mutationOptions({
+            snapshotScore: vi.fn(() => snapshot.promise),
+            isGenerationCurrent: (generation) => generation === currentGeneration,
+        });
+        const { result } = renderHook(() => useCompareMutationController(options));
+
+        let mutation!: Promise<boolean>;
+        act(() => {
+            mutation = result.current('stale edit', action);
+        });
+        currentGeneration = 2;
+        snapshot.resolve('<proposal/>');
+
+        await expect(mutation).resolves.toBe(false);
+        expect(action).not.toHaveBeenCalled();
+        expect(options.persistEdit).not.toHaveBeenCalled();
+        expect(options.endBusy).toHaveBeenCalledOnce();
     });
 });

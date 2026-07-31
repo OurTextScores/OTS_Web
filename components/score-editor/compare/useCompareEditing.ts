@@ -1,5 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { CompareScoreRole } from '@/lib/compare-user-edit-diff';
+import type { Score } from '@/lib/webmscore-loader';
+import type { CompareSide } from './useCompareTransport';
 
 type RoleRecord<T> = Record<CompareScoreRole, T>;
 
@@ -225,6 +227,179 @@ export type CompareEditCycleSnapshot = {
     baselines: RoleRecord<string | null>;
     editedRoles: CompareScoreRole[];
 };
+
+export type CompareMutationOptions = {
+    side?: CompareSide;
+    skipRelayout?: boolean;
+    preserveKeyboardQueue?: boolean;
+};
+
+export type CompareMutationControllerOptions = {
+    view: null | {
+        currentXml: string;
+        checkpointXml: string;
+    };
+    activeSide: CompareSide | null;
+    leftScore: Score | null;
+    rightScore: Score | null;
+    liveScore: Score | null;
+    swapBusy: boolean;
+    feedbackBusy: boolean;
+    beginBusy: () => void;
+    endBusy: () => void;
+    isBusy: () => boolean;
+    isNoteInputCommitted: (role: CompareScoreRole) => boolean;
+    setActiveSide: (side: CompareSide) => void;
+    snapshotScore: (score: Score, fallbackXml: string | null) => Promise<string | null>;
+    runSerialized: <T>(operation: () => Promise<T>, label: string) => Promise<T>;
+    invalidateOperations: (invalidateQueuedKeyboard?: boolean) => number;
+    isGenerationCurrent: (generation: number) => boolean;
+    trackOperation: <T>(operation: Promise<T>) => Promise<T>;
+    persistEdit: (
+        score: Score,
+        side: CompareSide,
+        beforeXml: string,
+        isCurrent: () => boolean,
+    ) => Promise<string | null>;
+    refreshLivePageCount: (score: Score) => Promise<void>;
+    setAuxiliaryPageCount: (pageCount: number) => void;
+    refreshNoteInputCursor: (
+        score: Score,
+        role: CompareScoreRole,
+        side: CompareSide,
+        isCurrent: () => boolean,
+    ) => Promise<unknown>;
+    reportError: (label: string, error: unknown) => void;
+};
+
+export function useCompareMutationController({
+    view,
+    activeSide,
+    leftScore,
+    rightScore,
+    liveScore,
+    swapBusy,
+    feedbackBusy,
+    beginBusy,
+    endBusy,
+    isBusy,
+    isNoteInputCommitted,
+    setActiveSide,
+    snapshotScore,
+    runSerialized,
+    invalidateOperations,
+    isGenerationCurrent,
+    trackOperation,
+    persistEdit,
+    refreshLivePageCount,
+    setAuxiliaryPageCount,
+    refreshNoteInputCursor,
+    reportError,
+}: CompareMutationControllerOptions) {
+    return useCallback(async (
+        label: string,
+        action: (targetScore: Score) => Promise<unknown> | unknown,
+        options?: CompareMutationOptions,
+    ) => {
+        const side = options?.side ?? activeSide;
+        const targetScore = side === 'left'
+            ? leftScore
+            : side === 'right'
+                ? rightScore
+                : null;
+        if (!view || !side || !targetScore || isBusy() || swapBusy || feedbackBusy) {
+            return false;
+        }
+
+        const generation = invalidateOperations(!options?.preserveKeyboardQueue);
+        const isCurrent = () => isGenerationCurrent(generation);
+        const role: CompareScoreRole = targetScore === liveScore ? 'current' : 'proposal';
+        setActiveSide(side);
+        beginBusy();
+
+        const operation = trackOperation((async () => {
+            const fallbackXml = role === 'current' ? view.currentXml : view.checkpointXml;
+            const beforeXml = await snapshotScore(targetScore, fallbackXml);
+            if (!isCurrent()) {
+                return false;
+            }
+            if (!beforeXml) {
+                throw new Error('Unable to snapshot the compare score before editing.');
+            }
+            const result = await runSerialized(
+                () => Promise.resolve(action(targetScore)),
+                `compare-edit:${label}`,
+            );
+            if (!isCurrent() || result === false) {
+                return false;
+            }
+            if (!options?.skipRelayout && targetScore.relayout) {
+                await runSerialized(
+                    () => Promise.resolve(targetScore.relayout!()),
+                    `compare-relayout:${label}`,
+                );
+                if (!isCurrent()) {
+                    return false;
+                }
+            }
+            if (role === 'current') {
+                await refreshLivePageCount(targetScore);
+            } else if (targetScore.npages) {
+                const pages = await runSerialized(
+                    () => Promise.resolve(targetScore.npages!()),
+                    'npages(compare-edit)',
+                );
+                if (!isCurrent()) {
+                    return false;
+                }
+                setAuxiliaryPageCount(Math.max(1, pages));
+            }
+            const persistedXml = await persistEdit(targetScore, side, beforeXml, isCurrent);
+            if (!persistedXml || !isCurrent()) {
+                return false;
+            }
+            if (isNoteInputCommitted(role)) {
+                await refreshNoteInputCursor(targetScore, role, side, isCurrent);
+            }
+            return isCurrent();
+        })());
+
+        try {
+            return await operation;
+        } catch (error) {
+            if (!isCurrent()) {
+                return false;
+            }
+            reportError(label, error);
+            return false;
+        } finally {
+            endBusy();
+        }
+    }, [
+        activeSide,
+        beginBusy,
+        endBusy,
+        feedbackBusy,
+        invalidateOperations,
+        isBusy,
+        isGenerationCurrent,
+        isNoteInputCommitted,
+        leftScore,
+        liveScore,
+        persistEdit,
+        refreshLivePageCount,
+        refreshNoteInputCursor,
+        reportError,
+        rightScore,
+        runSerialized,
+        setActiveSide,
+        setAuxiliaryPageCount,
+        snapshotScore,
+        swapBusy,
+        trackOperation,
+        view,
+    ]);
+}
 
 const emptyRoleRecord = <T,>(value: T): RoleRecord<T> => ({
     current: value,
