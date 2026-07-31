@@ -60,6 +60,12 @@ type PersistenceOptions = {
     /** Role-specific commit of the exported XML into app state. */
     commitProposalXml: (afterXml: string) => void;
     commitCurrentXml: (afterXml: string) => Promise<void>;
+    /**
+     * Re-renders the main editor sitting underneath the compare modal, so it is already
+     * current when the modal closes. Current-role edits only, and deliberately not on the
+     * byte-identical path, which changed no document the editor could be showing.
+     */
+    renderLiveEditor: (score: Score) => Promise<unknown>;
     renderEditedScore: (
         score: Score,
         side: CompareSide,
@@ -89,6 +95,7 @@ export function useComparePersistence({
     setNoteInputCursor,
     commitProposalXml,
     commitCurrentXml,
+    renderLiveEditor,
     renderEditedScore,
     refreshSelectionGeometry,
     bumpAlignmentRevision,
@@ -160,6 +167,7 @@ export function useComparePersistence({
             if (!isCurrentGeneration()) {
                 return null;
             }
+            await renderLiveEditor(targetScore);
         }
         if (!isCurrentGeneration()) {
             return null;
@@ -179,6 +187,7 @@ export function useComparePersistence({
         commitCurrentXml,
         commitProposalXml,
         exportXml,
+        renderLiveEditor,
         getFallbackXml,
         getRole,
         recordEdit,

@@ -23,6 +23,7 @@ const renderPersistence = (overrides: Overrides = {}) => {
         setNoteInputCursor: vi.fn(),
         commitProposalXml: vi.fn(() => { calls.push('commitProposal'); }),
         commitCurrentXml: vi.fn(async () => { calls.push('commitCurrent'); }),
+        renderLiveEditor: vi.fn(async () => { calls.push('renderLive'); }),
         renderEditedScore: vi.fn(async () => { calls.push('render'); }),
         refreshSelectionGeometry: vi.fn(async () => { calls.push('geometry'); }),
         bumpAlignmentRevision: vi.fn(() => { calls.push('alignment'); }),
@@ -113,6 +114,8 @@ describe('useComparePersistence', () => {
         expect(persistence.recordEdit).not.toHaveBeenCalled();
         expect(persistence.calls).toEqual(['render', 'geometry']);
         expect(persistence.bumpAlignmentRevision).not.toHaveBeenCalled();
+        // No document changed, so the editor under the modal must not be re-rendered.
+        expect(persistence.renderLiveEditor).not.toHaveBeenCalled();
     });
 
     it('commits a proposal edit without touching live editor state', async () => {
@@ -127,6 +130,8 @@ describe('useComparePersistence', () => {
         expect(persistence.recordEdit).toHaveBeenCalledWith('proposal', '<before/>', '<after/>');
         expect(persistence.commitProposalXml).toHaveBeenCalledWith('<after/>');
         expect(persistence.commitCurrentXml).not.toHaveBeenCalled();
+        // A proposal edit must never re-render the live editor.
+        expect(persistence.renderLiveEditor).not.toHaveBeenCalled();
         expect(persistence.calls).toEqual([
             'recordEdit', 'commitProposal', 'render', 'geometry', 'alignment',
         ]);
@@ -144,8 +149,10 @@ describe('useComparePersistence', () => {
         expect(persistence.recordEdit).toHaveBeenCalledWith('current', '<before/>', '<after/>');
         expect(persistence.commitCurrentXml).toHaveBeenCalledWith('<after/>');
         expect(persistence.commitProposalXml).not.toHaveBeenCalled();
+        // Ordering matters: the editor under the modal is re-rendered between the state
+        // commit and the pane render, so it is already current when the modal closes.
         expect(persistence.calls).toEqual([
-            'recordEdit', 'commitCurrent', 'render', 'geometry', 'alignment',
+            'recordEdit', 'commitCurrent', 'renderLive', 'render', 'geometry', 'alignment',
         ]);
     });
 
@@ -178,6 +185,7 @@ describe('useComparePersistence', () => {
         });
 
         expect(result).toBeNull();
+        expect(persistence.renderLiveEditor).not.toHaveBeenCalled();
         expect(persistence.renderEditedScore).not.toHaveBeenCalled();
         expect(persistence.bumpAlignmentRevision).not.toHaveBeenCalled();
     });

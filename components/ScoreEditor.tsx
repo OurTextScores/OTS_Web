@@ -132,6 +132,7 @@ import { type AiScoreBridge } from './score-editor/ai-score-bridge';
 import { useLatestCallbackFacade } from '@/lib/use-latest-callback-facade';
 import type { CompareSide } from './score-editor/compare/compare-types';
 import { useCompareClipboard } from './score-editor/compare/useCompareClipboard';
+import { useComparePersistence } from './score-editor/compare/useComparePersistence';
 import { useCompareOperationCoordinator } from './score-editor/compare/useCompareOperationCoordinator';
 import { useCompareTransport } from './score-editor/compare/useCompareTransport';
 import {
@@ -6548,57 +6549,6 @@ ${partsBodyXml}
         targetScore === score ? 'current' : 'proposal'
     ), [score]);
 
-    const refreshCompareNoteInputCursor = useCallback(async (
-        targetScore: Score,
-        role: CompareScoreRole,
-        side: 'left' | 'right',
-        isCurrent: () => boolean = () => true,
-    ) => {
-        if (!targetScore.getNoteInputCursorRect) {
-            if (isCurrent()) {
-                setCompareNoteInputCursor(role, null);
-            }
-            return null;
-        }
-        try {
-            const cursor = await runSerializedScoreOperation(
-                () => Promise.resolve(targetScore.getNoteInputCursorRect!()),
-                `compare-note-input-cursor:${side}`,
-            );
-            if (!isCurrent()) {
-                return null;
-            }
-            if (
-                !cursor
-                || !Number.isFinite(cursor.page)
-                || !Number.isFinite(cursor.x)
-                || !Number.isFinite(cursor.y)
-                || !Number.isFinite(cursor.width)
-                || !Number.isFinite(cursor.height)
-                || cursor.width <= 0
-                || cursor.height <= 0
-            ) {
-                setCompareNoteInputCursor(role, null);
-                return null;
-            }
-            const normalized: NoteInputCursorRect = {
-                page: Math.max(0, Math.floor(cursor.page)),
-                x: cursor.x,
-                y: cursor.y,
-                width: cursor.width,
-                height: cursor.height,
-                voice: Math.min(3, Math.max(0, Math.floor(cursor.voice))),
-            };
-            setCompareNoteInputCursor(role, normalized);
-            return normalized;
-        } catch (err) {
-            if (isCurrent()) {
-                console.warn(`Failed to read ${side} compare note input cursor geometry:`, err);
-                setCompareNoteInputCursor(role, null);
-            }
-            return null;
-        }
-    }, [runSerializedScoreOperation, setCompareNoteInputCursor]);
 
     const refreshCompareSelectionGeometry = useCallback(async (
         targetScore: Score,
@@ -6742,97 +6692,63 @@ ${partsBodyXml}
         await refreshMeasurePositions(targetScore, setPositions);
     }, [getCompareTargetPage, refreshMeasurePositions, renderScoreToContainer, syncCompareSvgSize]);
 
-    const persistCompareScoreEdit = useCallback(async (
-        targetScore: Score,
-        side: 'left' | 'right',
-        beforeXml: string,
-        isCurrentGeneration: () => boolean,
-    ) => {
-        const role = getCompareScoreRole(targetScore);
-        const fallbackXml = role === 'current'
-            ? compareView?.currentXml ?? null
-            : compareView?.checkpointXml ?? null;
-        const afterXml = await getScoreMusicXmlText(targetScore, fallbackXml);
-        if (!isCurrentGeneration()) {
-            return null;
-        }
-        if (!afterXml) {
-            throw new Error('Unable to export the edited compare score.');
-        }
-        if (afterXml === beforeXml) {
-            await renderEditedCompareScore(targetScore, side, true);
-            if (!isCurrentGeneration()) {
-                return null;
+    const commitCompareProposalXml = useCallback((afterXml: string) => {
+        // This update came from the already-loaded auxiliary Score. Mark the exported XML
+        // as loaded so the compare lifecycle does not destroy and recreate that same
+        // instance in response to our state update.
+        compareLoadedCheckpointXmlRef.current = afterXml;
+        setCompareView((prev) => prev ? { ...prev, checkpointXml: afterXml } : prev);
+    }, []);
+
+    const commitCompareCurrentXml = useCallback(async (afterXml: string) => {
+        setScoreDirtySinceCheckpoint(true);
+        setScoreDirtySinceXml(true);
+        setCompareView((prev) => prev ? { ...prev, currentXml: afterXml } : prev);
+        if (isAiCompareMode) {
+            try {
+                await recordAiProposalAppliedXml(afterXml);
+                setAiProposalApplyError(null);
+            } catch (hashError) {
+                const message = errorMessage(hashError)
+                    || 'The score was edited, but proposal continuity could not be advanced.';
+                invalidateAiProposalExpectedCurrent(message);
+                setAiProposalApplyError(message);
             }
-            await refreshCompareSelectionGeometry(
-                targetScore,
-                role,
-                side,
-                undefined,
-                isCurrentGeneration,
-            );
-            return isCurrentGeneration() ? afterXml : null;
         }
-        recordCompareEdit(role, beforeXml, afterXml);
-        if (role === 'proposal') {
-            // This update came from the already-loaded auxiliary Score. Mark the
-            // exported XML as loaded so the compare lifecycle does not destroy and
-            // recreate that same instance in response to our state update.
-            compareLoadedCheckpointXmlRef.current = afterXml;
-            setCompareView((prev) => prev ? { ...prev, checkpointXml: afterXml } : prev);
-        } else {
-            setScoreDirtySinceCheckpoint(true);
-            setScoreDirtySinceXml(true);
-            setCompareView((prev) => prev ? { ...prev, currentXml: afterXml } : prev);
-            if (isAiCompareMode) {
-                try {
-                    await recordAiProposalAppliedXml(afterXml);
-                    setAiProposalApplyError(null);
-                } catch (hashError) {
-                    const message = errorMessage(hashError)
-                        || 'The score was edited, but proposal continuity could not be advanced.';
-                    invalidateAiProposalExpectedCurrent(message);
-                    setAiProposalApplyError(message);
-                }
-            }
-            if (!isCurrentGeneration()) {
-                return null;
-            }
-            // Keep the editor underneath the modal current for when the modal closes.
-            await renderScore(targetScore, currentPageRef.current);
-        }
-        if (!isCurrentGeneration()) {
-            return null;
-        }
-        await renderEditedCompareScore(targetScore, side, true);
-        if (!isCurrentGeneration()) {
-            return null;
-        }
-        await refreshCompareSelectionGeometry(
-            targetScore,
-            role,
-            side,
-            undefined,
-            isCurrentGeneration,
-        );
-        if (!isCurrentGeneration()) {
-            return null;
-        }
-        setCompareAlignmentRevision((value) => value + 1);
-        return afterXml;
     }, [
-        compareView,
-        getCompareScoreRole,
-        getScoreMusicXmlText,
         invalidateAiProposalExpectedCurrent,
         isAiCompareMode,
         recordAiProposalAppliedXml,
-        recordCompareEdit,
-        refreshCompareSelectionGeometry,
-        renderScore,
-        renderEditedCompareScore,
         setAiProposalApplyError,
     ]);
+
+    const compareFallbackXml = useCallback((role: CompareScoreRole) => (
+        role === 'current'
+            ? compareView?.currentXml ?? null
+            : compareView?.checkpointXml ?? null
+    ), [compareView]);
+
+    const {
+        persistEdit: persistCompareScoreEdit,
+        refreshNoteInputCursor: refreshCompareNoteInputCursor,
+    } = useComparePersistence({
+        getRole: getCompareScoreRole,
+        getFallbackXml: compareFallbackXml,
+        exportXml: getScoreMusicXmlText,
+        runSerialized: runSerializedScoreOperation,
+        recordEdit: recordCompareEdit,
+        setNoteInputCursor: setCompareNoteInputCursor,
+        commitProposalXml: commitCompareProposalXml,
+        commitCurrentXml: commitCompareCurrentXml,
+        // Keep the editor underneath the modal current for when the modal closes.
+        renderLiveEditor: (targetScore) => renderScore(targetScore, currentPageRef.current),
+        renderEditedScore: renderEditedCompareScore,
+        refreshSelectionGeometry: (targetScore, role, side, isCurrent) => (
+            refreshCompareSelectionGeometry(targetScore, role, side, undefined, isCurrent)
+        ),
+        bumpAlignmentRevision: () => setCompareAlignmentRevision((value) => value + 1),
+    });
+
 
     const refreshCompareLivePageCount = useCallback(async (targetScore: Score) => {
         await refreshPageCount(targetScore, currentPageRef.current);
