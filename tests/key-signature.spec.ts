@@ -1,4 +1,5 @@
 import { expect, test } from 'playwright/test';
+import type { BrowserScoreWindow } from './browser-score-types';
 
 test('key signature can change and revert', async ({ page }) => {
   await page.goto('/?score=/test_scores/bach_orig.mscz');
@@ -6,7 +7,7 @@ test('key signature can change and revert', async ({ page }) => {
 
   const readKeySignature = async (): Promise<number> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as BrowserScoreWindow).__webmscore;
       if (!score?.getKeySignature) {
         throw new Error('window.__webmscore.getKeySignature is not available');
       }
@@ -30,7 +31,7 @@ test('key signature change starts at selected note', async ({ page }) => {
 
   const readStartKeySignature = async (): Promise<number> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as BrowserScoreWindow).__webmscore;
       if (!score?.getKeySignature) {
         throw new Error('window.__webmscore.getKeySignature is not available');
       }
@@ -40,7 +41,7 @@ test('key signature change starts at selected note', async ({ page }) => {
 
   const readMusicXmlFifths = async (): Promise<number[]> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as BrowserScoreWindow).__webmscore;
       if (!score?.saveXml) {
         throw new Error('window.__webmscore.saveXml is not available');
       }

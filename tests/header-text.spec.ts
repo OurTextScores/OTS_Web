@@ -1,4 +1,5 @@
 import { expect, test } from 'playwright/test';
+import type { BrowserScoreWindow } from './browser-score-types';
 
 /**
  * The input/button pair this test used to drive (input-title, btn-set-title,
@@ -15,7 +16,7 @@ test('title and composer text can be edited', async ({ page }) => {
 
   const readHeader = async (): Promise<{ title: string; composer: string }> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as BrowserScoreWindow).__webmscore;
       if (!score?.metadata) {
         throw new Error('window.__webmscore.metadata is not available');
       }

@@ -1,4 +1,5 @@
 import { expect, test } from 'playwright/test';
+import type { BrowserScoreWindow } from './browser-score-types';
 
 /**
  * Regression: "Delete Selected Bars" was wired in dd15d189 and silently lost one day
@@ -16,7 +17,7 @@ const SCORE = '/?score=/test_scores/four_measures.musicxml';
 /** Bar pitches of four_measures.musicxml, in order. */
 const readPitches = async (page: import('playwright/test').Page): Promise<string[]> =>
   page.evaluate(async () => {
-    const score = (window as any).__webmscore;
+    const score = (window as BrowserScoreWindow).__webmscore;
     if (!score?.saveXml) throw new Error('window.__webmscore.saveXml is not available');
     const xml: string = await score.saveXml();
     return Array.from(

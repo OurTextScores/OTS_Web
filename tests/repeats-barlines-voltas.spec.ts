@@ -1,4 +1,5 @@
 import { expect, test, Page } from 'playwright/test';
+import type { BrowserScoreWindow } from './browser-score-types';
 
 const loadSingleNoteScore = async (page: Page) => {
   await page.goto('/?score=/test_scores/single_note_c4.musicxml');
@@ -9,7 +10,7 @@ const loadSingleNoteScore = async (page: Page) => {
 
 const readMscx = async (page: Page): Promise<string> => {
   return page.evaluate(async () => {
-    const score = (window as any).__webmscore;
+    const score = (window as BrowserScoreWindow).__webmscore;
     if (!score?.saveMsc) {
       throw new Error('window.__webmscore.saveMsc is not available');
     }

@@ -1,4 +1,5 @@
 import { expect, test } from 'playwright/test';
+import type { BrowserScoreWindow } from './browser-score-types';
 
 /**
  * The input/button pair this suite used to drive (input-title, input-subtitle,
@@ -39,7 +40,7 @@ test('title and subtitle persist after save and reload', async ({ page }) => {
   const readHeader = async (): Promise<{ title: string | null; subtitle: string | null }> => {
     try {
       return await page.evaluate(async () => {
-        const score = (window as any).__webmscore;
+        const score = (window as BrowserScoreWindow).__webmscore;
         if (!score?.metadata) {
           throw new Error('window.__webmscore.metadata is not available');
         }
@@ -75,7 +76,7 @@ test('title and subtitle persist after save and reload', async ({ page }) => {
     .toBe(newSubtitle);
 
   const exportedXml = await page.evaluate(async () => {
-    const score = (window as any).__webmscore;
+    const score = (window as BrowserScoreWindow).__webmscore;
     if (!score?.saveMsc) {
       throw new Error('window.__webmscore.saveMsc is not available');
     }
@@ -83,7 +84,7 @@ test('title and subtitle persist after save and reload', async ({ page }) => {
     return new TextDecoder().decode(data);
   });
   const exportedMscz = await page.evaluate(async () => {
-    const score = (window as any).__webmscore;
+    const score = (window as BrowserScoreWindow).__webmscore;
     if (!score?.saveMsc) {
       throw new Error('window.__webmscore.saveMsc is not available');
     }

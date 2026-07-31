@@ -1,4 +1,5 @@
 import { expect, test } from 'playwright/test';
+import type { BrowserScoreWindow } from './browser-score-types';
 
 test('tie button adds a tie to the next same-pitch note', async ({ page }) => {
   await page.goto('/?score=/test_scores/two_notes_cc.musicxml');
@@ -6,7 +7,7 @@ test('tie button adds a tie to the next same-pitch note', async ({ page }) => {
 
   const readXml = async (): Promise<string> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as BrowserScoreWindow).__webmscore;
       if (!score?.saveXml) {
         throw new Error('window.__webmscore.saveXml is not available');
       }
@@ -32,4 +33,3 @@ test('tie button adds a tie to the next same-pitch note', async ({ page }) => {
     }, { timeout: 20_000 })
     .toBe(true);
 });
-

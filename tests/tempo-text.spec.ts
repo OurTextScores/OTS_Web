@@ -1,4 +1,5 @@
 import { expect, test } from 'playwright/test';
+import type { BrowserScoreWindow } from './browser-score-types';
 
 test('tempo button inserts visible tempo at start', async ({ page }) => {
   await page.goto('/?score=/test_scores/bach_orig.mscz');
@@ -6,7 +7,7 @@ test('tempo button inserts visible tempo at start', async ({ page }) => {
 
   const hasTempo120 = async (): Promise<boolean> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as BrowserScoreWindow).__webmscore;
       if (!score?.saveMsc) {
         throw new Error('window.__webmscore.saveMsc is not available');
       }
@@ -22,4 +23,3 @@ test('tempo button inserts visible tempo at start', async ({ page }) => {
 
   await expect.poll(async () => await hasTempo120(), { timeout: 20_000 }).toBe(true);
 });
-

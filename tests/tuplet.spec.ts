@@ -1,4 +1,5 @@
 import { expect, test } from 'playwright/test';
+import type { BrowserScoreWindow } from './browser-score-types';
 
 test('tuplet adds a tuplet entry at selection', async ({ page }) => {
   await page.goto('/?score=/test_scores/single_note_c4.musicxml');
@@ -6,7 +7,7 @@ test('tuplet adds a tuplet entry at selection', async ({ page }) => {
 
   const readTupletCount = async (): Promise<number> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as BrowserScoreWindow).__webmscore;
       if (!score?.saveMsc) {
         throw new Error('window.__webmscore.saveMsc is not available');
       }

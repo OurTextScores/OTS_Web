@@ -1,4 +1,5 @@
 import { expect, test } from 'playwright/test';
+import type { BrowserScoreWindow } from './browser-score-types';
 
 test('drag selection marquee selects multiple notes for transpose', async ({ page }) => {
   await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
@@ -6,7 +7,7 @@ test('drag selection marquee selects multiple notes for transpose', async ({ pag
 
   const readPitches = async (): Promise<string[]> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as BrowserScoreWindow).__webmscore;
       if (!score?.saveXml) {
         throw new Error('window.__webmscore.saveXml is not available');
       }

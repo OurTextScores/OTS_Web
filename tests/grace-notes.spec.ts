@@ -1,4 +1,5 @@
 import { expect, test } from 'playwright/test';
+import type { BrowserScoreWindow } from './browser-score-types';
 
 test('acciaccatura adds a grace note to the selected note', async ({ page }) => {
   await page.goto('/?score=/test_scores/single_note_c4.musicxml');
@@ -6,7 +7,7 @@ test('acciaccatura adds a grace note to the selected note', async ({ page }) => 
 
   const graceCount = async (): Promise<number> => {
     return page.evaluate(async () => {
-      const score = (window as any).__webmscore;
+      const score = (window as BrowserScoreWindow).__webmscore;
       if (!score?.saveMsc) {
         throw new Error('window.__webmscore.saveMsc is not available');
       }
