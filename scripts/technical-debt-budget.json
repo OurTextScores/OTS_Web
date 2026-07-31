@@ -1,0 +1,17 @@
+{
+  "scoreEditor": {
+    "maxLines": 20369,
+    "maxBytes": 995340
+  },
+  "eslint": {
+    "maxErrors": 328,
+    "maxWarnings": 90,
+    "maxFilesWithFindings": 52
+  },
+  "tests": {
+    "maxUnconditionalSkips": 5
+  },
+  "suppressions": {
+    "maxLocalDirectives": 4
+  }
+}

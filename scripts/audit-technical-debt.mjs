@@ -1,0 +1,180 @@
+import { spawnSync } from 'node:child_process';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const checkBudget = process.argv.includes('--check');
+const jsonOutput = process.argv.includes('--json');
+const budget = JSON.parse(readFileSync(resolve(root, 'scripts/technical-debt-budget.json'), 'utf8'));
+const ownedRoots = ['app', 'components', 'lib', 'unit', 'tests'];
+
+const readOwnedFiles = () => {
+  const files = [];
+  const visit = (path) => {
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const entryPath = resolve(path, entry.name);
+      if (entry.isDirectory()) {
+        visit(entryPath);
+      } else if (entry.isFile() && /\.(?:ts|tsx)$/.test(entry.name)) {
+        files.push(entryPath);
+      }
+    }
+  };
+  for (const ownedRoot of ownedRoots) visit(resolve(root, ownedRoot));
+  return files;
+};
+
+const gitResult = spawnSync('git', ['rev-parse', 'HEAD'], {
+  cwd: root,
+  encoding: 'utf8',
+});
+const baseCommit = gitResult.status === 0 ? gitResult.stdout.trim() : 'unknown';
+
+const scoreEditorPath = resolve(root, 'components/ScoreEditor.tsx');
+const scoreEditorText = readFileSync(scoreEditorPath, 'utf8');
+const scoreEditor = {
+  lines: (scoreEditorText.match(/\n/g) || []).length,
+  bytes: statSync(scoreEditorPath).size,
+};
+
+const eslintPath = resolve(root, 'node_modules/eslint/bin/eslint.js');
+const eslintResult = spawnSync(process.execPath, [
+  eslintPath,
+  ...ownedRoots,
+  '--format',
+  'json',
+], {
+  cwd: root,
+  encoding: 'utf8',
+  maxBuffer: 64 * 1024 * 1024,
+});
+
+if (eslintResult.status !== 0 && eslintResult.status !== 1) {
+  process.stderr.write(eslintResult.stderr || eslintResult.stdout || 'ESLint audit failed.\n');
+  process.exit(1);
+}
+
+let eslintRows;
+try {
+  eslintRows = JSON.parse(eslintResult.stdout);
+} catch (error) {
+  process.stderr.write(eslintResult.stderr);
+  console.error('Unable to parse ESLint JSON output:', error);
+  process.exit(1);
+}
+
+const ruleCounts = new Map();
+let eslintErrors = 0;
+let eslintWarnings = 0;
+let filesWithFindings = 0;
+
+for (const row of eslintRows) {
+  eslintErrors += row.errorCount;
+  eslintWarnings += row.warningCount;
+  if (row.errorCount > 0 || row.warningCount > 0) filesWithFindings += 1;
+  for (const message of row.messages) {
+    const rule = message.ruleId || 'unclassified';
+    const counts = ruleCounts.get(rule) || { errors: 0, warnings: 0 };
+    if (message.severity === 2) counts.errors += 1;
+    if (message.severity === 1) counts.warnings += 1;
+    ruleCounts.set(rule, counts);
+  }
+}
+
+const topRules = [...ruleCounts.entries()]
+  .map(([rule, counts]) => ({ rule, ...counts }))
+  .sort((a, b) => (b.errors + b.warnings) - (a.errors + a.warnings))
+  .slice(0, 10);
+const topFiles = eslintRows
+  .filter((row) => row.errorCount > 0 || row.warningCount > 0)
+  .sort((a, b) => (
+    (b.errorCount + b.warningCount) - (a.errorCount + a.warningCount)
+  ))
+  .slice(0, 10)
+  .map((row) => ({
+    file: relative(root, row.filePath),
+    errors: row.errorCount,
+    warnings: row.warningCount,
+  }));
+
+const ownedFiles = readOwnedFiles();
+let unconditionalSkips = 0;
+let localSuppressionDirectives = 0;
+for (const file of ownedFiles) {
+  const source = readFileSync(file, 'utf8');
+  unconditionalSkips += (
+    source.match(/\b(?:test|it|describe)\.skip\s*\(\s*(['"`])/g) || []
+  ).length;
+  localSuppressionDirectives += (
+    source.match(/eslint-disable|@ts-ignore|@ts-expect-error/g) || []
+  ).length;
+}
+
+const report = {
+  baseCommit,
+  runtime: {
+    node: process.version,
+  },
+  scoreEditor,
+  eslint: {
+    filesScanned: eslintRows.length,
+    filesWithFindings,
+    errors: eslintErrors,
+    warnings: eslintWarnings,
+    topRules,
+    topFiles,
+  },
+  tests: {
+    unconditionalSkips,
+  },
+  suppressions: {
+    localDirectives: localSuppressionDirectives,
+  },
+};
+
+const checks = [
+  ['ScoreEditor lines', report.scoreEditor.lines, budget.scoreEditor.maxLines],
+  ['ScoreEditor bytes', report.scoreEditor.bytes, budget.scoreEditor.maxBytes],
+  ['ESLint errors', report.eslint.errors, budget.eslint.maxErrors],
+  ['ESLint warnings', report.eslint.warnings, budget.eslint.maxWarnings],
+  ['files with ESLint findings', report.eslint.filesWithFindings, budget.eslint.maxFilesWithFindings],
+  ['unconditional test skips', report.tests.unconditionalSkips, budget.tests.maxUnconditionalSkips],
+  ['local suppression directives', report.suppressions.localDirectives, budget.suppressions.maxLocalDirectives],
+];
+const failures = checks.filter(([, actual, maximum]) => actual > maximum);
+
+if (jsonOutput) {
+  console.log(JSON.stringify({ report, budget, failures }, null, 2));
+} else {
+  console.log(`[debt:audit] base ${report.baseCommit}`);
+  console.log(
+    `[debt:audit] ScoreEditor: ${report.scoreEditor.lines} lines, ${report.scoreEditor.bytes} bytes`,
+  );
+  console.log(
+    `[debt:audit] ESLint: ${report.eslint.errors} errors, ${report.eslint.warnings} warnings, ${report.eslint.filesWithFindings}/${report.eslint.filesScanned} files with findings`,
+  );
+  console.log(
+    `[debt:audit] tests: ${report.tests.unconditionalSkips} unconditional skips; suppressions: ${report.suppressions.localDirectives} local directives`,
+  );
+  console.log('[debt:audit] top rules:');
+  for (const rule of report.eslint.topRules) {
+    console.log(`  ${rule.rule}: ${rule.errors} errors, ${rule.warnings} warnings`);
+  }
+  console.log('[debt:audit] top files:');
+  for (const file of report.eslint.topFiles) {
+    console.log(`  ${file.file}: ${file.errors} errors, ${file.warnings} warnings`);
+  }
+}
+
+if (checkBudget) {
+  if (failures.length > 0) {
+    console.error('[debt:audit] budget regression:');
+    for (const [label, actual, maximum] of failures) {
+      console.error(`  ${label}: ${actual} > ${maximum}`);
+    }
+    process.exitCode = 1;
+  } else {
+    console.log('[debt:audit] all ratchets pass.');
+  }
+}

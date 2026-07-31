@@ -18,6 +18,8 @@
     "typecheck:tests": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc -p tsconfig.tests.json --noEmit",
     "typecheck:scoreops": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc -p tsconfig.typecheck.json --noEmit",
     "typecheck:audit": "node scripts/audit-typecheck-inputs.mjs",
+    "audit:debt": "node scripts/audit-technical-debt.mjs",
+    "check:debt": "node scripts/audit-technical-debt.mjs --check",
     "typecheck:diagnostics:app": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc -p tsconfig.app.json --noEmit --extendedDiagnostics",
     "typecheck:diagnostics:tests": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc -p tsconfig.tests.json --noEmit --extendedDiagnostics",
     "test": "vitest run",
