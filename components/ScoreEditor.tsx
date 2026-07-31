@@ -2703,6 +2703,10 @@ export default function ScoreEditor() {
         };
 
         loadExternalCompare();
+        // TD-02 classification 3 (one-time initialization). This effect keys on the
+        // compare URLs only. handleFileUpload and the setters it closes over would
+        // re-run the fetch and replace the live score on every editor state change,
+        // discarding user edits. Do not add them.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [compareLeftUrl, compareRightUrl, leftLabel]);
 
@@ -2733,6 +2737,9 @@ export default function ScoreEditor() {
         };
 
         void loadReviewScore();
+        // TD-02 classification 3 (one-time initialization). Keyed on the review score
+        // URL only; adding handleFileUpload would reload and replace the working score
+        // whenever an unrelated editor callback identity changes.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reviewLabel, reviewScoreUrl]);
 
@@ -2763,6 +2770,9 @@ export default function ScoreEditor() {
         };
 
         loadScoreFromSession();
+        // TD-02 classification 3 (one-time initialization). The sessionStorage handoff
+        // from "Open in Editor" is consumed exactly once on mount; re-running it would
+        // reload the handoff score over whatever the user has since edited.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
