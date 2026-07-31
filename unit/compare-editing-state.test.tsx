@@ -1,6 +1,10 @@
 import { act, renderHook } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import { useCompareEditing } from '../components/score-editor/compare/useCompareEditing';
+import { describe, expect, it, vi } from 'vitest';
+import {
+    routeCompareKeyboardShortcut,
+    useCompareEditing,
+    type CompareKeyboardShortcutContext,
+} from '../components/score-editor/compare/useCompareEditing';
 
 type Box = { x: number };
 type Cursor = { voice: number };
@@ -64,5 +68,54 @@ describe('useCompareEditing', () => {
 
         act(() => result.current.clearEditCycle());
         expect(result.current.getBaseline('current')).toBeNull();
+    });
+});
+
+const keyboardContext = (
+    overrides: Partial<CompareKeyboardShortcutContext> = {},
+): CompareKeyboardShortcutContext => ({
+    active: true,
+    activeRole: 'proposal',
+    hasSelection: false,
+    noteMode: false,
+    mutate: vi.fn(),
+    updateInputState: vi.fn(),
+    copySelection: vi.fn(),
+    pasteSelection: vi.fn(),
+    disableNoteInput: vi.fn(),
+    toggleNoteInput: vi.fn(),
+    setHasSelection: vi.fn(),
+    ...overrides,
+});
+
+describe('routeCompareKeyboardShortcut', () => {
+    it('does not route anything without an explicitly active score role', () => {
+        const context = keyboardContext({ active: false, activeRole: null });
+        const event = new KeyboardEvent('keydown', { key: 'c', cancelable: true });
+
+        expect(routeCompareKeyboardShortcut(event, context)).toBe(false);
+        expect(context.mutate).not.toHaveBeenCalled();
+    });
+
+    it('routes pitch entry in note-input mode without a prior selection', () => {
+        const context = keyboardContext({ noteMode: true });
+        const event = new KeyboardEvent('keydown', { key: 'g', cancelable: true });
+
+        expect(routeCompareKeyboardShortcut(event, context)).toBe(true);
+        expect(context.mutate).toHaveBeenCalledWith('add a pitch', 'addPitchByStep', [4, false, false]);
+        expect(event.defaultPrevented).toBe(true);
+    });
+
+    it('routes clipboard shortcuts and role-owned selection state', () => {
+        const context = keyboardContext({ hasSelection: true });
+
+        routeCompareKeyboardShortcut(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true }), context);
+        routeCompareKeyboardShortcut(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true }), context);
+        routeCompareKeyboardShortcut(new KeyboardEvent('keydown', { key: 'Delete' }), context);
+
+        expect(context.copySelection).toHaveBeenCalledOnce();
+        expect(context.pasteSelection).toHaveBeenCalledOnce();
+        expect(context.mutate).toHaveBeenLastCalledWith('delete selection', 'deleteSelection');
+        expect(context.setHasSelection).toHaveBeenCalledWith('proposal', false);
     });
 });
