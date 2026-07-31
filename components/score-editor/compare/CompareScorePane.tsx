@@ -3,12 +3,15 @@ import { Pause, Play, Square } from 'lucide-react';
 import { ComparePaneEditorControls } from '../ComparePaneEditorControls';
 import type { CompareSide, CompareTransportState } from './useCompareTransport';
 
-type HighlightRect = {
-    id: string | number;
+type PositionedRect = {
     left: number;
     top: number;
     width: number;
     height: number;
+};
+
+type HighlightRect = PositionedRect & {
+    id: string | number;
     status?: string;
 };
 
@@ -49,6 +52,7 @@ export type CompareScorePaneModel = {
     };
     diffHighlights: HighlightRect[];
     positiveDiffStatus: string;
+    negativeDiffStatus: string | null;
     commentedHighlights: HighlightRect[];
     threadedHighlights: HighlightRect[];
     selectionRects: SelectionRect[];
@@ -56,7 +60,7 @@ export type CompareScorePaneModel = {
         rect: CursorRect;
         color: string;
     };
-    focusedHighlight: HighlightRect | null;
+    focusedHighlight: PositionedRect | null;
     measureHitAreaAvailable: boolean;
 };
 
@@ -87,7 +91,7 @@ type CompareScorePaneProps = {
     paneRefs: CompareScorePaneRefs;
 };
 
-const rectStyle = (rect: HighlightRect): CSSProperties => ({
+const rectStyle = (rect: PositionedRect): CSSProperties => ({
     left: `${rect.left}px`,
     top: `${rect.top}px`,
     width: `${rect.width}px`,
@@ -214,7 +218,9 @@ export function CompareScorePane({
                         <div ref={containerRef} />
                         <div className="pointer-events-none absolute inset-0 z-10">
                             {model.diffHighlights.map((highlight) => {
-                                const positive = highlight.status === model.positiveDiffStatus;
+                                const positive = model.negativeDiffStatus
+                                    ? highlight.status !== model.negativeDiffStatus
+                                    : highlight.status === model.positiveDiffStatus;
                                 return (
                                     <div
                                         key={`compare-${side}-highlight-${highlight.id}`}

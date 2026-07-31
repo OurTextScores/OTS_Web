@@ -2,7 +2,7 @@
 
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { PanelRightOpen, PanelRightClose, Play, Pause, Square } from 'lucide-react';
+import { PanelRightOpen, PanelRightClose } from 'lucide-react';
 import {
     loadWebMscore,
     loadWebMscoreInProcess,
@@ -114,7 +114,7 @@ import {
     AiCompareWorkspace,
     AiCompareWorkspaceActions,
 } from './score-editor/AiCompareWorkspace';
-import { ComparePaneEditorControls } from './score-editor/ComparePaneEditorControls';
+import { CompareScorePane } from './score-editor/compare/CompareScorePane';
 import { AiDiffBlockReview } from './score-editor/AiDiffBlockReview';
 import { XmlDiffView } from './score-editor/XmlDiffView';
 import {
@@ -14550,16 +14550,6 @@ ${partsBodyXml}
             alert('Unable to play audio. See console for details.');
         },
     });
-    const {
-        isPlaying: compareLeftIsPlaying,
-        isPaused: compareLeftIsPaused,
-        isBusy: compareLeftAudioBusy,
-    } = compareTransport.left;
-    const {
-        isPlaying: compareRightIsPlaying,
-        isPaused: compareRightIsPaused,
-        isBusy: compareRightAudioBusy,
-    } = compareTransport.right;
     const toggleCompareSidePlayPause = compareTransport.toggleSidePlayPause;
     stopCompareSideAudioRef.current = compareTransport.stopSideAudio;
 
@@ -19085,209 +19075,60 @@ ${partsBodyXml}
                             )}
                             <div className="flex min-w-0 flex-none overflow-x-hidden" style={{ height: '100dvh' }}>
                                 <div className="flex min-h-0 min-w-0 flex-1 gap-4">
-                                    <div className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col gap-3">
-                                        <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                            <div className="flex items-center gap-2">
-                                                <span>{compareLeftLabel}</span>
-                                                {!compareLeftIsCurrent && (
-                                                    <span className="rounded bg-blue-100 px-2 py-0.5 text-[10px] font-normal text-blue-700">
-                                                        Checkpoint
-                                                    </span>
-                                                )}
-                                                {isEmbedMode && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleOpenScoreInEditor('left')}
-                                                        className="rounded border border-blue-500 bg-blue-50 px-2 py-0.5 text-[10px] font-normal text-blue-700 hover:bg-blue-100"
-                                                        title="Open this score in the full editor"
-                                                    >
-                                                        📝 Open in Editor
-                                                    </button>
-                                                )}
-                                                <div className="flex items-center gap-1">
-                                                    <button
-                                                        type="button"
-                                                        data-testid="btn-compare-play-left"
-                                                        onClick={() => void toggleCompareSidePlayPause('left')}
-                                                        disabled={!compareLeftScore || (compareLeftAudioBusy && !(compareLeftIsPlaying || compareLeftIsPaused))}
-                                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                                                        title={compareLeftIsPlaying && !compareLeftIsPaused ? 'Pause' : compareLeftIsPaused ? 'Resume' : 'Play'}
-                                                    >
-                                                        {compareLeftIsPlaying && !compareLeftIsPaused
-                                                            ? <Pause size={12} />
-                                                            : <Play size={12} />}
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        data-testid="btn-compare-stop-left"
-                                                        onClick={() => void stopCompareSideAudio('left', { awaitCancel: true })}
-                                                        disabled={!(compareLeftIsPlaying || compareLeftIsPaused)}
-                                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                                                        title="Stop"
-                                                    >
-                                                        <Square size={12} />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            {!isEmbedMode && (
-                                            <div className="flex items-center gap-2">
-                                                <input
-                                                    type="text"
-                                                    value={compareLeftCheckpointLabel}
-                                                    onChange={(e) => setCompareLeftCheckpointLabel(e.target.value)}
-                                                    placeholder="Label (optional)"
-                                                    className="w-32 rounded border border-gray-300 bg-white px-2 py-0.5 text-[10px] text-gray-700 placeholder-gray-400"
-                                                />
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleSaveCompareCheckpoint('left')}
-                                                    disabled={checkpointBusy}
-                                                    className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[10px] font-normal text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                                                    title={compareLeftIsCurrent ? 'Save current score as checkpoint' : 'Save this checkpoint'}
-                                                >
-                                                    💾 Save checkpoint
-                                                </button>
-                                            </div>
-                                            )}
-                                        </div>
-                                        <ComparePaneEditorControls
-                                            side="left"
-                                            active={compareActiveSide === 'left'}
-                                            busy={compareEditBusy || compareSwapBusy || aiDiffFeedbackBusy || !compareLeftScore}
-                                            noteInputActive={compareLeftRole ? compareNoteInputByRole[compareLeftRole] : false}
-                                            zoom={compareEffectiveZoom}
-                                            onActivate={() => setCompareActiveSide('left')}
-                                            onZoomOut={() => setCompareZoom((value) => Math.max(0.2, (value ?? compareEffectiveZoom) - 0.1))}
-                                            onZoomIn={() => setCompareZoom((value) => Math.min(1.5, (value ?? compareEffectiveZoom) + 0.1))}
-                                            onAddBar={() => handleCompareAddBar('left')}
-                                            onToggleNoteInput={() => {
+                                    <CompareScorePane
+                                        model={{
+                                            side: 'left',
+                                            label: compareLeftLabel,
+                                            isCurrent: compareLeftIsCurrent,
+                                            isActive: compareActiveSide === 'left',
+                                            embedded: isEmbedMode,
+                                            scoreAvailable: Boolean(compareLeftScore),
+                                            editorBusy: compareEditBusy || compareSwapBusy || aiDiffFeedbackBusy || !compareLeftScore,
+                                            noteInputActive: compareLeftRole ? compareNoteInputByRole[compareLeftRole] : false,
+                                            zoom: compareEffectiveZoom,
+                                            wrapperStyle: compareZoomStyle,
+                                            transport: compareTransport.left,
+                                            checkpoint: isEmbedMode ? null : { label: compareLeftCheckpointLabel, busy: checkpointBusy },
+                                            viewportStatus: compareLeftScore ? null : { message: 'Load a score to compare.', overlay: false },
+                                            diffHighlights: compareLeftHighlights,
+                                            positiveDiffStatus: 'new-diff',
+                                            negativeDiffStatus: null,
+                                            commentedHighlights: compareCommentedLeftHighlights,
+                                            threadedHighlights: compareThreadedLeftHighlights,
+                                            selectionRects: compareLeftSelectionBoxes,
+                                            noteInputCursor: compareLeftNoteInputCursorVisible && compareLeftNoteInputCursor
+                                                ? { rect: compareLeftNoteInputCursor, color: compareLeftNoteInputCursorColor }
+                                                : null,
+                                            focusedHighlight: compareFocusedHighlights.left ?? null,
+                                            measureHitAreaAvailable: Boolean(compareLeftMeasurePositions),
+                                        }}
+                                        actions={{
+                                            activate: () => setCompareActiveSide('left'),
+                                            openInEditor: isEmbedMode ? () => handleOpenScoreInEditor('left') : null,
+                                            togglePlayPause: () => void toggleCompareSidePlayPause('left'),
+                                            stop: () => void stopCompareSideAudio('left', { awaitCancel: true }),
+                                            setCheckpointLabel: setCompareLeftCheckpointLabel,
+                                            saveCheckpoint: () => void handleSaveCompareCheckpoint('left'),
+                                            zoomOut: () => setCompareZoom((value) => Math.max(0.2, (value ?? compareEffectiveZoom) - 0.1)),
+                                            zoomIn: () => setCompareZoom((value) => Math.min(1.5, (value ?? compareEffectiveZoom) + 0.1)),
+                                            addBar: () => handleCompareAddBar('left'),
+                                            toggleNoteInput: () => {
                                                 setCompareActiveSide('left');
                                                 toggleCompareNoteInputMode('left');
-                                            }}
-                                            onOpenPalettes={() => {
+                                            },
+                                            openPalettes: () => {
                                                 setCompareActiveSide('left');
                                                 setPaletteCategory(null);
                                                 setPalettesOpen(true);
-                                            }}
-                                        />
-                                        <div className="flex min-h-0 flex-1 flex-col gap-3">
-                                            <div
-                                                ref={compareLeftScrollRef}
-                                                className={`relative min-h-0 min-w-0 flex-1 overflow-auto rounded border bg-white ${compareActiveSide === 'left' ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200'}`}
-                                                data-testid="compare-pane-left"
-                                                onPointerDown={() => setCompareActiveSide('left')}
-                                            >
-                                                {!compareLeftScore && (
-                                                    <div className="p-3 text-xs text-gray-500">
-                                                        Load a score to compare.
-                                                    </div>
-                                                )}
-                                            <div
-                                                ref={compareLeftWrapperRef}
-                                                data-testid="compare-score-wrapper-left"
-                                                className="relative origin-top-left"
-                                                style={compareZoomStyle}
-                                            >
-                                                <div ref={compareLeftContainerRef} />
-                                                <div className="pointer-events-none absolute inset-0 z-10">
-                                                    {compareLeftHighlights.map((highlight) => (
-                                                        <div
-                                                            key={`compare-left-highlight-${highlight.id}`}
-                                                            data-testid="compare-left-highlight"
-                                                            className="absolute rounded-sm border-2"
-                                                            style={{
-                                                                left: `${highlight.left}px`,
-                                                                top: `${highlight.top}px`,
-                                                                width: `${highlight.width}px`,
-                                                                height: `${highlight.height}px`,
-                                                                backgroundColor: highlight.status === 'new-diff' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(244, 63, 94, 0.3)',
-                                                                borderColor: highlight.status === 'new-diff' ? 'rgb(16, 185, 129)' : 'rgb(244, 63, 94)',
-                                                            }}
-                                                        />
-                                                    ))}
-                                                    {compareCommentedLeftHighlights.map((highlight) => (
-                                                        <div
-                                                            key={`compare-left-comment-${highlight.id}`}
-                                                            className="absolute rounded-sm border-2"
-                                                            style={{
-                                                                left: `${highlight.left}px`,
-                                                                top: `${highlight.top}px`,
-                                                                width: `${highlight.width}px`,
-                                                                height: `${highlight.height}px`,
-                                                                backgroundColor: 'rgba(245, 158, 11, 0.25)',
-                                                                borderColor: 'rgb(245, 158, 11)',
-                                                            }}
-                                                        />
-                                                    ))}
-                                                    {compareThreadedLeftHighlights.map((highlight) => (
-                                                        <div
-                                                            key={`compare-left-thread-${highlight.id}`}
-                                                            data-testid="compare-left-thread-highlight"
-                                                            className="absolute rounded-sm border-2"
-                                                            style={{
-                                                                left: `${highlight.left}px`,
-                                                                top: `${highlight.top}px`,
-                                                                width: `${highlight.width}px`,
-                                                                height: `${highlight.height}px`,
-                                                                backgroundColor: 'rgba(16, 185, 129, 0.35)',
-                                                                borderColor: 'rgb(5, 150, 105)',
-                                                            }}
-                                                        />
-                                                    ))}
-                                                    {compareActiveSide === 'left' && compareLeftSelectionBoxes.map((box, index) => (
-                                                        <div
-                                                            key={`compare-left-selection-${index}`}
-                                                            data-testid="compare-selection-overlay-left"
-                                                            aria-hidden="true"
-                                                            className="absolute border-2 border-blue-600"
-                                                            style={{
-                                                                left: `${box.x}px`,
-                                                                top: `${box.y}px`,
-                                                                width: `${box.w}px`,
-                                                                height: `${box.h}px`,
-                                                            }}
-                                                        />
-                                                    ))}
-                                                    {compareLeftNoteInputCursorVisible && compareLeftNoteInputCursor && (
-                                                        <div
-                                                            data-testid="compare-note-input-cursor-left"
-                                                            data-voice={compareLeftNoteInputCursor.voice}
-                                                            aria-hidden="true"
-                                                            className="pointer-events-none absolute z-10"
-                                                            style={{
-                                                                left: compareLeftNoteInputCursor.x,
-                                                                top: compareLeftNoteInputCursor.y,
-                                                                width: compareLeftNoteInputCursor.width,
-                                                                height: compareLeftNoteInputCursor.height,
-                                                                backgroundColor: `${compareLeftNoteInputCursorColor}32`,
-                                                                borderLeft: `3px solid ${compareLeftNoteInputCursorColor}`,
-                                                            }}
-                                                        />
-                                                    )}
-                                                    {compareFocusedHighlights.left && (
-                                                        <div
-                                                            className="absolute rounded-sm border-2 border-blue-500 ring-2 ring-blue-300/50"
-                                                            style={{
-                                                                left: `${compareFocusedHighlights.left.left}px`,
-                                                                top: `${compareFocusedHighlights.left.top}px`,
-                                                                width: `${compareFocusedHighlights.left.width}px`,
-                                                                height: `${compareFocusedHighlights.left.height}px`,
-                                                            }}
-                                                        />
-                                                    )}
-                                                    {compareLeftMeasurePositions && (
-                                                        <div
-                                                            className="absolute inset-0 cursor-pointer"
-                                                            style={{ pointerEvents: 'auto' }}
-                                                            title="Click to select this score and an element; click its bar to annotate"
-                                                            onClick={(e) => handleComparePaneClick(e, 'left')}
-                                                        />
-                                                    )}
-                                                </div>
-                                            </div>
-                                            </div>
-                                        </div>
-                                    </div>
+                                            },
+                                            clickScore: (event) => handleComparePaneClick(event, 'left'),
+                                        }}
+                                        paneRefs={{
+                                            scroll: compareLeftScrollRef,
+                                            wrapper: compareLeftWrapperRef,
+                                            container: compareLeftContainerRef,
+                                        }}
+                                    />
                                     <div
                                         className={`flex min-h-0 flex-none flex-col items-stretch gap-2 ${(isAiCompareMode || isChangeReviewCompareMode) ? '' : 'w-44'}`}
                                         style={(isAiCompareMode || isChangeReviewCompareMode) ? { width: `${aiDiffGutterWidth}px` } : undefined}
@@ -19932,209 +19773,65 @@ ${partsBodyXml}
                                             })}
                                         </div>
                                     </div>
-                                    <div className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col gap-3">
-                                        <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                            <div className="flex items-center gap-2">
-                                                <span>{compareRightLabel}</span>
-                                                {!compareRightIsCurrent && (
-                                                    <span className="rounded bg-blue-100 px-2 py-0.5 text-[10px] font-normal text-blue-700">
-                                                        Checkpoint
-                                                    </span>
-                                                )}
-                                                {isEmbedMode && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleOpenScoreInEditor('right')}
-                                                        className="rounded border border-blue-500 bg-blue-50 px-2 py-0.5 text-[10px] font-normal text-blue-700 hover:bg-blue-100"
-                                                        title="Open this score in the full editor"
-                                                    >
-                                                        📝 Open in Editor
-                                                    </button>
-                                                )}
-                                                <div className="flex items-center gap-1">
-                                                    <button
-                                                        type="button"
-                                                        data-testid="btn-compare-play-right"
-                                                        onClick={() => void toggleCompareSidePlayPause('right')}
-                                                        disabled={!compareRightScoreDisplay || (compareRightAudioBusy && !(compareRightIsPlaying || compareRightIsPaused))}
-                                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                                                        title={compareRightIsPlaying && !compareRightIsPaused ? 'Pause' : compareRightIsPaused ? 'Resume' : 'Play'}
-                                                    >
-                                                        {compareRightIsPlaying && !compareRightIsPaused
-                                                            ? <Pause size={12} />
-                                                            : <Play size={12} />}
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        data-testid="btn-compare-stop-right"
-                                                        onClick={() => void stopCompareSideAudio('right', { awaitCancel: true })}
-                                                        disabled={!(compareRightIsPlaying || compareRightIsPaused)}
-                                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                                                        title="Stop"
-                                                    >
-                                                        <Square size={12} />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            {!isEmbedMode && (
-                                            <div className="flex items-center gap-2">
-                                                <input
-                                                    type="text"
-                                                    value={compareRightCheckpointLabel}
-                                                    onChange={(e) => setCompareRightCheckpointLabel(e.target.value)}
-                                                    placeholder="Label (optional)"
-                                                    className="w-32 rounded border border-gray-300 bg-white px-2 py-0.5 text-[10px] text-gray-700 placeholder-gray-400"
-                                                />
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleSaveCompareCheckpoint('right')}
-                                                    disabled={checkpointBusy}
-                                                    className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[10px] font-normal text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                                                    title={compareRightIsCurrent ? 'Save current score as checkpoint' : 'Save this checkpoint'}
-                                                >
-                                                    💾 Save checkpoint
-                                                </button>
-                                            </div>
-                                            )}
-                                        </div>
-                                        <ComparePaneEditorControls
-                                            side="right"
-                                            active={compareActiveSide === 'right'}
-                                            busy={compareEditBusy || compareSwapBusy || aiDiffFeedbackBusy || !compareRightScoreDisplay}
-                                            noteInputActive={compareRightRole ? compareNoteInputByRole[compareRightRole] : false}
-                                            zoom={compareEffectiveZoom}
-                                            onActivate={() => setCompareActiveSide('right')}
-                                            onZoomOut={() => setCompareZoom((value) => Math.max(0.2, (value ?? compareEffectiveZoom) - 0.1))}
-                                            onZoomIn={() => setCompareZoom((value) => Math.min(1.5, (value ?? compareEffectiveZoom) + 0.1))}
-                                            onAddBar={() => handleCompareAddBar('right')}
-                                            onToggleNoteInput={() => {
+                                    <CompareScorePane
+                                        model={{
+                                            side: 'right',
+                                            label: compareRightLabel,
+                                            isCurrent: compareRightIsCurrent,
+                                            isActive: compareActiveSide === 'right',
+                                            embedded: isEmbedMode,
+                                            scoreAvailable: Boolean(compareRightScoreDisplay),
+                                            editorBusy: compareEditBusy || compareSwapBusy || aiDiffFeedbackBusy || !compareRightScoreDisplay,
+                                            noteInputActive: compareRightRole ? compareNoteInputByRole[compareRightRole] : false,
+                                            zoom: compareEffectiveZoom,
+                                            wrapperStyle: compareRightZoomStyle,
+                                            transport: compareTransport.right,
+                                            checkpoint: isEmbedMode ? null : { label: compareRightCheckpointLabel, busy: checkpointBusy },
+                                            viewportStatus: compareRightLoading || compareRightError || !compareRightScore
+                                                ? {
+                                                    message: compareRightError ?? (compareRightLoading ? 'Loading checkpoint score...' : 'Score not loaded.'),
+                                                    overlay: true,
+                                                }
+                                                : null,
+                                            diffHighlights: compareRightHighlights,
+                                            positiveDiffStatus: 'new-diff',
+                                            negativeDiffStatus: 'old-diff',
+                                            commentedHighlights: compareCommentedRightHighlights,
+                                            threadedHighlights: compareThreadedRightHighlights,
+                                            selectionRects: compareRightSelectionBoxes,
+                                            noteInputCursor: compareRightNoteInputCursorVisible && compareRightNoteInputCursor
+                                                ? { rect: compareRightNoteInputCursor, color: compareRightNoteInputCursorColor }
+                                                : null,
+                                            focusedHighlight: compareFocusedHighlights.right ?? null,
+                                            measureHitAreaAvailable: Boolean(compareRightMeasurePositions),
+                                        }}
+                                        actions={{
+                                            activate: () => setCompareActiveSide('right'),
+                                            openInEditor: isEmbedMode ? () => handleOpenScoreInEditor('right') : null,
+                                            togglePlayPause: () => void toggleCompareSidePlayPause('right'),
+                                            stop: () => void stopCompareSideAudio('right', { awaitCancel: true }),
+                                            setCheckpointLabel: setCompareRightCheckpointLabel,
+                                            saveCheckpoint: () => void handleSaveCompareCheckpoint('right'),
+                                            zoomOut: () => setCompareZoom((value) => Math.max(0.2, (value ?? compareEffectiveZoom) - 0.1)),
+                                            zoomIn: () => setCompareZoom((value) => Math.min(1.5, (value ?? compareEffectiveZoom) + 0.1)),
+                                            addBar: () => handleCompareAddBar('right'),
+                                            toggleNoteInput: () => {
                                                 setCompareActiveSide('right');
                                                 toggleCompareNoteInputMode('right');
-                                            }}
-                                            onOpenPalettes={() => {
+                                            },
+                                            openPalettes: () => {
                                                 setCompareActiveSide('right');
                                                 setPaletteCategory(null);
                                                 setPalettesOpen(true);
-                                            }}
-                                        />
-                                        <div className="flex min-h-0 flex-1 flex-col gap-3">
-                                            <div
-                                                ref={compareRightScrollRef}
-                                                className={`relative min-h-0 min-w-0 flex-1 overflow-auto rounded border bg-white ${compareActiveSide === 'right' ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200'}`}
-                                                data-testid="compare-pane-right"
-                                                onPointerDown={() => setCompareActiveSide('right')}
-                                            >
-                                                {(compareRightLoading || compareRightError || !compareRightScore) && (
-                                                    <div className="absolute inset-0 flex items-center justify-center bg-white/80 p-3 text-xs text-gray-500">
-                                                        {compareRightError ?? (compareRightLoading ? 'Loading checkpoint score...' : 'Score not loaded.')}
-                                                    </div>
-                                                )}
-                                            <div
-                                                ref={compareRightWrapperRef}
-                                                data-testid="compare-score-wrapper-right"
-                                                className="relative origin-top-left"
-                                                style={compareRightZoomStyle}
-                                            >
-                                                <div ref={compareRightContainerRef} />
-                                                <div className="pointer-events-none absolute inset-0 z-10">
-                                                    {compareRightHighlights.map((highlight) => (
-                                                        <div
-                                                            key={`compare-right-highlight-${highlight.id}`}
-                                                            data-testid="compare-right-highlight"
-                                                            className="absolute rounded-sm border-2"
-                                                            style={{
-                                                                left: `${highlight.left}px`,
-                                                                top: `${highlight.top}px`,
-                                                                width: `${highlight.width}px`,
-                                                                height: `${highlight.height}px`,
-                                                                backgroundColor: highlight.status === 'old-diff' ? 'rgba(244, 63, 94, 0.3)' : 'rgba(16, 185, 129, 0.3)',
-                                                                borderColor: highlight.status === 'old-diff' ? 'rgb(244, 63, 94)' : 'rgb(16, 185, 129)',
-                                                            }}
-                                                        />
-                                                    ))}
-                                                    {compareCommentedRightHighlights.map((highlight) => (
-                                                        <div
-                                                            key={`compare-right-comment-${highlight.id}`}
-                                                            className="absolute rounded-sm border-2"
-                                                            style={{
-                                                                left: `${highlight.left}px`,
-                                                                top: `${highlight.top}px`,
-                                                                width: `${highlight.width}px`,
-                                                                height: `${highlight.height}px`,
-                                                                backgroundColor: 'rgba(245, 158, 11, 0.25)',
-                                                                borderColor: 'rgb(245, 158, 11)',
-                                                            }}
-                                                        />
-                                                    ))}
-                                                    {compareThreadedRightHighlights.map((highlight) => (
-                                                        <div
-                                                            key={`compare-right-thread-${highlight.id}`}
-                                                            data-testid="compare-right-thread-highlight"
-                                                            className="absolute rounded-sm border-2"
-                                                            style={{
-                                                                left: `${highlight.left}px`,
-                                                                top: `${highlight.top}px`,
-                                                                width: `${highlight.width}px`,
-                                                                height: `${highlight.height}px`,
-                                                                backgroundColor: 'rgba(16, 185, 129, 0.35)',
-                                                                borderColor: 'rgb(5, 150, 105)',
-                                                            }}
-                                                        />
-                                                    ))}
-                                                    {compareActiveSide === 'right' && compareRightSelectionBoxes.map((box, index) => (
-                                                        <div
-                                                            key={`compare-right-selection-${index}`}
-                                                            data-testid="compare-selection-overlay-right"
-                                                            aria-hidden="true"
-                                                            className="absolute border-2 border-blue-600"
-                                                            style={{
-                                                                left: `${box.x}px`,
-                                                                top: `${box.y}px`,
-                                                                width: `${box.w}px`,
-                                                                height: `${box.h}px`,
-                                                            }}
-                                                        />
-                                                    ))}
-                                                    {compareRightNoteInputCursorVisible && compareRightNoteInputCursor && (
-                                                        <div
-                                                            data-testid="compare-note-input-cursor-right"
-                                                            data-voice={compareRightNoteInputCursor.voice}
-                                                            aria-hidden="true"
-                                                            className="pointer-events-none absolute z-10"
-                                                            style={{
-                                                                left: compareRightNoteInputCursor.x,
-                                                                top: compareRightNoteInputCursor.y,
-                                                                width: compareRightNoteInputCursor.width,
-                                                                height: compareRightNoteInputCursor.height,
-                                                                backgroundColor: `${compareRightNoteInputCursorColor}32`,
-                                                                borderLeft: `3px solid ${compareRightNoteInputCursorColor}`,
-                                                            }}
-                                                        />
-                                                    )}
-                                                    {compareFocusedHighlights.right && (
-                                                        <div
-                                                            className="absolute rounded-sm border-2 border-blue-500 ring-2 ring-blue-300/50"
-                                                            style={{
-                                                                left: `${compareFocusedHighlights.right.left}px`,
-                                                                top: `${compareFocusedHighlights.right.top}px`,
-                                                                width: `${compareFocusedHighlights.right.width}px`,
-                                                                height: `${compareFocusedHighlights.right.height}px`,
-                                                            }}
-                                                        />
-                                                    )}
-                                                    {compareRightMeasurePositions && (
-                                                        <div
-                                                            className="absolute inset-0 cursor-pointer"
-                                                            style={{ pointerEvents: 'auto' }}
-                                                            title="Click to select this score and an element; click its bar to annotate"
-                                                            onClick={(e) => handleComparePaneClick(e, 'right')}
-                                                        />
-                                                    )}
-                                                </div>
-                                            </div>
-                                            </div>
-                                        </div>
-                                    </div>
+                                            },
+                                            clickScore: (event) => handleComparePaneClick(event, 'right'),
+                                        }}
+                                        paneRefs={{
+                                            scroll: compareRightScrollRef,
+                                            wrapper: compareRightWrapperRef,
+                                            container: compareRightContainerRef,
+                                        }}
+                                    />
                                 </div>
                             </div>
                             <XmlDiffView

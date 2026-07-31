@@ -23,6 +23,7 @@ const makeModel = (): CompareScorePaneModel => ({
     viewportStatus: null,
     diffHighlights: [{ id: 'diff', left: 1, top: 2, width: 3, height: 4, status: 'new-diff' }],
     positiveDiffStatus: 'new-diff',
+    negativeDiffStatus: null,
     commentedHighlights: [],
     threadedHighlights: [],
     selectionRects: [{ x: 5, y: 6, w: 7, h: 8 }],
