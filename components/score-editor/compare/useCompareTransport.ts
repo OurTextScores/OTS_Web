@@ -41,6 +41,13 @@ type CompareTransportOptions = {
     reportUnavailable: () => void;
     reportMissingSoundFont: () => void;
     reportPlaybackError: (side: CompareSide, error: unknown) => void;
+    /**
+     * Registers playback cancellation with the compare operation coordinator so a
+     * lifecycle transition cannot destroy a score while its batch iterator is still
+     * being cancelled. Only cancellation is tracked: tracking the whole play setup
+     * would make every queued keyboard shortcut wait on soundfont loading.
+     */
+    trackOperation?: <T>(operation: Promise<T>) => Promise<T>;
 };
 
 export function useCompareTransport(options: CompareTransportOptions) {
@@ -103,21 +110,29 @@ export function useCompareTransport(options: CompareTransportOptions) {
         generationRef: rightGenerationRef,
     }), [setLeftIsPaused, setLeftIsPlaying, setRightIsPaused, setRightIsPlaying]);
 
-    const stopSideAudio = useCallback(async (
+    const track = useCallback(<T,>(operation: Promise<T>): Promise<T> => (
+        optionsRef.current.trackOperation?.(operation) ?? operation
+    ), []);
+
+    const stopSideAudio = useCallback((
         side: CompareSide,
         stopOptions?: { awaitCancel?: boolean },
     ) => {
         const transport = getSideTransport(side);
+        // Claim before the first await so a concurrent play attempt cannot publish
+        // audio for a score this stop is retiring.
         transport.generationRef.current += 1;
-        await optionsRef.current.stopStream(
-            transport.sourcesRef,
-            transport.iteratorRef,
-            stopOptions,
-        );
-        transport.setIsPlaying(false);
-        transport.setIsPaused(false);
-        transport.setIsBusy(false);
-    }, [getSideTransport]);
+        return track((async () => {
+            await optionsRef.current.stopStream(
+                transport.sourcesRef,
+                transport.iteratorRef,
+                stopOptions,
+            );
+            transport.setIsPlaying(false);
+            transport.setIsPaused(false);
+            transport.setIsBusy(false);
+        })());
+    }, [getSideTransport, track]);
 
     const pauseSideAudio = useCallback(async (side: CompareSide) => {
         const audioContext = optionsRef.current.audioContextRef.current;
@@ -176,7 +191,9 @@ export function useCompareTransport(options: CompareTransportOptions) {
                 optionsRef.current.batchSize,
             ) as SynthAudioBatchIterator;
             if (!isCurrent()) {
-                await Promise.resolve(iterator(true)).catch(() => {});
+                // Track the cancel: this iterator already holds engine state for
+                // targetScore, and teardown must not destroy it mid-cancel.
+                await track(Promise.resolve(iterator(true)).catch(() => {}));
                 return;
             }
             await optionsRef.current.playStream(iterator, {
@@ -193,9 +210,12 @@ export function useCompareTransport(options: CompareTransportOptions) {
                 await stopSideAudio(side, { awaitCancel: true });
             }
         } finally {
-            transport.setIsBusy(false);
+            // A superseded attempt must not clear the busy flag a newer attempt owns.
+            if (isCurrent()) {
+                transport.setIsBusy(false);
+            }
         }
-    }, [getSideTransport, stopSideAudio]);
+    }, [getSideTransport, stopSideAudio, track]);
 
     const toggleSidePlayPause = useCallback(async (side: CompareSide) => {
         const transport = getSideTransport(side);

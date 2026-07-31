@@ -1,7 +1,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { createRef } from 'react';
+import { createRef, useRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Score, SynthAudioBatchIterator } from '../lib/webmscore-loader';
+import { useCompareOperationCoordinator } from '../components/score-editor/compare/useCompareOperationCoordinator';
 import {
     useCompareTransport,
     type CompareStreamTarget,
@@ -105,6 +106,94 @@ describe('useCompareTransport', () => {
         expect(original.synthAudioBatch).not.toHaveBeenCalled();
         expect(replacement.synthAudioBatch).not.toHaveBeenCalled();
         expect(transport.playStream).not.toHaveBeenCalled();
+    });
+
+    it('keeps a superseded attempt from clearing the busy flag a newer one owns', async () => {
+        const first = deferred<boolean>();
+        const second = deferred<boolean>();
+        const soundFonts = [first.promise, second.promise];
+        const left = makeScore();
+        const transport = renderTransport(
+            { left: left.score, right: null },
+            vi.fn(() => soundFonts.shift() ?? Promise.resolve(true)),
+        );
+
+        let superseded!: Promise<void>;
+        await act(async () => {
+            superseded = transport.result.current.playSideAudio('left');
+            await Promise.resolve();
+        });
+        await act(async () => {
+            void transport.result.current.playSideAudio('left');
+            await Promise.resolve();
+        });
+
+        first.resolve(true);
+        await act(async () => superseded);
+
+        // The newer attempt is still loading its soundfont and still owns busy.
+        expect(transport.playStream).not.toHaveBeenCalled();
+        expect(transport.result.current.left.isBusy).toBe(true);
+
+        second.resolve(true);
+        await act(async () => {
+            await Promise.resolve();
+        });
+        await waitFor(() => expect(transport.result.current.left.isBusy).toBe(false));
+    });
+
+    it('drains a tracked cancellation before the coordinator destroys the score', async () => {
+        const cancel = deferred<void>();
+        const auxiliary = makeScore();
+        const destroy = vi.fn();
+        const auxiliaryScore = Object.assign(auxiliary.score, { destroy }) as Score;
+        const stopStream = vi.fn(() => cancel.promise);
+
+        const { result } = renderHook(() => {
+            const auxiliaryScoreRef = useRef<Score | null>(auxiliaryScore);
+            const coordinator = useCompareOperationCoordinator({
+                auxiliaryScoreRef,
+                runSerializedScoreOperation: (operation) => operation(),
+            });
+            const audioContextRef = useRef<AudioContext | null>(null);
+            const transport = useCompareTransport({
+                scores: { left: null, right: auxiliaryScore },
+                audioContextRef,
+                batchSize: 2,
+                ensureSoundFontLoaded: async () => true,
+                stopMainAudio: async () => {},
+                stopStream,
+                playStream: async () => {},
+                reportUnavailable: () => {},
+                reportMissingSoundFont: () => {},
+                reportPlaybackError: () => {},
+                trackOperation: coordinator.trackOperation,
+            });
+            return { coordinator, transport };
+        });
+
+        let teardown!: Promise<void>;
+        await act(async () => {
+            void result.current.transport.stopSideAudio('right', { awaitCancel: true });
+            teardown = result.current.coordinator.queueScoreTeardown(
+                auxiliaryScore,
+                null,
+                'compare-close',
+            );
+            await Promise.resolve();
+        });
+
+        expect(stopStream).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.anything(),
+            { awaitCancel: true },
+        );
+        expect(destroy).not.toHaveBeenCalled();
+
+        cancel.resolve();
+        await act(async () => teardown);
+
+        expect(destroy).toHaveBeenCalledOnce();
     });
 
     it('stops the main and opposite transports before starting a side', async () => {

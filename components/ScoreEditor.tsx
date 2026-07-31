@@ -8933,8 +8933,10 @@ ${partsBodyXml}
     useEffect(() => {
         if (!compareView) {
             invalidateCompareOperations();
-            void stopCompareSideAudio('left');
-            void stopCompareSideAudio('right');
+            // awaitCancel keeps the batch-iterator cancellation inside the tracked
+            // operation, so queueCompareScoreTeardown drains it before destroy().
+            void stopCompareSideAudio('left', { awaitCancel: true });
+            void stopCompareSideAudio('right', { awaitCancel: true });
             const auxiliaryScore = compareRightScoreRef.current;
             void queueCompareScoreTeardown(
                 auxiliaryScore,
@@ -8986,8 +8988,8 @@ ${partsBodyXml}
         const loadCompareScore = async () => {
             // The checkpoint side is being replaced -- stop whichever visual side is
             // currently playing it before the underlying Score instance is destroyed.
-            await stopCompareSideAudio('left');
-            await stopCompareSideAudio('right');
+            await stopCompareSideAudio('left', { awaitCancel: true });
+            await stopCompareSideAudio('right', { awaitCancel: true });
             if (canceled) {
                 return;
             }
@@ -9063,8 +9065,8 @@ ${partsBodyXml}
     useEffect(() => {
         return () => {
             invalidateCompareOperations();
-            void stopCompareSideAudio('left');
-            void stopCompareSideAudio('right');
+            void stopCompareSideAudio('left', { awaitCancel: true });
+            void stopCompareSideAudio('right', { awaitCancel: true });
             const auxiliaryScore = compareRightScoreRef.current;
             void queueCompareScoreTeardown(
                 auxiliaryScore,
@@ -14307,6 +14309,7 @@ ${partsBodyXml}
             console.error(`Failed to play ${side} compare audio`, error);
             alert('Unable to play audio. See console for details.');
         },
+        trackOperation: trackCompareOperation,
     });
     const toggleCompareSidePlayPause = compareTransport.toggleSidePlayPause;
     stopCompareSideAudioRef.current = compareTransport.stopSideAudio;
