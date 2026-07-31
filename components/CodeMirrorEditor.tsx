@@ -303,6 +303,44 @@ const jsonDiagnostics = (text: string): Diagnostic[] => {
 
 const jsonLinter = linter((view) => jsonDiagnostics(view.state.doc.toString()));
 
+type CodeMirrorConfiguration = Pick<
+    CodeMirrorEditorProps,
+    'readOnly' | 'placeholderText' | 'language' | 'lint' | 'themeMode'
+>;
+
+const buildConfigExtensions = ({
+    readOnly = false,
+    placeholderText,
+    language = 'xml',
+    lint = true,
+    themeMode = 'light',
+}: CodeMirrorConfiguration) => {
+    const extensions: Extension[] = [
+        EditorState.readOnly.of(readOnly),
+        EditorView.editable.of(!readOnly),
+        editorShellThemes[themeMode] ?? editorShellThemes.light,
+        editorSyntaxThemes[themeMode] ?? editorSyntaxThemes.light,
+    ];
+    if (placeholderText) {
+        extensions.push(placeholder(placeholderText));
+    }
+    if (readOnly) {
+        extensions.push(readOnlyTheme);
+    }
+    if (language === 'xml') {
+        extensions.push(xml());
+        if (lint) {
+            extensions.push(xmlLinter, lintGutter());
+        }
+    } else if (language === 'json') {
+        extensions.push(json());
+        if (lint) {
+            extensions.push(jsonLinter, lintGutter());
+        }
+    }
+    return extensions;
+};
+
 export const CodeMirrorEditor: React.FC<CodeMirrorEditorProps> = ({
     value,
     onChange,
@@ -324,44 +362,25 @@ export const CodeMirrorEditor: React.FC<CodeMirrorEditorProps> = ({
     const onChangeRef = useRef(onChange);
     const configCompartmentRef = useRef(new Compartment());
     const suppressChangeRef = useRef(false);
+    const initialValueRef = useRef(value);
+    const initialConfigRef = useRef<CodeMirrorConfiguration>({
+        readOnly,
+        placeholderText,
+        language,
+        lint,
+        themeMode,
+    });
 
     useEffect(() => {
         onChangeRef.current = onChange;
     }, [onChange]);
-
-    const buildConfigExtensions = () => {
-        const extensions: Extension[] = [
-            EditorState.readOnly.of(readOnly),
-            EditorView.editable.of(!readOnly),
-            editorShellThemes[themeMode] ?? editorShellThemes.light,
-            editorSyntaxThemes[themeMode] ?? editorSyntaxThemes.light,
-        ];
-        if (placeholderText) {
-            extensions.push(placeholder(placeholderText));
-        }
-        if (readOnly) {
-            extensions.push(readOnlyTheme);
-        }
-        if (language === 'xml') {
-            extensions.push(xml());
-            if (lint) {
-                extensions.push(xmlLinter, lintGutter());
-            }
-        } else if (language === 'json') {
-            extensions.push(json());
-            if (lint) {
-                extensions.push(jsonLinter, lintGutter());
-            }
-        }
-        return extensions;
-    };
 
     useEffect(() => {
         if (!containerRef.current || viewRef.current) {
             return;
         }
         const state = EditorState.create({
-            doc: value,
+            doc: initialValueRef.current,
             extensions: [
                 basicSetup,
                 foldGutter(),
@@ -376,7 +395,7 @@ export const CodeMirrorEditor: React.FC<CodeMirrorEditorProps> = ({
                         onChangeRef.current(nextValue);
                     }
                 }),
-                configCompartmentRef.current.of(buildConfigExtensions()),
+                configCompartmentRef.current.of(buildConfigExtensions(initialConfigRef.current)),
             ],
         });
         viewRef.current = new EditorView({
@@ -410,7 +429,13 @@ export const CodeMirrorEditor: React.FC<CodeMirrorEditorProps> = ({
             return;
         }
         view.dispatch({
-            effects: configCompartmentRef.current.reconfigure(buildConfigExtensions()),
+            effects: configCompartmentRef.current.reconfigure(buildConfigExtensions({
+                readOnly,
+                placeholderText,
+                language,
+                lint,
+                themeMode,
+            })),
         });
     }, [readOnly, placeholderText, language, lint, themeMode]);
 
