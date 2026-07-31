@@ -129,6 +129,7 @@ import {
     type MusicXmlPatchOp,
 } from './score-editor/ai-assistant-types';
 import { type AiScoreBridge } from './score-editor/ai-score-bridge';
+import { useLatestCallbackFacade } from '@/lib/use-latest-callback-facade';
 import {
     buildCompareUserEditDiff,
     type CompareScoreRole,
@@ -748,6 +749,26 @@ type StopCompareSideAudio = (
     options?: { awaitCancel?: boolean },
 ) => Promise<void>;
 
+type HandleUrlLoad = (url: string, signal?: AbortSignal) => Promise<boolean>;
+type HandleFileUploadOptions = {
+    preserveScoreId?: boolean;
+    scoreIdOverride?: string;
+    updateUrl?: boolean;
+    createInitialCheckpoint?: boolean;
+    telemetrySource?: string;
+};
+type HandleFileUpload = (file: File, options?: HandleFileUploadOptions) => Promise<boolean>;
+type RefreshPageCount = (targetScore: Score, preferredPage?: number) => Promise<number>;
+type RenderScore = (
+    currentScore: Score,
+    pageIndex?: number,
+    highlightSelection?: boolean,
+) => Promise<boolean>;
+type EnsureSoundFontLoaded = (
+    targetScore?: Score,
+    options?: { forceRetry?: boolean },
+) => Promise<boolean>;
+
 const formatBytes = (bytes: number) => {
     if (!Number.isFinite(bytes)) {
         return '';
@@ -1288,6 +1309,12 @@ export default function ScoreEditor() {
     const scoreRef = useRef<Score | null>(null);
     const applyXmlToScoreRef = useRef<ApplyXmlToScore>(async () => false);
     const stopCompareSideAudioRef = useRef<StopCompareSideAudio>(async () => {});
+    const [handleUrlLoad, handleUrlLoadRef] = useLatestCallbackFacade<HandleUrlLoad>(async () => false);
+    const [handleFileUpload, handleFileUploadRef] = useLatestCallbackFacade<HandleFileUpload>(async () => false);
+    const [refreshPageCount, refreshPageCountRef] = useLatestCallbackFacade<RefreshPageCount>(async () => 0);
+    const [renderScore, renderScoreRef] = useLatestCallbackFacade<RenderScore>(async () => false);
+    const [ensureSoundFontLoaded, ensureSoundFontLoadedRef] = useLatestCallbackFacade<EnsureSoundFontLoaded>(async () => false);
+    const keyboardShortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => {});
     const [zoom, setZoom] = useState(1.0);
     const containerRef = useRef<HTMLDivElement>(null);
     const scoreWrapperRef = useRef<HTMLDivElement>(null);
@@ -5267,7 +5294,16 @@ ${partsBodyXml}
 
         boot();
         return () => abortController.abort();
-    }, [searchParams, launchContext?.canonicalXmlUrl]);
+    }, [
+        handleFileUpload,
+        handleUrlLoad,
+        launchContext?.canonicalXmlUrl,
+        launchContext?.revisionId,
+        launchContext?.source,
+        launchContext?.sourceId,
+        launchContext?.workId,
+        searchParams,
+    ]);
 
     const parseLayoutProgressState = (value: unknown): LayoutProgressState | null => {
         if (!value || typeof value !== 'object') {
@@ -5510,7 +5546,14 @@ ${partsBodyXml}
                 }
             })();
         }, LARGE_SCORE_INTERACTION_PRIME_DELAY_MS);
-    }, [clearInteractionPrime]);
+    }, [
+        clearInteractionPrime,
+        ensureSoundFontLoaded,
+        refreshPageCount,
+        renderScore,
+        runSerializedScoreOperation,
+        setInteractionState,
+    ]);
 
     const resolveCurrentPageSvgContext = useCallback(async () => {
         const renderedSvg = containerRef.current?.querySelector('svg');
@@ -5952,7 +5995,7 @@ ${partsBodyXml}
         void runTasks(0);
     };
 
-    const handleUrlLoad = async (url: string, signal?: AbortSignal): Promise<boolean> => {
+    handleUrlLoadRef.current = async (url, signal) => {
         if (signal?.aborted) {
             return false;
         }
@@ -6143,16 +6186,7 @@ ${partsBodyXml}
         }
     };
 
-    const handleFileUpload = async (
-        file: File,
-        options?: {
-            preserveScoreId?: boolean;
-            scoreIdOverride?: string;
-            updateUrl?: boolean;
-            createInitialCheckpoint?: boolean;
-            telemetrySource?: string;
-        },
-    ): Promise<boolean> => {
+    handleFileUploadRef.current = async (file, options) => {
         clearScheduledBackgroundInit();
         clearInteractionPrime();
         setLoading(true);
@@ -6355,7 +6389,7 @@ ${partsBodyXml}
         telemetrySource: 'file_upload',
     });
 
-    const refreshPageCount = async (targetScore: Score, preferredPage: number = currentPageRef.current) => {
+    refreshPageCountRef.current = async (targetScore, preferredPage = currentPageRef.current) => {
         if (!targetScore?.npages) {
             setPageCount(1);
             setCurrentPage(0);
@@ -6463,7 +6497,7 @@ ${partsBodyXml}
         }
     };
 
-    const renderScore = async (currentScore: Score, pageIndex?: number, highlightSelection: boolean = true): Promise<boolean> => {
+    renderScoreRef.current = async (currentScore, pageIndex, highlightSelection = true) => {
         if (!currentScore || !containerRef.current) return false;
 
         try {
@@ -8284,10 +8318,7 @@ ${partsBodyXml}
         return prefetchPromise;
     }, [buildSoundFontCandidates]);
 
-    const ensureSoundFontLoaded = async (
-        targetScore?: Score,
-        options?: { forceRetry?: boolean },
-    ): Promise<boolean> => {
+    ensureSoundFontLoadedRef.current = async (targetScore, options) => {
         // scoreRef.current is updated synchronously the moment a newly loaded score
         // becomes "the" main score (see handleUrlLoad/handleFileUpload); the `score`
         // state closure can still be one render behind inside a deferred/background
@@ -13510,8 +13541,7 @@ ${partsBodyXml}
         return target.isContentEditable || tagName === 'input' || tagName === 'textarea' || tagName === 'select';
     };
 
-    useEffect(() => {
-        const onKeyDown = (event: KeyboardEvent) => {
+    keyboardShortcutHandlerRef.current = (event: KeyboardEvent) => {
             if (event.defaultPrevented || !score) {
                 return;
             }
@@ -13763,42 +13793,13 @@ ${partsBodyXml}
                     handleDeleteSelection();
                 }
             }
-        };
+    };
 
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => keyboardShortcutHandlerRef.current(event);
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
-    }, [
-        score,
-        compareView,
-        handleCompareKeyboardShortcut,
-        interactiveMutationEnabled,
-        selectedElement,
-        selectionBoxes.length,
-        handleAddPitchByStep,
-        handleEnterRest,
-        handleSetAccidental,
-        handleSetDurationType,
-        handleToggleDot,
-        handleAddSlur,
-        handleAddTie,
-        handleUndo,
-        handleRedo,
-        handlePitchUp,
-        handlePitchDown,
-        handleTranspose,
-        handleSelectNextChord,
-        handleSelectPrevChord,
-        handleExtendSelectionNextChord,
-        handleExtendSelectionPrevChord,
-        handleExtendSelectionNextMeasure,
-        handleExtendSelectionPrevMeasure,
-        handleExtendSelectionStaffAbove,
-        handleExtendSelectionStaffBelow,
-        handleDeleteSelection,
-        handleCopySelection,
-        handlePasteSelection,
-        handleSelectAll,
-    ]);
+    }, []);
 
     const handleSetTimeSignature = async (num: number, den: number, timeSigType?: number) => {
         if (!score || !score.setTimeSignature) return;
