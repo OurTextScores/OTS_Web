@@ -259,6 +259,10 @@ describe('ScoreEditor', () => {
     const insertPending = new Promise<boolean>((resolve) => {
       resolveInsert = resolve;
     });
+    let resolveNoteEntryDisable!: (value: boolean) => void;
+    const noteEntryDisablePending = new Promise<boolean>((resolve) => {
+      resolveNoteEntryDisable = resolve;
+    });
     const makeScore = (overrides: Record<string, unknown> = {}) => ({
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg width="100" height="40"></svg>'),
@@ -287,6 +291,9 @@ describe('ScoreEditor', () => {
     const mainScore: any = makeScore();
     const auxiliaryScore: any = makeScore({
       insertMeasures: vi.fn(() => insertPending),
+      setNoteEntryMode: vi.fn((enabled: boolean) => (
+        enabled ? Promise.resolve(true) : noteEntryDisablePending
+      )),
     });
     const webmscore: any = {
       ready: Promise.resolve(),
@@ -352,10 +359,102 @@ describe('ScoreEditor', () => {
     expect(auxiliaryScore.destroy).not.toHaveBeenCalled();
 
     resolveInsert(true);
+    await waitFor(() => expect(auxiliaryScore.setNoteEntryMode).toHaveBeenLastCalledWith(false));
+    expect(auxiliaryScore.destroy).not.toHaveBeenCalled();
+
+    resolveNoteEntryDisable(true);
     await waitFor(() => expect(auxiliaryScore.destroy).toHaveBeenCalledOnce());
-    expect(auxiliaryScore.setNoteEntryMode).toHaveBeenLastCalledWith(false);
     expect(auxiliaryScore.setNoteEntryMode.mock.invocationCallOrder.at(-1))
       .toBeLessThan(auxiliaryScore.destroy.mock.invocationCallOrder[0]);
+  });
+
+  it('ignores compare mutations before activation and routes shortcuts to the displayed score', async () => {
+    const user = userEvent.setup();
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list>
+  <part id="P1"><measure number="1"><note><rest/><duration>4</duration><type>whole</type></note></measure></part>
+</score-partwise>`;
+    const makeScore = () => ({
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg width="100" height="40"></svg>'),
+      saveXml: vi.fn(async () => new TextEncoder().encode(xml)),
+      setSoundFont: vi.fn(async () => {}),
+      setNoteEntryMode: vi.fn(async () => true),
+      metadata: vi.fn(async () => ({ parts: [{ name: 'Music' }] })),
+      measurePositions: vi.fn(async () => ({
+        elements: [{ id: 0, x: 0, y: 0, sx: 100, sy: 40, page: 0 }],
+        events: [],
+        pageSize: { width: 100, height: 40 },
+      })),
+      segmentPositions: vi.fn(async () => ({})),
+      npages: vi.fn(async () => 1),
+      relayout: vi.fn(async () => true),
+      selectAll: vi.fn(async () => true),
+      pitchUp: vi.fn(async () => true),
+      getSelectionBoundingBoxes: vi.fn(async () => [{
+        page: 0,
+        x: 12,
+        y: 8,
+        width: 18,
+        height: 14,
+      }]),
+    });
+    const mainScore = makeScore();
+    const auxiliaryScore = makeScore();
+    const webmscore = {
+      ready: Promise.resolve(),
+      load: vi.fn()
+        .mockResolvedValueOnce(mainScore)
+        .mockResolvedValueOnce(auxiliaryScore),
+    };
+
+    searchParamValues = {
+      compareLeft: '/left.musicxml',
+      compareRight: '/right.musicxml',
+    };
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/left.musicxml') || url.endsWith('/right.musicxml')) {
+        return {
+          ok: true,
+          text: async () => xml,
+          arrayBuffer: async () => new TextEncoder().encode(xml).buffer,
+        };
+      }
+      return {
+        ok: false,
+        text: async () => '',
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    }));
+
+    render(<ScoreEditor />);
+    await waitFor(() => expect(auxiliaryScore.saveSvg).toHaveBeenCalled());
+
+    fireEvent.keyDown(window, { key: 'a', ctrlKey: true });
+    fireEvent.keyDown(window, { key: 'ArrowUp' });
+    expect(auxiliaryScore.selectAll).not.toHaveBeenCalled();
+    expect(auxiliaryScore.pitchUp).not.toHaveBeenCalled();
+    expect(mainScore.selectAll).not.toHaveBeenCalled();
+    expect(mainScore.pitchUp).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId('btn-compare-activate-left'));
+    fireEvent.keyDown(window, { key: 'a', ctrlKey: true });
+    await waitFor(() => expect(auxiliaryScore.selectAll).toHaveBeenCalledOnce());
+    fireEvent.keyDown(window, { key: 'ArrowUp' });
+    await waitFor(() => expect(auxiliaryScore.pitchUp).toHaveBeenCalledOnce());
+    expect(mainScore.selectAll).not.toHaveBeenCalled();
+    expect(mainScore.pitchUp).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId('btn-compare-activate-right'));
+    fireEvent.keyDown(window, { key: 'a', ctrlKey: true });
+    await waitFor(() => expect(mainScore.selectAll).toHaveBeenCalledOnce());
+    fireEvent.keyDown(window, { key: 'ArrowUp' });
+    await waitFor(() => expect(mainScore.pitchUp).toHaveBeenCalledOnce());
+    expect(auxiliaryScore.selectAll).toHaveBeenCalledOnce();
+    expect(auxiliaryScore.pitchUp).toHaveBeenCalledOnce();
   });
 
   it('detects .mxl uploads and loads them with mxl format', async () => {
