@@ -2,6 +2,29 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+type TestMock = ReturnType<typeof vi.fn>;
+
+type ScoreEditorTestGlobals = {
+  alert: unknown;
+  fetch: unknown;
+  URL: {
+    createObjectURL: unknown;
+    revokeObjectURL: unknown;
+  };
+  Audio: unknown;
+  AudioContext: unknown;
+};
+
+const testGlobals = globalThis as unknown as ScoreEditorTestGlobals;
+const originalTestGlobals = {
+  alert: testGlobals.alert,
+  fetch: testGlobals.fetch,
+  createObjectURL: testGlobals.URL.createObjectURL,
+  revokeObjectURL: testGlobals.URL.revokeObjectURL,
+  Audio: testGlobals.Audio,
+  AudioContext: testGlobals.AudioContext,
+};
+
 const mocked = vi.hoisted(() => ({
   loadWebMscore: vi.fn(),
   loadWebMscoreInProcess: vi.fn(),
@@ -164,7 +187,7 @@ describe('ScoreEditor', () => {
     ),
   };
 
-  const boundingRect = {
+  const boundingRect: DOMRect = {
     x: 0,
     y: 0,
     width: 100,
@@ -190,19 +213,25 @@ describe('ScoreEditor', () => {
     mocked.loadWebMscoreInProcess.mockImplementation(() => mocked.loadWebMscore());
     mockedNavigation.useSearchParams.mockReturnValue(searchParams);
 
-    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(boundingRect as any);
-    (globalThis as any).alert = vi.fn();
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(boundingRect);
+    testGlobals.alert = vi.fn();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    testGlobals.alert = originalTestGlobals.alert;
+    testGlobals.fetch = originalTestGlobals.fetch;
+    testGlobals.URL.createObjectURL = originalTestGlobals.createObjectURL;
+    testGlobals.URL.revokeObjectURL = originalTestGlobals.revokeObjectURL;
+    testGlobals.Audio = originalTestGlobals.Audio;
+    testGlobals.AudioContext = originalTestGlobals.AudioContext;
     suppressConsole();
   });
 
   it('loads a score from file upload, supports selection, and applies clef', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
       savePdf: vi.fn(async () => new Uint8Array([1])),
@@ -215,13 +244,13 @@ describe('ScoreEditor', () => {
       relayout: vi.fn(async () => true),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -263,7 +292,7 @@ describe('ScoreEditor', () => {
     const noteEntryDisablePending = new Promise<boolean>((resolve) => {
       resolveNoteEntryDisable = resolve;
     });
-    const makeScore = (overrides: Record<string, unknown> = {}) => ({
+    const makeScore = () => ({
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg width="100" height="40"></svg>'),
       saveXml: vi.fn(async () => new TextEncoder().encode(xml)),
@@ -286,16 +315,16 @@ describe('ScoreEditor', () => {
         width: 18,
         height: 14,
       }]),
-      ...overrides,
     });
-    const mainScore: any = makeScore();
-    const auxiliaryScore: any = makeScore({
+    const mainScore = makeScore();
+    const auxiliaryScore = {
+      ...makeScore(),
       insertMeasures: vi.fn(() => insertPending),
       setNoteEntryMode: vi.fn((enabled: boolean) => (
         enabled ? Promise.resolve(true) : noteEntryDisablePending
       )),
-    });
-    const webmscore: any = {
+    };
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn()
         .mockResolvedValueOnce(mainScore)
@@ -307,7 +336,7 @@ describe('ScoreEditor', () => {
       compareRight: '/right.musicxml',
     };
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async (input: RequestInfo | URL) => {
+    testGlobals.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith('/left.musicxml') || url.endsWith('/right.musicxml')) {
         return {
@@ -543,7 +572,7 @@ describe('ScoreEditor', () => {
     const user = userEvent.setup();
     const largeData = new Uint8Array((2 * 1024 * 1024) + 8);
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg></svg>'),
       savePdf: vi.fn(async () => new Uint8Array([1])),
@@ -554,13 +583,13 @@ describe('ScoreEditor', () => {
       npages: vi.fn(async () => 1),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -579,7 +608,7 @@ describe('ScoreEditor', () => {
   it('detects .mscz uploads and starts with deferred load', async () => {
     const user = userEvent.setup();
     const largeData = new Uint8Array((2 * 1024 * 1024) + 256);
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg></svg>'),
       savePdf: vi.fn(async () => new Uint8Array([1])),
@@ -589,13 +618,13 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
       npages: vi.fn(async () => 1),
     };
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -616,7 +645,7 @@ describe('ScoreEditor', () => {
     const largeData = new Uint8Array((2 * 1024 * 1024) + 8);
     let pages = 1;
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async (pageIndex?: number) => `<svg><text>page-${pageIndex ?? 0}</text></svg>`),
       savePdf: vi.fn(async () => new Uint8Array([1])),
@@ -639,13 +668,13 @@ describe('ScoreEditor', () => {
       npages: vi.fn(async () => pages),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -675,7 +704,7 @@ describe('ScoreEditor', () => {
   it('alerts when score load fails', async () => {
     const user = userEvent.setup();
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => {
         throw new Error('boom');
@@ -683,7 +712,7 @@ describe('ScoreEditor', () => {
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -694,14 +723,14 @@ describe('ScoreEditor', () => {
     await user.upload(screen.getByTestId('open-score-input'), file);
 
     await waitFor(() =>
-      expect((globalThis as any).alert).toHaveBeenCalledWith('Failed to load score. See console for details.'),
+      expect(testGlobals.alert).toHaveBeenCalledWith('Failed to load score. See console for details.'),
     );
   });
 
   it('loads default soundfont and enables WAV export when audio is available', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
       savePdf: vi.fn(async () => new Uint8Array([1])),
@@ -712,13 +741,13 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: true,
       arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
     }));
@@ -736,7 +765,7 @@ describe('ScoreEditor', () => {
   it('invokes mutation and export handlers from the toolbar', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
       savePdf: vi.fn(async () => new Uint8Array([1])),
@@ -757,19 +786,19 @@ describe('ScoreEditor', () => {
       setKeySignature: vi.fn(async () => true),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
 
-    (globalThis as any).URL.createObjectURL = vi.fn(() => 'blob:mock');
-    (globalThis as any).URL.revokeObjectURL = vi.fn();
+    testGlobals.URL.createObjectURL = vi.fn(() => 'blob:mock');
+    testGlobals.URL.revokeObjectURL = vi.fn();
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
     render(<ScoreEditor />);
@@ -813,24 +842,24 @@ describe('ScoreEditor', () => {
     await user.click(screen.getByTestId('dropdown-export'));
     await user.click(await screen.findByTestId('btn-export-svg'));
     await waitFor(() => expect(score.saveSvg).toHaveBeenCalled());
-    await waitFor(() => expect((globalThis as any).URL.createObjectURL).toHaveBeenCalled());
+    await waitFor(() => expect(testGlobals.URL.createObjectURL).toHaveBeenCalled());
   }, 15000);
 
   it('auto-loads a score from the URL query param', async () => {
     scoreParamValue = '/test_scores/demo.musicxml';
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg></svg>'),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async (url: string) => {
+    testGlobals.fetch = vi.fn(async (url: string) => {
       expect(url).toBe('/test_scores/demo.musicxml');
       return {
         ok: true,
@@ -848,7 +877,7 @@ describe('ScoreEditor', () => {
   it('adds tempo text at the start of the score without requiring a selection', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
       relayout: vi.fn(async () => true),
@@ -858,13 +887,13 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -906,7 +935,7 @@ describe('ScoreEditor', () => {
   it('exports PDF/PNG/MXL/MSCZ/MSCX/MusicXML/ABC/MIDI via Score methods', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
       savePdf: vi.fn(async () => new Uint8Array([1])),
@@ -920,14 +949,18 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async (input: any) => {
-      const url = typeof input === 'string' ? input : String(input?.url ?? '');
+    testGlobals.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
       if (url.includes('/api/music/convert')) {
         return {
           ok: true,
@@ -944,8 +977,8 @@ describe('ScoreEditor', () => {
       };
     });
 
-    (globalThis as any).URL.createObjectURL = vi.fn(() => 'blob:mock');
-    (globalThis as any).URL.revokeObjectURL = vi.fn();
+    testGlobals.URL.createObjectURL = vi.fn(() => 'blob:mock');
+    testGlobals.URL.revokeObjectURL = vi.fn();
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
     render(<ScoreEditor />);
@@ -981,8 +1014,8 @@ describe('ScoreEditor', () => {
     await waitFor(() => expect(score.saveMsc).toHaveBeenCalledWith('mscx'));
     await waitFor(() => expect(score.saveXml).toHaveBeenCalled());
     await waitFor(() => expect(score.saveMidi).toHaveBeenCalledWith(true, true));
-    await waitFor(() => expect((globalThis as any).URL.createObjectURL).toHaveBeenCalled());
-    await waitFor(() => expect((globalThis as any).fetch).toHaveBeenCalledWith(
+    await waitFor(() => expect(testGlobals.URL.createObjectURL).toHaveBeenCalled());
+    await waitFor(() => expect(testGlobals.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/music/convert'),
       expect.any(Object),
     ));
@@ -991,7 +1024,7 @@ describe('ScoreEditor', () => {
   it('supports note respelling keyboard shortcuts', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
       relayout: vi.fn(async () => true),
@@ -1007,13 +1040,13 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -1058,7 +1091,7 @@ describe('ScoreEditor', () => {
   it('shows and advances the engine note-input cursor without a prior UI selection', async () => {
     const user = userEvent.setup();
     let cursorX = 14;
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg width="200" height="100"><g class="Rest selected"></g></svg>'),
       setNoteEntryMode: vi.fn(async () => true),
@@ -1084,7 +1117,7 @@ describe('ScoreEditor', () => {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     });
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -1118,7 +1151,7 @@ describe('ScoreEditor', () => {
     const user = userEvent.setup();
 
     let selectedIndex: number | null = null;
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => {
         const firstSelected = selectedIndex === 0 ? ' selected' : '';
@@ -1142,7 +1175,7 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
@@ -1154,20 +1187,20 @@ describe('ScoreEditor', () => {
           ...boundingRect,
           left: 120,
           right: 220,
-        } as any;
+        } as DOMRect;
       }
       if (classes.includes('note-1')) {
         return {
           ...boundingRect,
           left: 0,
           right: 100,
-        } as any;
+        } as DOMRect;
       }
-      return boundingRect as any;
+      return boundingRect;
     });
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -1197,7 +1230,7 @@ describe('ScoreEditor', () => {
   it('alerts when optional export bindings are missing', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg></svg>'),
       savePdf: vi.fn(async () => new Uint8Array([1])),
@@ -1206,13 +1239,13 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -1226,27 +1259,27 @@ describe('ScoreEditor', () => {
 
     await user.click(screen.getByTestId('dropdown-export'));
     await user.click(await screen.findByTestId('btn-export-mxl'));
-    expect((globalThis as any).alert).toHaveBeenCalledWith('MXL export is not available in this build.');
+    expect(testGlobals.alert).toHaveBeenCalledWith('MXL export is not available in this build.');
 
     await user.click(screen.getByTestId('dropdown-export'));
     await user.click(await screen.findByTestId('btn-export-mscz'));
-    expect((globalThis as any).alert).toHaveBeenCalledWith('MSCZ export is not available in this build.');
+    expect(testGlobals.alert).toHaveBeenCalledWith('MSCZ export is not available in this build.');
 
     await user.click(screen.getByTestId('dropdown-export'));
     await user.click(await screen.findByTestId('btn-export-mscx'));
-    expect((globalThis as any).alert).toHaveBeenCalledWith('MSCX export is not available in this build.');
+    expect(testGlobals.alert).toHaveBeenCalledWith('MSCX export is not available in this build.');
 
     await user.click(screen.getByTestId('dropdown-export'));
     await user.click(await screen.findByTestId('btn-export-musicxml'));
-    expect((globalThis as any).alert).toHaveBeenCalledWith('MusicXML export is not available in this build.');
+    expect(testGlobals.alert).toHaveBeenCalledWith('MusicXML export is not available in this build.');
 
     await user.click(screen.getByTestId('dropdown-export'));
     await user.click(await screen.findByTestId('btn-export-abc'));
-    expect((globalThis as any).alert).toHaveBeenCalledWith('ABC export is not available in this build.');
+    expect(testGlobals.alert).toHaveBeenCalledWith('ABC export is not available in this build.');
 
     await user.click(screen.getByTestId('dropdown-export'));
     await user.click(await screen.findByTestId('btn-export-midi'));
-    expect((globalThis as any).alert).toHaveBeenCalledWith('MIDI export is not available in this build.');
+    expect(testGlobals.alert).toHaveBeenCalledWith('MIDI export is not available in this build.');
   });
 
   it.skip('plays audio from WAV once and replays from cached URL', async () => {
@@ -1260,7 +1293,7 @@ describe('ScoreEditor', () => {
         }),
     );
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg></svg>'),
       saveAudio,
@@ -1270,21 +1303,21 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: true,
       arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
     }));
 
-    (globalThis as any).URL.createObjectURL = vi.fn(() => 'blob:audio');
-    (globalThis as any).URL.revokeObjectURL = vi.fn();
+    testGlobals.URL.createObjectURL = vi.fn(() => 'blob:audio');
+    testGlobals.URL.revokeObjectURL = vi.fn();
 
-    const createdAudios: any[] = [];
+    const createdAudios: MockAudio[] = [];
     class MockAudio {
       src = '';
       currentTime = 0;
@@ -1297,7 +1330,7 @@ describe('ScoreEditor', () => {
         createdAudios.push(this);
       }
     }
-    (globalThis as any).Audio = MockAudio;
+    testGlobals.Audio = MockAudio;
 
     render(<ScoreEditor />);
 
@@ -1319,11 +1352,11 @@ describe('ScoreEditor', () => {
     await user.click(screen.getByTestId('btn-play'));
     await waitFor(() => expect(screen.getByTestId('btn-play')).toHaveTextContent('Replay'));
     expect(saveAudio).toHaveBeenCalledTimes(1);
-    expect((globalThis as any).URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(testGlobals.URL.createObjectURL).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByTestId('btn-stop'));
     await waitFor(() => expect(screen.getByTestId('btn-play')).toHaveTextContent('Play'));
-    expect(createdAudios.at(-1).pause).toHaveBeenCalled();
+    expect(createdAudios.at(-1)?.pause).toHaveBeenCalled();
   });
 
   it.skip('streams playback when synthAudioBatch is available and cancels on stop', async () => {
@@ -1346,7 +1379,7 @@ describe('ScoreEditor', () => {
       ];
     });
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg></svg>'),
       saveAudio: vi.fn(async () => new Uint8Array([0])),
@@ -1357,31 +1390,35 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: true,
       arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
     }));
 
-    const createdSources: any[] = [];
-    let lastAudioCtx: any | null = null;
+    type MockAudioSource = {
+      buffer: AudioBuffer | null;
+      connect: TestMock;
+      start: TestMock;
+      stop: TestMock;
+      onended: (() => void) | null;
+    };
+    const createdSources: MockAudioSource[] = [];
+    const resumeAudioContext = vi.fn(async () => {});
     class MockAudioContext {
       state: 'running' | 'suspended' = 'suspended';
       currentTime = 0;
       sampleRate = 44100;
       destination = {};
 
-      constructor(_opts?: any) {
-        lastAudioCtx = this;
-      }
-
       resume = vi.fn(async () => {
         this.state = 'running';
+        await resumeAudioContext();
       });
 
       createBuffer = vi.fn(() => ({
@@ -1390,18 +1427,18 @@ describe('ScoreEditor', () => {
 
       createBufferSource = vi.fn(() => {
         const source = {
-          buffer: null as any,
+          buffer: null,
           connect: vi.fn(),
           start: vi.fn(),
           stop: vi.fn(),
-          onended: null as any,
+          onended: null,
         };
-        createdSources.push(source);
+        createdSources.push(source as MockAudioSource);
         return source;
       });
     }
 
-    (globalThis as any).AudioContext = MockAudioContext;
+    testGlobals.AudioContext = MockAudioContext;
 
     render(<ScoreEditor />);
 
@@ -1416,7 +1453,7 @@ describe('ScoreEditor', () => {
 
     expect(score.synthAudioBatch).toHaveBeenCalled();
     expect(score.saveAudio).not.toHaveBeenCalled();
-    expect(lastAudioCtx?.resume).toHaveBeenCalled();
+    expect(resumeAudioContext).toHaveBeenCalled();
     expect(createdSources.length).toBeGreaterThan(0);
 
     await user.click(screen.getByTestId('btn-stop'));
@@ -1441,25 +1478,28 @@ describe('ScoreEditor', () => {
       ];
     });
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
       saveAudio: vi.fn(async () => new Uint8Array([0])),
       setSoundFont: vi.fn(async () => {}),
-      synthAudioBatchFromSelection: vi.fn(async () => fromSelectionBatchFn),
+      synthAudioBatchFromSelection: vi.fn(async (startTick?: number) => {
+        void startTick;
+        return fromSelectionBatchFn;
+      }),
       selectElementAtPoint: vi.fn(async () => true),
       metadata: vi.fn(async () => ({})),
       measurePositions: vi.fn(async () => ({})),
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: true,
       arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
     }));
@@ -1476,14 +1516,14 @@ describe('ScoreEditor', () => {
         copyToChannel: vi.fn(),
       }));
       createBufferSource = vi.fn(() => ({
-        buffer: null as any,
+        buffer: null,
         connect: vi.fn(),
         start: vi.fn(),
         stop: vi.fn(),
-        onended: null as any,
+        onended: null,
       }));
     }
-    (globalThis as any).AudioContext = MockAudioContext;
+    testGlobals.AudioContext = MockAudioContext;
 
     render(<ScoreEditor />);
 
@@ -1519,7 +1559,7 @@ describe('ScoreEditor', () => {
       ];
     });
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
       saveAudio: vi.fn(async () => new Uint8Array([0])),
@@ -1533,13 +1573,13 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: true,
       arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
     }));
@@ -1556,14 +1596,14 @@ describe('ScoreEditor', () => {
         copyToChannel: vi.fn(),
       }));
       createBufferSource = vi.fn(() => ({
-        buffer: null as any,
+        buffer: null,
         connect: vi.fn(),
         start: vi.fn(),
         stop: vi.fn(),
-        onended: null as any,
+        onended: null,
       }));
     }
-    (globalThis as any).AudioContext = MockAudioContext;
+    testGlobals.AudioContext = MockAudioContext;
 
     render(<ScoreEditor />);
 
@@ -1586,7 +1626,7 @@ describe('ScoreEditor', () => {
   it('extracts page index from SVG ancestry and clears selection on invalid boxes', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g id="page-2"><g class="Note"><path id="inner"/></g></g></svg>'),
       selectElementAtPoint: vi.fn(async () => true),
@@ -1595,13 +1635,13 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -1627,7 +1667,7 @@ describe('ScoreEditor', () => {
       height: 0,
       right: 0,
       bottom: 0,
-    } as any);
+    } as DOMRect);
 
     fireEvent.click(inner!);
     await waitFor(() => expect(screen.queryByTestId('selection-overlay')).not.toBeInTheDocument());
@@ -1636,7 +1676,7 @@ describe('ScoreEditor', () => {
   it.skip('clears selection when clicking blank space and allows re-selecting notes', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
       selectElementAtPoint: vi.fn(async () => true),
@@ -1645,13 +1685,13 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -1685,7 +1725,7 @@ describe('ScoreEditor', () => {
   it('refreshes selection overlay after mutation using SVG selection classes', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi
         .fn()
@@ -1699,7 +1739,7 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
@@ -1715,13 +1755,13 @@ describe('ScoreEditor', () => {
           bottom: 90,
           width: 50,
           height: 60,
-        } as any;
+        } as DOMRect;
       }
-      return boundingRect as any;
+      return boundingRect;
     });
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -1748,7 +1788,7 @@ describe('ScoreEditor', () => {
   it('alerts when a mutation binding is missing', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
       selectElementAtPoint: vi.fn(async () => true),
@@ -1758,13 +1798,13 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -1783,13 +1823,13 @@ describe('ScoreEditor', () => {
 
     await user.click(screen.getByTestId('dropdown-rhythm'));
     await user.click(await screen.findByTestId('btn-double-dot'));
-    expect((globalThis as any).alert).toHaveBeenCalledWith('This build of webmscore does not expose "toggleDoubleDot".');
+    expect(testGlobals.alert).toHaveBeenCalledWith('This build of webmscore does not expose "toggleDoubleDot".');
   });
 
   it('clears selection on delete even when the binding is missing', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg><g class="Note"></g></svg>'),
       selectElementAtPoint: vi.fn(async () => true),
@@ -1799,13 +1839,13 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       ready: Promise.resolve(),
       load: vi.fn(async () => score),
     };
 
     mocked.loadWebMscore.mockResolvedValue(webmscore);
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobals.fetch = vi.fn(async () => ({
       ok: false,
       arrayBuffer: async () => new ArrayBuffer(0),
     }));
@@ -1824,13 +1864,13 @@ describe('ScoreEditor', () => {
 
     await user.click(screen.getByTestId('btn-delete'));
     await waitFor(() => expect(screen.queryByTestId('selection-overlay')).not.toBeInTheDocument());
-    expect((globalThis as any).alert).toHaveBeenCalledWith('This build of webmscore does not expose "deleteSelection".');
+    expect(testGlobals.alert).toHaveBeenCalledWith('This build of webmscore does not expose "deleteSelection".');
   });
 
   it('new score dialog shows pickup checkbox and reveals inputs when checked', async () => {
     const user = userEvent.setup();
 
-    const score: any = {
+    const score = {
       destroy: vi.fn(),
       saveSvg: vi.fn(async () => '<svg></svg>'),
       savePdf: vi.fn(async () => new Uint8Array([1])),
@@ -1840,7 +1880,7 @@ describe('ScoreEditor', () => {
       segmentPositions: vi.fn(async () => ({})),
     };
 
-    const webmscore: any = {
+    const webmscore = {
       load: vi.fn(async () => score),
       ready: Promise.resolve(),
     };
