@@ -131,6 +131,7 @@ import {
 import { type AiScoreBridge } from './score-editor/ai-score-bridge';
 import { useLatestCallbackFacade } from '@/lib/use-latest-callback-facade';
 import { useCompareOperationCoordinator } from './score-editor/compare/useCompareOperationCoordinator';
+import { useCompareTransport } from './score-editor/compare/useCompareTransport';
 import {
     buildCompareUserEditDiff,
     type CompareScoreRole,
@@ -1798,25 +1799,6 @@ export default function ScoreEditor() {
     const previewAudioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
     const previewStreamIteratorRef = useRef<SynthBatchIterator | null>(null);
     const previewPlaybackGenerationRef = useRef(0);
-    // Independent transport for each AI-review/change-review compare panel. These are
-    // deliberately separate from the main transport above (and from each other): the
-    // panel's Score instance is whichever of `score` / `compareRightScore` is currently
-    // displayed on that visual side, and either side can be the live document or an
-    // auxiliary working score depending on the mode's initial orientation. Starting one side stops the
-    // other (and the main transport) so only one voice ever plays -- see
-    // `playCompareSideAudio`.
-    const [compareLeftIsPlaying, setCompareLeftIsPlaying] = useState(false);
-    const [compareLeftIsPaused, setCompareLeftIsPaused] = useState(false);
-    const [compareLeftAudioBusy, setCompareLeftAudioBusy] = useState(false);
-    const compareLeftAudioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-    const compareLeftStreamIteratorRef = useRef<SynthBatchIterator | null>(null);
-    const compareLeftPlaybackGenerationRef = useRef(0);
-    const [compareRightIsPlaying, setCompareRightIsPlaying] = useState(false);
-    const [compareRightIsPaused, setCompareRightIsPaused] = useState(false);
-    const [compareRightAudioBusy, setCompareRightAudioBusy] = useState(false);
-    const compareRightAudioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-    const compareRightStreamIteratorRef = useRef<SynthBatchIterator | null>(null);
-    const compareRightPlaybackGenerationRef = useRef(0);
     const clipboardRef = useRef<{ mimeType: string; data: Uint8Array } | null>(null);
     const currentPageRef = useRef(currentPage);
     const selectedPointRef = useRef<{ page: number, x: number, y: number } | null>(selectedPoint);
@@ -9198,29 +9180,6 @@ ${partsBodyXml}
         };
     }, [invalidateCompareOperations, queueCompareScoreTeardown, stopCompareSideAudio]);
 
-    // compareLeftScore/compareRightScoreDisplay resolve to whichever of `score` /
-    // compareRightScore is currently shown on that visual side, and that mapping can
-    // change without the modal closing -- e.g. an Apply/Overwrite action replaces the
-    // live `score` instance while the compare view stays open, or compareSwapped
-    // flips which raw Score each side shows. A side's transport streams from a
-    // specific Score instance via its own iterator/refs (see getCompareSideRefs), so
-    // if the identity changes out from under it, that stream would keep pulling from
-    // a stale (possibly destroyed) instance instead of the one now displayed. Stop
-    // playback on a side whenever its displayed Score instance changes.
-    const prevCompareLeftScoreRef = useRef<Score | null>(null);
-    useEffect(() => {
-        if (prevCompareLeftScoreRef.current && prevCompareLeftScoreRef.current !== compareLeftScore) {
-            void stopCompareSideAudio('left');
-        }
-        prevCompareLeftScoreRef.current = compareLeftScore;
-    }, [compareLeftScore, stopCompareSideAudio]);
-    const prevCompareRightScoreRef = useRef<Score | null>(null);
-    useEffect(() => {
-        if (prevCompareRightScoreRef.current && prevCompareRightScoreRef.current !== compareRightScoreDisplay) {
-            void stopCompareSideAudio('right');
-        }
-        prevCompareRightScoreRef.current = compareRightScoreDisplay;
-    }, [compareRightScoreDisplay, stopCompareSideAudio]);
     const prevCompareLiveSelectionScoreRef = useRef<Score | null>(null);
     useEffect(() => {
         if (
@@ -14560,136 +14519,47 @@ ${partsBodyXml}
         }
     };
 
-    const getCompareSideRefs = (side: 'left' | 'right') => (side === 'left' ? {
-        score: compareLeftScore,
+    const compareTransport = useCompareTransport({
+        scores: {
+            left: compareLeftScore,
+            right: compareRightScoreDisplay,
+        },
+        audioContextRef: audioCtxRef,
+        batchSize: TRANSPORT_SYNTH_BATCH_SIZE,
+        ensureSoundFontLoaded: (targetScore, options) => ensureSoundFontLoaded(targetScore, options),
+        stopMainAudio: () => stopAudio({ awaitCancel: true }),
+        stopStream: stopSynthStream,
+        playStream: (iterator, target) => playSynthBatchStream(iterator, {
+            sourcesRef: target.sourcesRef,
+            iteratorRef: target.iteratorRef,
+            generationRef: target.generationRef,
+            trackTransportState: true,
+            stateSetters: {
+                setIsPlaying: target.setIsPlaying,
+                setIsPaused: target.setIsPaused,
+            },
+            debugLabel: target.debugLabel,
+            renderWindow: DEFAULT_RENDER_WINDOW,
+        }),
+        reportUnavailable: () => alert('Audio playback is not available for this score.'),
+        reportMissingSoundFont: () => alert('No default soundfont found. Configure NEXT_PUBLIC_SOUNDFONT_CDN_URL or provide /public/soundfonts/default.sf3 (or .sf2).'),
+        reportPlaybackError: (side, error) => {
+            console.error(`Failed to play ${side} compare audio`, error);
+            alert('Unable to play audio. See console for details.');
+        },
+    });
+    const {
         isPlaying: compareLeftIsPlaying,
         isPaused: compareLeftIsPaused,
-        setIsPlaying: setCompareLeftIsPlaying,
-        setIsPaused: setCompareLeftIsPaused,
-        setAudioBusy: setCompareLeftAudioBusy,
-        sourcesRef: compareLeftAudioSourcesRef,
-        iteratorRef: compareLeftStreamIteratorRef,
-        generationRef: compareLeftPlaybackGenerationRef,
-    } : {
-        score: compareRightScoreDisplay,
+        isBusy: compareLeftAudioBusy,
+    } = compareTransport.left;
+    const {
         isPlaying: compareRightIsPlaying,
         isPaused: compareRightIsPaused,
-        setIsPlaying: setCompareRightIsPlaying,
-        setIsPaused: setCompareRightIsPaused,
-        setAudioBusy: setCompareRightAudioBusy,
-        sourcesRef: compareRightAudioSourcesRef,
-        iteratorRef: compareRightStreamIteratorRef,
-        generationRef: compareRightPlaybackGenerationRef,
-    });
-
-    stopCompareSideAudioRef.current = async (side, options) => {
-        const refs = getCompareSideRefs(side);
-        refs.generationRef.current += 1;
-        await stopSynthStream(refs.sourcesRef, refs.iteratorRef, options);
-        refs.setIsPlaying(false);
-        refs.setIsPaused(false);
-    };
-
-    /**
-     * Only one of {main transport, compare-left, compare-right} should ever be
-     * audible at once -- otherwise playing a panel while the main score (or the
-     * other panel) is already sounding would overlay two performances. Called
-     * before starting playback on any one of them.
-     */
-    const stopOtherTransports = async (except: 'main' | 'left' | 'right') => {
-        if (except !== 'main') {
-            await stopAudio({ awaitCancel: true });
-        }
-        if (except !== 'left') {
-            await stopCompareSideAudio('left', { awaitCancel: true });
-        }
-        if (except !== 'right') {
-            await stopCompareSideAudio('right', { awaitCancel: true });
-        }
-    };
-
-    const pauseCompareSideAudio = async (side: 'left' | 'right') => {
-        const audioCtx = audioCtxRef.current;
-        if (audioCtx && audioCtx.state === 'running') {
-            await audioCtx.suspend();
-        }
-        getCompareSideRefs(side).setIsPaused(true);
-    };
-
-    const resumeCompareSideAudio = async (side: 'left' | 'right') => {
-        const audioCtx = audioCtxRef.current;
-        if (audioCtx && audioCtx.state === 'suspended') {
-            await audioCtx.resume();
-        }
-        getCompareSideRefs(side).setIsPaused(false);
-    };
-
-    const playCompareSideAudio = async (side: 'left' | 'right') => {
-        const refs = getCompareSideRefs(side);
-        const targetScore = refs.score;
-        if (!targetScore?.synthAudioBatch) {
-            alert('Audio playback is not available for this score.');
-            return;
-        }
-        // Claim this attempt before the async setup below (soundfont load, fetching
-        // the batch iterator) so a stop/close/side-switch that happens while we're
-        // still awaiting is detected before any audio starts. Without this,
-        // stopCompareSideAudio's generation bump has nothing to invalidate yet --
-        // playSynthBatchStream only increments the counter once *it* starts, which
-        // would silently adopt it as the new "current" generation and start playing
-        // audio for a side the user already closed or switched away from.
-        const myGeneration = ++refs.generationRef.current;
-        const stillCurrent = () => refs.generationRef.current === myGeneration;
-        try {
-            refs.setAudioBusy(true);
-            const ok = await ensureSoundFontLoaded(targetScore, { forceRetry: true });
-            if (!stillCurrent()) {
-                return;
-            }
-            if (!ok) {
-                alert('No default soundfont found. Configure NEXT_PUBLIC_SOUNDFONT_CDN_URL or provide /public/soundfonts/default.sf3 (or .sf2).');
-                return;
-            }
-            await stopOtherTransports(side);
-            if (!stillCurrent()) {
-                return;
-            }
-            const batchFn = await targetScore.synthAudioBatch(0, TRANSPORT_SYNTH_BATCH_SIZE) as SynthBatchIterator;
-            if (!stillCurrent()) {
-                return;
-            }
-            await playSynthBatchStream(batchFn, {
-                sourcesRef: refs.sourcesRef,
-                iteratorRef: refs.iteratorRef,
-                generationRef: refs.generationRef,
-                trackTransportState: true,
-                stateSetters: { setIsPlaying: refs.setIsPlaying, setIsPaused: refs.setIsPaused },
-                debugLabel: `compare-${side}`,
-                renderWindow: DEFAULT_RENDER_WINDOW,
-            });
-        } catch (err) {
-            console.error(`Failed to play ${side} compare audio`, err);
-            if (stillCurrent()) {
-                alert('Unable to play audio. See console for details.');
-                await stopCompareSideAudio(side, { awaitCancel: true });
-            }
-        } finally {
-            refs.setAudioBusy(false);
-        }
-    };
-
-    const toggleCompareSidePlayPause = async (side: 'left' | 'right') => {
-        const refs = getCompareSideRefs(side);
-        if (refs.isPlaying && !refs.isPaused) {
-            await pauseCompareSideAudio(side);
-            return;
-        }
-        if (refs.isPaused) {
-            await resumeCompareSideAudio(side);
-            return;
-        }
-        await playCompareSideAudio(side);
-    };
+        isBusy: compareRightAudioBusy,
+    } = compareTransport.right;
+    const toggleCompareSidePlayPause = compareTransport.toggleSidePlayPause;
+    stopCompareSideAudioRef.current = compareTransport.stopSideAudio;
 
     const playSelectionPreview = async (
         trigger: string = 'unknown',
