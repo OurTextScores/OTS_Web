@@ -135,6 +135,7 @@ import { useCompareTransport } from './score-editor/compare/useCompareTransport'
 import {
     routeCompareKeyboardShortcut,
     useCompareEditing,
+    useCompareMutationController,
     type CompareInputStateMethod,
     type CompareKeyboardMutationMethod,
 } from './score-editor/compare/useCompareEditing';
@@ -6811,128 +6812,37 @@ ${partsBodyXml}
         setAiProposalApplyError,
     ]);
 
-    const performCompareMutation = useCallback(async (
-        label: string,
-        action: (targetScore: Score) => Promise<unknown> | unknown,
-        options?: {
-            side?: 'left' | 'right';
-            skipRelayout?: boolean;
-            preserveKeyboardQueue?: boolean;
-        },
-    ) => {
-        const side = options?.side ?? compareActiveSide;
-        const targetScore = side === 'left'
-            ? compareLeftScore
-            : side === 'right'
-                ? compareRightScoreDisplay
-                : null;
-        if (
-            !compareView
-            || !side
-            || !targetScore
-            || isCompareEditBusy()
-            || compareSwapBusy
-            || aiDiffFeedbackBusy
-        ) {
-            return false;
-        }
-        // Supersede stale work from the preceding edit without cancelling later
-        // keypresses that are already serialized in the same keyboard input run.
-        const generation = invalidateCompareOperations(!options?.preserveKeyboardQueue);
-        const isCurrentGeneration = () => isCompareGenerationCurrent(generation);
-        setCompareActiveSide(side);
-        beginCompareEdit();
-        const operation = trackCompareOperation((async () => {
-            const role = getCompareScoreRole(targetScore);
-            const fallbackXml = role === 'current' ? compareView.currentXml : compareView.checkpointXml;
-            const beforeXml = await getScoreMusicXmlText(targetScore, fallbackXml);
-            if (!isCurrentGeneration()) {
-                return false;
-            }
-            if (!beforeXml) {
-                throw new Error('Unable to snapshot the compare score before editing.');
-            }
-            const result = await runSerializedScoreOperation(
-                () => Promise.resolve(action(targetScore)),
-                `compare-edit:${label}`,
-            );
-            if (!isCurrentGeneration() || result === false) {
-                return false;
-            }
-            if (!options?.skipRelayout && targetScore.relayout) {
-                await runSerializedScoreOperation(
-                    () => Promise.resolve(targetScore.relayout!()),
-                    `compare-relayout:${label}`,
-                );
-                if (!isCurrentGeneration()) {
-                    return false;
-                }
-            }
-            if (targetScore === score) {
-                await refreshPageCount(targetScore, currentPageRef.current);
-            } else if (targetScore.npages) {
-                const pages = await runSerializedScoreOperation(
-                    () => Promise.resolve(targetScore.npages!()),
-                    'npages(compare-edit)',
-                );
-                if (!isCurrentGeneration()) {
-                    return false;
-                }
-                setCompareRightPageCount(Math.max(1, pages));
-            }
-            const persistedXml = await persistCompareScoreEdit(
-                targetScore,
-                side,
-                beforeXml,
-                isCurrentGeneration,
-            );
-            if (!persistedXml || !isCurrentGeneration()) {
-                return false;
-            }
-            if (isCompareNoteInputCommitted(role)) {
-                await refreshCompareNoteInputCursor(
-                    targetScore,
-                    role,
-                    side,
-                    isCurrentGeneration,
-                );
-            }
-            return isCurrentGeneration();
-        })());
-        try {
-            return await operation;
-        } catch (err) {
-            if (!isCurrentGeneration()) {
-                return false;
-            }
-            console.error(`Compare mutation "${label}" failed:`, err);
-            alert(`Unable to ${label} in the compare score. Check the console for details.`);
-            return false;
-        } finally {
-            endCompareEdit();
-        }
-    }, [
-        aiDiffFeedbackBusy,
-        beginCompareEdit,
-        compareActiveSide,
-        compareLeftScore,
-        compareRightScoreDisplay,
-        compareSwapBusy,
-        compareView,
-        getCompareScoreRole,
-        getScoreMusicXmlText,
-        invalidateCompareOperations,
-        isCompareEditBusy,
-        isCompareGenerationCurrent,
-        isCompareNoteInputCommitted,
-        endCompareEdit,
-        persistCompareScoreEdit,
-        refreshCompareNoteInputCursor,
-        refreshPageCount,
-        runSerializedScoreOperation,
-        score,
-        trackCompareOperation,
-    ]);
+    const refreshCompareLivePageCount = useCallback(async (targetScore: Score) => {
+        await refreshPageCount(targetScore, currentPageRef.current);
+    }, [refreshPageCount]);
+    const reportCompareMutationError = useCallback((label: string, error: unknown) => {
+        console.error(`Compare mutation "${label}" failed:`, error);
+        alert(`Unable to ${label} in the compare score. Check the console for details.`);
+    }, []);
+    const performCompareMutation = useCompareMutationController({
+        view: compareView,
+        activeSide: compareActiveSide,
+        leftScore: compareLeftScore,
+        rightScore: compareRightScoreDisplay,
+        liveScore: score,
+        swapBusy: compareSwapBusy,
+        feedbackBusy: aiDiffFeedbackBusy,
+        beginBusy: beginCompareEdit,
+        endBusy: endCompareEdit,
+        isBusy: isCompareEditBusy,
+        isNoteInputCommitted: isCompareNoteInputCommitted,
+        setActiveSide: setCompareActiveSide,
+        snapshotScore: getScoreMusicXmlText,
+        runSerialized: runSerializedScoreOperation,
+        invalidateOperations: invalidateCompareOperations,
+        isGenerationCurrent: isCompareGenerationCurrent,
+        trackOperation: trackCompareOperation,
+        persistEdit: persistCompareScoreEdit,
+        refreshLivePageCount: refreshCompareLivePageCount,
+        setAuxiliaryPageCount: setCompareRightPageCount,
+        refreshNoteInputCursor: refreshCompareNoteInputCursor,
+        reportError: reportCompareMutationError,
+    });
 
     const setCompareNoteInputMode = useCallback(async (
         enabled: boolean,
