@@ -77,6 +77,15 @@ export interface FretDiagramData {
     barres: Array<{ fret: number; startString: number; endString: number }>;
 }
 
+export type SynthAudioBatchChunk = {
+    chunk: Uint8Array;
+    startTime: number;
+    endTime?: number;
+    done?: boolean;
+};
+
+export type SynthAudioBatchIterator = (cancel?: boolean) => Promise<SynthAudioBatchChunk[]>;
+
 export interface Score {
     destroy: (soft?: boolean) => void;
     saveSvg: (pageNumber?: number, drawPageBackground?: boolean, highlightSelection?: boolean) => Promise<string>;
@@ -89,9 +98,10 @@ export interface Score {
     saveAudioForMeasureRange?: (format: 'wav', startMeasureIndex: number, endMeasureIndex: number) => Promise<Uint8Array>;
     savePng?: (pageNumber?: number, drawPageBackground?: boolean, transparent?: boolean) => Promise<Uint8Array>;
     setSoundFont: (data: Uint8Array) => Promise<void>;
-    synthAudioBatchFromSelection?: (batchSize: number) => Promise<(cancel?: boolean) => Promise<unknown[]>> | ((cancel?: boolean) => Promise<unknown[]>);
-    synthAudioBatchForMeasureRange?: (startMeasureIndex: number, endMeasureIndex: number, batchSize: number) => Promise<(cancel?: boolean) => Promise<unknown[]>> | ((cancel?: boolean) => Promise<unknown[]>);
-    synthSelectionPreviewBatch?: (batchSize: number, durationMs?: number) => Promise<(cancel?: boolean) => Promise<unknown[]>> | ((cancel?: boolean) => Promise<unknown[]>);
+    synthAudioBatch?: (startTime: number, batchSize: number) => Promise<SynthAudioBatchIterator> | SynthAudioBatchIterator;
+    synthAudioBatchFromSelection?: (batchSize: number) => Promise<SynthAudioBatchIterator> | SynthAudioBatchIterator;
+    synthAudioBatchForMeasureRange?: (startMeasureIndex: number, endMeasureIndex: number, batchSize: number) => Promise<SynthAudioBatchIterator> | SynthAudioBatchIterator;
+    synthSelectionPreviewBatch?: (batchSize: number, durationMs?: number) => Promise<SynthAudioBatchIterator> | SynthAudioBatchIterator;
     metadata: () => Promise<Record<string, unknown>>;
     npages?: () => Promise<number>;
     measurePositions: () => Promise<Positions>;

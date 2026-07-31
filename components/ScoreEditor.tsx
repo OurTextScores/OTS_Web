@@ -14,6 +14,7 @@ import {
     type InspectorPropertyName,
     type SelectedElementProperties,
     type FretDiagramData,
+    type SynthAudioBatchIterator,
     type WebMscoreInstance,
 } from '../lib/webmscore-loader';
 import {
@@ -146,6 +147,18 @@ type SelectionBox = {
     centerY: number;
     classes?: string;
     isMeasureBbox?: boolean;
+};
+
+type SelectionGeometryBox = {
+    index?: number | null;
+    page?: number;
+    x?: number;
+    y?: number;
+    w?: number;
+    h?: number;
+    width?: number;
+    height?: number;
+    classes?: string;
 };
 
 type SelectionFallback = {
@@ -409,17 +422,10 @@ type MeasureAlignmentRow = {
     match: boolean;
 };
 
-type SynthBatchChunk = {
-    chunk: Uint8Array;
-    startTime: number;
-    endTime?: number;
-    done?: boolean;
-};
+type SynthBatchIterator = SynthAudioBatchIterator;
 
-type SynthBatchIterator = (cancel?: boolean) => Promise<SynthBatchChunk[]>;
-
-const asRecord = (value: unknown): Record<string, any> | null => (
-    value && typeof value === 'object' ? value as Record<string, any> : null
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+    value && typeof value === 'object' ? value as Record<string, unknown> : null
 );
 
 const findAiEditProposal = (value: unknown): AiEditProposal | null => {
@@ -1675,29 +1681,29 @@ export default function ScoreEditor() {
     const tempPlaybackAudioUrlRef = useRef<string | null>(null);
     const audioCtxRef = useRef<AudioContext | null>(null);
     const audioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-    const streamIteratorRef = useRef<((cancel?: boolean) => Promise<any>) | null>(null);
+    const streamIteratorRef = useRef<SynthBatchIterator | null>(null);
     const transportPlaybackGenerationRef = useRef(0);
     const previewAudioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-    const previewStreamIteratorRef = useRef<((cancel?: boolean) => Promise<any>) | null>(null);
+    const previewStreamIteratorRef = useRef<SynthBatchIterator | null>(null);
     const previewPlaybackGenerationRef = useRef(0);
     // Independent transport for each AI-review/change-review compare panel. These are
     // deliberately separate from the main transport above (and from each other): the
     // panel's Score instance is whichever of `score` / `compareRightScore` is currently
-    // displayed on that visual side, and either side can be the live document or a
-    // read-only checkpoint depending on `compareSwapped`. Starting one side stops the
+    // displayed on that visual side, and either side can be the live document or an
+    // auxiliary working score depending on the mode's initial orientation. Starting one side stops the
     // other (and the main transport) so only one voice ever plays -- see
     // `playCompareSideAudio`.
     const [compareLeftIsPlaying, setCompareLeftIsPlaying] = useState(false);
     const [compareLeftIsPaused, setCompareLeftIsPaused] = useState(false);
     const [compareLeftAudioBusy, setCompareLeftAudioBusy] = useState(false);
     const compareLeftAudioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-    const compareLeftStreamIteratorRef = useRef<((cancel?: boolean) => Promise<any>) | null>(null);
+    const compareLeftStreamIteratorRef = useRef<SynthBatchIterator | null>(null);
     const compareLeftPlaybackGenerationRef = useRef(0);
     const [compareRightIsPlaying, setCompareRightIsPlaying] = useState(false);
     const [compareRightIsPaused, setCompareRightIsPaused] = useState(false);
     const [compareRightAudioBusy, setCompareRightAudioBusy] = useState(false);
     const compareRightAudioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-    const compareRightStreamIteratorRef = useRef<((cancel?: boolean) => Promise<any>) | null>(null);
+    const compareRightStreamIteratorRef = useRef<SynthBatchIterator | null>(null);
     const compareRightPlaybackGenerationRef = useRef(0);
     const clipboardRef = useRef<{ mimeType: string; data: Uint8Array } | null>(null);
     const currentPageRef = useRef(currentPage);
@@ -3368,8 +3374,8 @@ export default function ScoreEditor() {
         const pageHeight = positions.pageSize?.height ?? 0;
         // Exact hit first
         const exact = positions.elements.findIndex((el) => {
-            const w = typeof el.sx === 'number' ? el.sx : (el as any).width ?? 0;
-            const h = typeof el.sy === 'number' ? el.sy : (el as any).height ?? 0;
+            const w = typeof el.sx === 'number' ? el.sx : el.width ?? 0;
+            const h = typeof el.sy === 'number' ? el.sy : el.height ?? 0;
             const needsPageOffset = pageHeight > 0 && el.page > 0 && (el.y + h) <= (pageHeight * 1.2);
             const pageOffset = needsPageOffset ? el.page * pageHeight : 0;
             const y = el.y + pageOffset;
@@ -3380,8 +3386,8 @@ export default function ScoreEditor() {
         let bestIdx = -1;
         let bestDist = Infinity;
         positions.elements.forEach((el, idx) => {
-            const w = typeof el.sx === 'number' ? el.sx : (el as any).width ?? 0;
-            const h = typeof el.sy === 'number' ? el.sy : (el as any).height ?? 0;
+            const w = typeof el.sx === 'number' ? el.sx : el.width ?? 0;
+            const h = typeof el.sy === 'number' ? el.sy : el.height ?? 0;
             const needsPageOffset = pageHeight > 0 && el.page > 0 && (el.y + h) <= (pageHeight * 1.2);
             const pageOffset = needsPageOffset ? el.page * pageHeight : 0;
             const cy = el.y + pageOffset + h / 2;
@@ -3409,7 +3415,7 @@ export default function ScoreEditor() {
             if (comparePartCount > 1 && wrapperRef.current && positions) {
                 const el = positions.elements[measureIndex];
                 if (el) {
-                    const h = typeof el.sy === 'number' ? el.sy : (el as any).height ?? 0;
+                    const h = typeof el.sy === 'number' ? el.sy : el.height ?? 0;
                     const pageHeight = positions.pageSize?.height ?? 0;
                     const needsPageOffset = pageHeight > 0 && el.page > 0 && (el.y + h) <= (pageHeight * 1.2);
                     const pageOffset = needsPageOffset ? el.page * pageHeight : 0;
@@ -3485,7 +3491,7 @@ export default function ScoreEditor() {
             if (comparePartCount > 1 && wrapperRef.current && positions) {
                 const el = positions.elements[measureIndex];
                 if (el) {
-                    const h = typeof el.sy === 'number' ? el.sy : (el as any).height ?? 0;
+                    const h = typeof el.sy === 'number' ? el.sy : el.height ?? 0;
                     const pageHeight = positions.pageSize?.height ?? 0;
                     const needsPageOffset = pageHeight > 0 && el.page > 0 && (el.y + h) <= (pageHeight * 1.2);
                     const pageOffset = needsPageOffset ? el.page * pageHeight : 0;
@@ -3821,8 +3827,8 @@ export default function ScoreEditor() {
             if (measureIndex == null || !positions?.elements.length) return null;
             const el = positions.elements[measureIndex];
             if (!el) return null;
-            const w = typeof el.sx === 'number' ? el.sx : (el as any).width ?? 0;
-            const h = typeof el.sy === 'number' ? el.sy : (el as any).height ?? 0;
+            const w = typeof el.sx === 'number' ? el.sx : el.width ?? 0;
+            const h = typeof el.sy === 'number' ? el.sy : el.height ?? 0;
             const pageHeight = positions.pageSize?.height ?? 0;
             const needsPageOffset = pageHeight > 0 && el.page > 0 && (el.y + h) <= (pageHeight * 1.2);
             const pageOffset = needsPageOffset ? el.page * pageHeight : 0;
@@ -4230,13 +4236,18 @@ ${partsBodyXml}
             isSyncingRef.current = true;
             const isSync = Boolean(scoreSessionId);
             const endpoint = isSync ? '/api/music/scoreops/sync' : '/api/music/scoreops/session/open';
-            const body: any = { content };
+            const body: {
+                content: string;
+                scoreMeta?: { launchContext: EditorLaunchContext };
+                scoreSessionId?: string;
+                baseRevision?: number;
+            } = { content };
             if (activeLaunchContext) {
                 body.scoreMeta = {
                     launchContext: activeLaunchContext,
                 };
             }
-            if (isSync) {
+            if (scoreSessionId) {
                 body.scoreSessionId = scoreSessionId;
                 body.baseRevision = scoreRevision;
             }
@@ -4292,12 +4303,13 @@ ${partsBodyXml}
         if (!text.trim()) {
             return { patch: null as MusicXmlPatch | null, error: 'AI response is empty.' };
         }
-        let parsed: any;
+        let parsedValue: unknown;
         try {
-            parsed = JSON.parse(text);
-        } catch (err) {
+            parsedValue = JSON.parse(text);
+        } catch {
             return { patch: null, error: 'AI response is not valid JSON.' };
         }
+        const parsed = asRecord(parsedValue);
         if (!parsed || parsed.format !== 'musicxml-patch@1' || !Array.isArray(parsed.ops)) {
             return { patch: null, error: 'AI response is not a musicxml-patch@1 payload.' };
         }
@@ -4351,8 +4363,8 @@ ${partsBodyXml}
             return { topLevelElementCount, hasTopLevelText, unbalancedTags };
         };
         for (let i = 0; i < parsed.ops.length; i += 1) {
-            const op = parsed.ops[i];
-            if (!op || typeof op !== 'object') {
+            const op = asRecord(parsed.ops[i]);
+            if (!op) {
                 return { patch: null, error: `Patch op ${i + 1} is not an object.` };
             }
             const opName = String(op.op || '');
@@ -4808,7 +4820,7 @@ ${partsBodyXml}
     const exposeScoreToWindow = (s: Score | null) => {
         // Handy for Playwright/debug sessions to poke at WASM bindings directly
         if (typeof window !== 'undefined') {
-            (window as any).__webmscore = s;
+            (window as Window & { __webmscore?: Score | null }).__webmscore = s;
         }
     };
 
@@ -5507,7 +5519,7 @@ ${partsBodyXml}
             lines.push(`Primary selection classes: ${classList}`);
         }
 
-        const rawBoxes = selectionBoxes.length
+        const rawBoxes: SelectionGeometryBox[] = selectionBoxes.length
             ? selectionBoxes
             : selectedElement
                 ? [{
@@ -5522,7 +5534,7 @@ ${partsBodyXml}
                 : [];
 
         const boxes = rawBoxes
-            .map((box: any, index: number) => {
+            .map((box, index) => {
                 const x = typeof box?.x === 'number' ? box.x : NaN;
                 const y = typeof box?.y === 'number' ? box.y : NaN;
                 const w = typeof box?.w === 'number'
@@ -8146,15 +8158,19 @@ ${partsBodyXml}
         score,
     ]);
 
-    const parsePartsFromMetadata = useCallback((metadata: any): PartSummary[] => {
-        const parts = Array.isArray(metadata?.parts) ? metadata.parts : [];
-        return parts.map((part: any, index: number) => ({
-            index,
-            name: typeof part?.name === 'string' ? part.name : '',
-            instrumentName: typeof part?.instrumentName === 'string' ? part.instrumentName : '',
-            instrumentId: typeof part?.instrumentId === 'string' ? part.instrumentId : '',
-            isVisible: String(part?.isVisible ?? '').toLowerCase() === 'true',
-        }));
+    const parsePartsFromMetadata = useCallback((metadata: unknown): PartSummary[] => {
+        const metadataRecord = asRecord(metadata);
+        const parts = Array.isArray(metadataRecord?.parts) ? metadataRecord.parts : [];
+        return parts.map((value, index) => {
+            const part = asRecord(value);
+            return {
+                index,
+                name: typeof part?.name === 'string' ? part.name : '',
+                instrumentName: typeof part?.instrumentName === 'string' ? part.instrumentName : '',
+                instrumentId: typeof part?.instrumentId === 'string' ? part.instrumentId : '',
+                isVisible: String(part?.isVisible ?? '').toLowerCase() === 'true',
+            };
+        });
     }, []);
 
     const refreshScoreMetadata = async (currentScore: Score) => {
@@ -8164,12 +8180,12 @@ ${partsBodyXml}
                 'metadata',
             );
             setScoreTitle(typeof metadata.title === 'string' ? metadata.title : '');
-            setScoreSubtitle(typeof (metadata as any).subtitle === 'string' ? (metadata as any).subtitle : '');
+            setScoreSubtitle(typeof metadata.subtitle === 'string' ? metadata.subtitle : '');
             setScoreComposer(typeof metadata.composer === 'string' ? metadata.composer : '');
-            const lyricistValue = typeof (metadata as any).lyricist === 'string'
-                ? (metadata as any).lyricist
-                : typeof (metadata as any).poet === 'string'
-                    ? (metadata as any).poet
+            const lyricistValue = typeof metadata.lyricist === 'string'
+                ? metadata.lyricist
+                : typeof metadata.poet === 'string'
+                    ? metadata.poet
                     : '';
             setScoreLyricist(lyricistValue);
             setScoreParts(parsePartsFromMetadata(metadata));
@@ -10659,12 +10675,13 @@ ${partsBodyXml}
                 let streamError: string | null = null;
 
                 const handleSseEvent = (eventName: string, payloadText: string) => {
-                    let payload: any = null;
+                    let payloadValue: unknown = null;
                     try {
-                        payload = payloadText ? JSON.parse(payloadText) : null;
+                        payloadValue = payloadText ? JSON.parse(payloadText) : null;
                     } catch {
-                        payload = { raw: payloadText };
+                        payloadValue = { raw: payloadText };
                     }
+                    const payload = asRecord(payloadValue);
                     if (eventName === 'status') {
                         const stage = typeof payload?.stage === 'string' ? payload.stage : '';
                         const message = typeof payload?.message === 'string' ? payload.message : '';
@@ -11779,12 +11796,12 @@ ${partsBodyXml}
     const requireMutation = (methodName: keyof MutationMethods) => {
         const activeScore = scoreRef.current ?? score;
         const fn = activeScore && (activeScore as MutationMethods)[methodName];
-        if (!fn) {
+        if (typeof fn !== 'function') {
             console.warn(`Mutation binding "${methodName}" is missing on Score instance.`);
             alert(`This build of webmscore does not expose "${methodName}".`);
             return null;
         }
-        return (...args: any[]) => (fn as any).apply(activeScore, args);
+        return (...args: unknown[]) => Reflect.apply(fn, activeScore, args);
     };
 
     const refreshNoteInputCursor = async (targetScore: Score | null = score) => {
@@ -14151,7 +14168,7 @@ ${partsBodyXml}
 
     const stopSynthStream = async (
         sourcesRef: React.MutableRefObject<AudioBufferSourceNode[]>,
-        iteratorRef: React.MutableRefObject<((cancel?: boolean) => Promise<any>) | null>,
+        iteratorRef: React.MutableRefObject<SynthBatchIterator | null>,
         options?: { awaitCancel?: boolean },
     ) => {
         sourcesRef.current.forEach(src => {
@@ -14236,7 +14253,7 @@ ${partsBodyXml}
         batchFn: SynthBatchIterator,
         options: {
             sourcesRef: React.MutableRefObject<AudioBufferSourceNode[]>;
-            iteratorRef: React.MutableRefObject<((cancel?: boolean) => Promise<any>) | null>;
+            iteratorRef: React.MutableRefObject<SynthBatchIterator | null>;
             generationRef: React.MutableRefObject<number>;
             maxDurationSeconds?: number;
             trackTransportState: boolean;
@@ -14545,14 +14562,14 @@ ${partsBodyXml}
             const useSelectionStreaming = fromSelection && typeof score.synthAudioBatchFromSelection === 'function';
             const useStreaming = fromSelection
                 ? useSelectionStreaming
-                : typeof (score as any).synthAudioBatch === 'function';
+                : typeof score.synthAudioBatch === 'function';
             let streamed = false;
             let streamFailure: unknown = null;
             if (useStreaming) {
                 try {
                     const batchFn = useSelectionStreaming
                         ? await score.synthAudioBatchFromSelection!(SELECTION_SYNTH_BATCH_SIZE) as SynthBatchIterator
-                        : await (score as any).synthAudioBatch(0, TRANSPORT_SYNTH_BATCH_SIZE) as SynthBatchIterator;
+                        : await score.synthAudioBatch!(0, TRANSPORT_SYNTH_BATCH_SIZE) as SynthBatchIterator;
 
                     await playSynthBatchStream(batchFn, {
                         sourcesRef: audioSourcesRef,
@@ -14675,7 +14692,7 @@ ${partsBodyXml}
     const playCompareSideAudio = async (side: 'left' | 'right') => {
         const refs = getCompareSideRefs(side);
         const targetScore = refs.score;
-        if (!targetScore || typeof (targetScore as any).synthAudioBatch !== 'function') {
+        if (!targetScore?.synthAudioBatch) {
             alert('Audio playback is not available for this score.');
             return;
         }
@@ -14702,7 +14719,7 @@ ${partsBodyXml}
             if (!stillCurrent()) {
                 return;
             }
-            const batchFn = await (targetScore as any).synthAudioBatch(0, TRANSPORT_SYNTH_BATCH_SIZE) as SynthBatchIterator;
+            const batchFn = await targetScore.synthAudioBatch(0, TRANSPORT_SYNTH_BATCH_SIZE) as SynthBatchIterator;
             if (!stillCurrent()) {
                 return;
             }
@@ -16258,18 +16275,14 @@ ${partsBodyXml}
                                     selectionBoxCount = bboxes.length;
                                     // Set boxes for state tracking (keyboard shortcuts, button states)
                                     // Set backend highlighting flag to skip visual rendering (backend handles it)
-                                    const boxes: SelectionBox[] = bboxes.map((bb: any, index: number) => {
-                                        const x = typeof bb?.x === 'number' ? bb.x : 0;
-                                        const y = typeof bb?.y === 'number' ? bb.y : 0;
-                                        const w = typeof bb?.w === 'number'
-                                            ? bb.w
-                                            : (typeof bb?.width === 'number' ? bb.width : 0);
-                                        const h = typeof bb?.h === 'number'
-                                            ? bb.h
-                                            : (typeof bb?.height === 'number' ? bb.height : 0);
-                                        const page = typeof bb?.page === 'number' ? bb.page : pageIndex;
+                                    const boxes: SelectionBox[] = bboxes.map((bb, index) => {
+                                        const x = bb.x;
+                                        const y = bb.y;
+                                        const w = bb.width;
+                                        const h = bb.height;
+                                        const page = bb.page;
                                         return {
-                                            index: typeof bb?.index === 'number' ? bb.index : index,
+                                            index,
                                             page,
                                             x,
                                             y,
@@ -16277,9 +16290,7 @@ ${partsBodyXml}
                                             h,
                                             centerX: x + (w / 2),
                                             centerY: y + (h / 2),
-                                            classes: typeof bb?.classes === 'string' && bb.classes.trim()
-                                                ? bb.classes
-                                                : 'Measure',
+                                            classes: 'Measure',
                                         };
                                     });
                                     setSelectionBoxes(boxes);
