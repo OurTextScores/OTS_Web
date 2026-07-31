@@ -130,14 +130,17 @@ import {
 } from './score-editor/ai-assistant-types';
 import { type AiScoreBridge } from './score-editor/ai-score-bridge';
 import { useLatestCallbackFacade } from '@/lib/use-latest-callback-facade';
+import type { CompareSide } from './score-editor/compare/compare-types';
 import { useCompareOperationCoordinator } from './score-editor/compare/useCompareOperationCoordinator';
 import { useCompareTransport } from './score-editor/compare/useCompareTransport';
 import {
     routeCompareKeyboardShortcut,
-    useCompareEditing,
-    useCompareMutationController,
     type CompareInputStateMethod,
     type CompareKeyboardMutationMethod,
+} from './score-editor/compare/compare-keyboard-policy';
+import {
+    useCompareEditing,
+    useCompareMutationController,
 } from './score-editor/compare/useCompareEditing';
 import {
     buildCompareUserEditDiff,
@@ -752,7 +755,6 @@ type ApplyXmlToScore = (
     },
 ) => Promise<boolean>;
 
-type CompareSide = 'left' | 'right';
 type StopCompareSideAudio = (
     side: CompareSide,
     options?: { awaitCancel?: boolean },

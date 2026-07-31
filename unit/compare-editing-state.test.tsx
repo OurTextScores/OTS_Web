@@ -2,9 +2,11 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
     routeCompareKeyboardShortcut,
+    type CompareKeyboardShortcutContext,
+} from '../components/score-editor/compare/compare-keyboard-policy';
+import {
     useCompareEditing,
     useCompareMutationController,
-    type CompareKeyboardShortcutContext,
     type CompareMutationControllerOptions,
 } from '../components/score-editor/compare/useCompareEditing';
 import type { Score } from '../lib/webmscore-loader';

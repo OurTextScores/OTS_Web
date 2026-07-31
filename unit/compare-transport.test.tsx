@@ -4,9 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Score, SynthAudioBatchIterator } from '../lib/webmscore-loader';
 import {
     useCompareTransport,
-    type CompareSide,
     type CompareStreamTarget,
 } from '../components/score-editor/compare/useCompareTransport';
+import type { CompareSide } from '../components/score-editor/compare/compare-types';
 
 const deferred = <T,>() => {
     let resolve!: (value: T | PromiseLike<T>) => void;

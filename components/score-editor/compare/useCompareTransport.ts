@@ -7,14 +7,9 @@ import {
     type MutableRefObject,
 } from 'react';
 import type { Score, SynthAudioBatchIterator } from '@/lib/webmscore-loader';
+import type { CompareSide, CompareTransportState } from './compare-types';
 
-export type CompareSide = 'left' | 'right';
-
-export type CompareTransportState = {
-    isPlaying: boolean;
-    isPaused: boolean;
-    isBusy: boolean;
-};
+export type { CompareSide, CompareTransportState };
 
 export type CompareStreamTarget = {
     sourcesRef: MutableRefObject<AudioBufferSourceNode[]>;

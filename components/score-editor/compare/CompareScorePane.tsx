@@ -1,7 +1,7 @@
 import type { CSSProperties, MouseEventHandler, RefObject } from 'react';
 import { Pause, Play, Square } from 'lucide-react';
 import { ComparePaneEditorControls } from '../ComparePaneEditorControls';
-import type { CompareSide, CompareTransportState } from './useCompareTransport';
+import type { CompareSide, CompareTransportState } from './compare-types';
 
 type PositionedRect = {
     left: number;
