@@ -733,6 +733,95 @@ type EditorTelemetryCounters = {
     patchApplyFailures: number;
 };
 
+type ApplyXmlToScore = (
+    sourceXml: string,
+    options?: {
+        telemetrySource?: string;
+        inputFormat?: string;
+        enforceJazzHarmonyStyle?: boolean;
+    },
+) => Promise<boolean>;
+
+const formatBytes = (bytes: number) => {
+    if (!Number.isFinite(bytes)) {
+        return '';
+    }
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex += 1;
+    }
+    const precision = size >= 10 || unitIndex === 0 ? 0 : 1;
+    return `${size.toFixed(precision)} ${units[unitIndex]}`;
+};
+
+const formatTimestamp = (timestamp: number) => new Date(timestamp).toLocaleString();
+
+const buildCheckpointTitle = (label: string, fallbackTitle: string) => {
+    const trimmed = label.trim();
+    if (trimmed) {
+        return trimmed;
+    }
+    const base = fallbackTitle.trim() || 'Untitled Score';
+    return `${base} ${formatTimestamp(Date.now())}`;
+};
+
+const toSafeFilename = (name: string) => {
+    const cleaned = name.replace(/[\\/:*?"<>|]+/g, '_').trim();
+    return cleaned.length > 0 ? cleaned.slice(0, 64) : 'checkpoint';
+};
+
+const updateUrlScoreId = (nextScoreId: string) => {
+    if (typeof window === 'undefined') {
+        return;
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set('scoreId', nextScoreId);
+    url.searchParams.delete('score');
+    window.history.replaceState({}, '', url.toString());
+};
+
+const buildOtsScoreId = (workId: string, sourceId: string) => `ots:${workId}:${sourceId}`;
+
+const parseSvgNumeric = (value: string | null) => {
+    if (!value || value.includes('%')) {
+        return null;
+    }
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getSvgNaturalSize = (svg: SVGSVGElement, zoomValue: number) => {
+    const widthAttr = parseSvgNumeric(svg.getAttribute('width'));
+    const heightAttr = parseSvgNumeric(svg.getAttribute('height'));
+    let width = widthAttr ?? null;
+    let height = heightAttr ?? null;
+    if ((!width || !height) && svg.getAttribute('viewBox')) {
+        const parts = svg
+            .getAttribute('viewBox')
+            ?.trim()
+            .split(/[\s,]+/)
+            .map((value) => Number.parseFloat(value));
+        if (parts && parts.length === 4) {
+            width = width ?? (Number.isFinite(parts[2]) ? parts[2] : null);
+            height = height ?? (Number.isFinite(parts[3]) ? parts[3] : null);
+        }
+    }
+    if (!width || !height) {
+        const rect = svg.getBoundingClientRect();
+        if (zoomValue > 0) {
+            width = width ?? rect.width / zoomValue;
+            height = height ?? rect.height / zoomValue;
+        }
+    }
+    if (!width || !height) {
+        return null;
+    }
+    return { width, height };
+};
+
 interface InstrumentTemplate {
     id: string;
     name: string;
@@ -1191,6 +1280,7 @@ export default function ScoreEditor() {
     const lastSyncedRevisionRef = useRef<number>(-1);
     const isSyncingRef = useRef<boolean>(false);
     const scoreRef = useRef<Score | null>(null);
+    const applyXmlToScoreRef = useRef<ApplyXmlToScore>(async () => false);
     const [zoom, setZoom] = useState(1.0);
     const containerRef = useRef<HTMLDivElement>(null);
     const scoreWrapperRef = useRef<HTMLDivElement>(null);
@@ -1765,6 +1855,45 @@ export default function ScoreEditor() {
         }
     }, []);
 
+    const clearScheduledBackgroundInit = useCallback(() => {
+        if (backgroundInitTimerRef.current) {
+            clearTimeout(backgroundInitTimerRef.current);
+            backgroundInitTimerRef.current = null;
+        }
+    }, []);
+
+    const runSerializedScoreOperation = useCallback(async <T,>(operation: () => Promise<T>, label: string): Promise<T> => {
+        const waitForPriorOperation = scoreOperationQueueRef.current;
+        let releaseQueueSlot: (() => void) | null = null;
+        scoreOperationQueueRef.current = new Promise<void>((resolve) => {
+            releaseQueueSlot = resolve;
+        });
+
+        await waitForPriorOperation;
+
+        let released = false;
+        const release = () => {
+            if (released) {
+                return;
+            }
+            released = true;
+            releaseQueueSlot?.();
+        };
+
+        const operationPromise = Promise.resolve().then(operation);
+        const forceReleaseTimer = setTimeout(() => {
+            console.warn(`[engine-queue] force release after ${ENGINE_OPERATION_STALL_RELEASE_MS}ms`, { label });
+            release();
+        }, ENGINE_OPERATION_STALL_RELEASE_MS);
+
+        try {
+            return await operationPromise;
+        } finally {
+            clearTimeout(forceReleaseTimer);
+            release();
+        }
+    }, []);
+
     const aiEditController = useAiEditController(aiEditEffort);
     const beginAiEdit = aiEditController.begin;
     const updateAiEditProgress = aiEditController.updateProgress;
@@ -1783,10 +1912,11 @@ export default function ScoreEditor() {
             editorSessionIdRef.current = getOrCreateEditorSessionId();
         }
         editorMountedAtRef.current = Date.now();
+        const telemetryCounters = telemetryCountersRef.current;
         emitEditorTelemetry('score_editor_runtime_loaded');
         return () => {
             const durationMs = Math.max(0, Date.now() - editorMountedAtRef.current);
-            const counters = telemetryCountersRef.current;
+            const counters = telemetryCounters;
             // In React strict-mode development mounts can be immediately torn down.
             // Ignore near-zero lifecycle noise unless actual user work happened.
             const hasActivity = (
@@ -2266,7 +2396,7 @@ export default function ScoreEditor() {
         return () => {
             clearScheduledBackgroundInit();
         };
-    }, []);
+    }, [clearScheduledBackgroundInit]);
 
     useEffect(() => {
         soundFontLoadedRef.current = soundFontLoaded;
@@ -2294,7 +2424,7 @@ export default function ScoreEditor() {
             window.localStorage.removeItem(aiKeyStorageKey);
         }
         setAiApiKey(stored ?? legacy ?? '');
-    }, [aiEnabled, aiKeyStorageKey]);
+    }, [aiEnabled, aiKeyStorageKey, setAiApiKey]);
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -2323,7 +2453,7 @@ export default function ScoreEditor() {
             return;
         }
         setAiModel(DEFAULT_MODEL_BY_PROVIDER[aiProvider] ?? '');
-    }, [aiEnabled, aiModelStorageKey, aiProvider]);
+    }, [aiEnabled, aiModelStorageKey, aiProvider, setAiModel]);
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -2346,7 +2476,7 @@ export default function ScoreEditor() {
         setAiChatSourceRagHintDismissed(
             window.localStorage.getItem(AI_CHAT_SOURCE_RAG_HINT_DISMISSED_STORAGE_KEY) === '1',
         );
-    }, []);
+    }, [setAiChatSourceRagHintDismissed]);
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -2779,50 +2909,7 @@ export default function ScoreEditor() {
         void refreshInspector();
     }, [refreshInspector, score, selectedElement, selectedElementClasses, selectedPoint, selectionBoxes.length]);
 
-    const formatBytes = (bytes: number) => {
-        if (!Number.isFinite(bytes)) {
-            return '';
-        }
-        const units = ['B', 'KB', 'MB', 'GB'];
-        let size = bytes;
-        let unitIndex = 0;
-        while (size >= 1024 && unitIndex < units.length - 1) {
-            size /= 1024;
-            unitIndex += 1;
-        }
-        const precision = size >= 10 || unitIndex === 0 ? 0 : 1;
-        return `${size.toFixed(precision)} ${units[unitIndex]}`;
-    };
-
-    const formatTimestamp = (timestamp: number) => new Date(timestamp).toLocaleString();
-
-    const buildCheckpointTitle = (label: string, fallbackTitle: string) => {
-        const trimmed = label.trim();
-        if (trimmed) {
-            return trimmed;
-        }
-        const base = fallbackTitle.trim() || 'Untitled Score';
-        return `${base} ${formatTimestamp(Date.now())}`;
-    };
-
-    const toSafeFilename = (name: string) => {
-        const cleaned = name.replace(/[\\/:*?"<>|]+/g, '_').trim();
-        return cleaned.length > 0 ? cleaned.slice(0, 64) : 'checkpoint';
-    };
-
-    const updateUrlScoreId = (nextScoreId: string) => {
-        if (typeof window === 'undefined') {
-            return;
-        }
-        const url = new URL(window.location.href);
-        url.searchParams.set('scoreId', nextScoreId);
-        url.searchParams.delete('score');
-        window.history.replaceState({}, '', url.toString());
-    };
-
-    const buildOtsScoreId = (workId: string, sourceId: string) => `ots:${workId}:${sourceId}`;
-
-    const ensureScoreId = (fallbackPrefix: string) => {
+    const ensureScoreId = useCallback((fallbackPrefix: string) => {
         if (scoreId) {
             return scoreId;
         }
@@ -2830,7 +2917,7 @@ export default function ScoreEditor() {
         setScoreId(generated);
         updateUrlScoreId(generated);
         return generated;
-    };
+    }, [scoreId]);
 
     const summarizeScoreId = (id: string) => {
         if (id.startsWith('url:')) {
@@ -3543,7 +3630,6 @@ export default function ScoreEditor() {
         comparePartCount,
         changeReviewDiff,
         changeReviewFocusedAnchorId,
-        changeReviewId,
         changeReviewThreadsByAnchor,
         changeReviewDetail,
         compareAlignmentByPart,
@@ -4120,7 +4206,7 @@ ${partsBodyXml}
             console.warn('Failed to export MusicXML from score:', err);
             return fallbackXml;
         }
-    }, [decodeXmlData]);
+    }, [decodeXmlData, runSerializedScoreOperation]);
 
     const getScoreXmlData = useCallback(async () => {
         const activeScore = scoreRef.current ?? score;
@@ -4133,7 +4219,7 @@ ${partsBodyXml}
             'saveXml',
         );
         return await normalizeXmlData(data);
-    }, [score, normalizeXmlData]);
+    }, [score, normalizeXmlData, runSerializedScoreOperation]);
 
     const loadXmlFromScore = useCallback(async () => {
         if (!score) {
@@ -4594,14 +4680,7 @@ ${partsBodyXml}
         return { ok: true, currentXml };
     };
 
-    const applyXmlToScore = async (
-        sourceXml: string,
-        options?: {
-            telemetrySource?: string;
-            inputFormat?: string;
-            enforceJazzHarmonyStyle?: boolean;
-        },
-    ): Promise<boolean> => {
+    const applyXmlToScore: ApplyXmlToScore = async (sourceXml, options) => {
         if (!score) {
             alert('Load a score before applying XML edits.');
             return false;
@@ -4650,6 +4729,7 @@ ${partsBodyXml}
         }
         return applied;
     };
+    applyXmlToScoreRef.current = applyXmlToScore;
 
 
     const loadScoreSummaryList = useCallback(async () => {
@@ -4793,7 +4873,13 @@ ${partsBodyXml}
         } catch (err) {
             console.warn('Failed to create initial load checkpoint', err);
         }
-    }, [buildCheckpointMetadata, ensureScoreId, loadCheckpointList, normalizeXmlData]);
+    }, [
+        buildCheckpointMetadata,
+        ensureScoreId,
+        loadCheckpointList,
+        normalizeXmlData,
+        runSerializedScoreOperation,
+    ]);
 
     const exposeScoreToWindow = (s: Score | null) => {
         // Handy for Playwright/debug sessions to poke at WASM bindings directly
@@ -4860,7 +4946,7 @@ ${partsBodyXml}
             setScoreId(nextScoreId);
             updateUrlScoreId(nextScoreId);
         }
-    }, [otsSourceContext, scoreId]);
+    }, [leftSidebarTab, otsSourceContext, scoreId]);
 
     useEffect(() => {
         if (!score) {
@@ -4944,6 +5030,12 @@ ${partsBodyXml}
         aiTemperature,
         aiTemperatureMode,
         selectedAiModelDescriptor,
+        setAiIncludePdf,
+        setAiIncludeRenderedImage,
+        setAiMaxTokens,
+        setAiMaxTokensMode,
+        setAiTemperature,
+        setAiTemperatureMode,
     ]);
 
     useEffect(() => {
@@ -5044,7 +5136,20 @@ ${partsBodyXml}
         return () => {
             canceled = true;
         };
-    }, [aiApiKey, aiEnabled, aiProvider, isEmbedBuild, llmProxyBase, useLlmProxy, proxyUrlFor]);
+    }, [
+        aiApiKey,
+        aiEnabled,
+        aiProvider,
+        isEmbedBuild,
+        llmProxyBase,
+        proxyUrlFor,
+        setAiModel,
+        setAiModelDescriptors,
+        setAiModels,
+        setAiModelsError,
+        setAiModelsLoading,
+        useLlmProxy,
+    ]);
 
     useEffect(() => {
         if (!newScoreDialogOpen) {
@@ -5285,45 +5390,6 @@ ${partsBodyXml}
             }
         }
     };
-
-    const clearScheduledBackgroundInit = useCallback(() => {
-        if (backgroundInitTimerRef.current) {
-            clearTimeout(backgroundInitTimerRef.current);
-            backgroundInitTimerRef.current = null;
-        }
-    }, []);
-
-    const runSerializedScoreOperation = useCallback(async <T,>(operation: () => Promise<T>, label: string): Promise<T> => {
-        const waitForPriorOperation = scoreOperationQueueRef.current;
-        let releaseQueueSlot: (() => void) | null = null;
-        scoreOperationQueueRef.current = new Promise<void>((resolve) => {
-            releaseQueueSlot = resolve;
-        });
-
-        await waitForPriorOperation;
-
-        let released = false;
-        const release = () => {
-            if (released) {
-                return;
-            }
-            released = true;
-            releaseQueueSlot?.();
-        };
-
-        const operationPromise = Promise.resolve().then(operation);
-        const forceReleaseTimer = setTimeout(() => {
-            console.warn(`[engine-queue] force release after ${ENGINE_OPERATION_STALL_RELEASE_MS}ms`, { label });
-            release();
-        }, ENGINE_OPERATION_STALL_RELEASE_MS);
-
-        try {
-            return await operationPromise;
-        } finally {
-            clearTimeout(forceReleaseTimer);
-            release();
-        }
-    }, []);
 
     const invalidateCompareOperations = useCallback((invalidateQueuedKeyboard = true) => {
         compareEditGenerationRef.current += 1;
@@ -5650,15 +5716,23 @@ ${partsBodyXml}
         }
     }, [score, runSerializedScoreOperation]);
 
-    const aiScoreBridge: AiScoreBridge = {
+    const aiScoreBridge = useMemo<AiScoreBridge>(() => ({
         getLiveXml: (fallback = null) => getScoreMusicXmlText(scoreRef.current ?? score, fallback),
         getContextXml: resolveXmlContext,
-        applyXml: (xml, telemetrySource) => applyXmlToScore(xml, { telemetrySource }),
+        applyXml: (xml, telemetrySource) => applyXmlToScoreRef.current(xml, { telemetrySource }),
         getSelectionContext: resolveSelectionContext,
         getPageSvgContext: resolveCurrentPageSvgContext,
         getPageImage: resolveCurrentPageImageAttachment,
         getScorePdf: resolveScorePdfAttachment,
-    };
+    }), [
+        getScoreMusicXmlText,
+        resolveCurrentPageImageAttachment,
+        resolveCurrentPageSvgContext,
+        resolveScorePdfAttachment,
+        resolveSelectionContext,
+        resolveXmlContext,
+        score,
+    ]);
 
     const loadScoreWithInitialLayout = async (
         WebMscore: Awaited<ReturnType<typeof loadWebMscore>>,
@@ -6495,47 +6569,7 @@ ${partsBodyXml}
             }
             return false;
         }
-    }, []);
-
-    const parseSvgNumeric = (value: string | null) => {
-        if (!value) {
-            return null;
-        }
-        if (value.includes('%')) {
-            return null;
-        }
-        const parsed = Number.parseFloat(value);
-        return Number.isFinite(parsed) ? parsed : null;
-    };
-
-    const getSvgNaturalSize = (svg: SVGSVGElement, zoomValue: number) => {
-        const widthAttr = parseSvgNumeric(svg.getAttribute('width'));
-        const heightAttr = parseSvgNumeric(svg.getAttribute('height'));
-        let width = widthAttr ?? null;
-        let height = heightAttr ?? null;
-        if ((!width || !height) && svg.getAttribute('viewBox')) {
-            const parts = svg
-                .getAttribute('viewBox')
-                ?.trim()
-                .split(/[\s,]+/)
-                .map((value) => Number.parseFloat(value));
-            if (parts && parts.length === 4) {
-                width = width ?? (Number.isFinite(parts[2]) ? parts[2] : null);
-                height = height ?? (Number.isFinite(parts[3]) ? parts[3] : null);
-            }
-        }
-        if (!width || !height) {
-            const rect = svg.getBoundingClientRect();
-            if (zoomValue > 0) {
-                width = width ?? rect.width / zoomValue;
-                height = height ?? rect.height / zoomValue;
-            }
-        }
-        if (!width || !height) {
-            return null;
-        }
-        return { width, height };
-    };
+    }, [runSerializedScoreOperation]);
 
     const syncCompareSvgSize = useCallback((
         container: HTMLDivElement | null,
@@ -7353,7 +7387,7 @@ ${partsBodyXml}
             }
 
             if (targetScore === score) {
-                const applied = await applyXmlToScore(patched.xml, { telemetrySource: 'compare_overwrite' });
+                const applied = await aiScoreBridge.applyXml(patched.xml, 'compare_overwrite');
                 if (!applied) {
                     return false;
                 }
@@ -7381,14 +7415,15 @@ ${partsBodyXml}
             setCompareSwapBusy(false);
         }
     }, [
+        aiScoreBridge,
         compareSwapBusy,
         score,
         compareView,
         getScoreMusicXmlText,
         replaceMeasuresInMusicXml,
-        applyXmlToScore,
         invalidateAiProposalExpectedCurrent,
         recordAiProposalAppliedXml,
+        setAiError,
         setAiProposalApplyError,
         verifyAiProposalCurrent,
     ]);
@@ -7452,13 +7487,13 @@ ${partsBodyXml}
             setCompareSwapBusy(false);
         }
     }, [
+        aiScoreBridge,
         compareView,
         compareSwapBusy,
         score,
-        getScoreMusicXmlText,
-        applyXmlToScore,
         invalidateAiProposalExpectedCurrent,
         recordAiProposalAppliedXml,
+        setAiError,
         setAiProposalApplyError,
         verifyAiProposalCurrent,
     ]);
@@ -7499,6 +7534,8 @@ ${partsBodyXml}
         score,
         getScoreMusicXmlText,
         captureAiProposal,
+        setAiBaseXml,
+        setAiError,
         setAiProposalApplyError,
     ]);
 
@@ -8075,6 +8112,7 @@ ${partsBodyXml}
             setCompareRightLoading(false);
         }
     }, [
+        aiScoreBridge,
         compareView,
         isAiCompareMode,
         aiDiffFeedbackBusy,
@@ -8084,6 +8122,12 @@ ${partsBodyXml}
         getAiProposalExpectedHashes,
         getAiProposalSession,
         restoreAiProposalContinuity,
+        setAiBaseXml,
+        setAiError,
+        setAiOutput,
+        setAiPatch,
+        setAiPatchError,
+        setAiPatchedXml,
         setAiProposalAudit,
         setAiProposalSession,
         snapshotAiProposalContinuity,
@@ -8114,8 +8158,6 @@ ${partsBodyXml}
         aiPrompt,
         captureApiTraceContext,
         parseMusicXmlPatch,
-        getScoreMusicXmlText,
-        score,
     ]);
 
     const parsePartsFromMetadata = useCallback((metadata: unknown): PartSummary[] => {
@@ -8822,7 +8864,6 @@ ${partsBodyXml}
         scoreTitle,
         versionsCommitMessage,
         refreshSourceHistory,
-        toSafeFilename,
     ]);
 
     const handleSaveCheckpoint = async () => {
@@ -10092,7 +10133,14 @@ ${partsBodyXml}
         setAiPatchError(null);
         setAiPatchedXml(applied.xml);
         return { ok: true, baseXml: baseXml.trim(), proposedXml: applied.xml.trim(), error: '', annotations };
-    }, [aiBaseXml, resolveXmlContext]);
+    }, [
+        aiBaseXml,
+        aiScoreBridge,
+        setAiOutput,
+        setAiPatch,
+        setAiPatchError,
+        setAiPatchedXml,
+    ]);
 
     const handleAiRequest = async () => {
         if (!aiEnabled) {
