@@ -35,7 +35,6 @@ export const MUSIC_DIFF_FEEDBACK_TOOL_CONTRACT: MusicToolContract = {
       },
       blocks: {
         type: 'array',
-        minItems: 1,
         items: {
           type: 'object',
           additionalProperties: false,
@@ -45,6 +44,20 @@ export const MUSIC_DIFF_FEEDBACK_TOOL_CONTRACT: MusicToolContract = {
             measureRange: { type: 'string', minLength: 1 },
             status: { type: 'string', enum: ['accepted', 'rejected', 'comment', 'pending'] },
             comment: { type: 'string' },
+          },
+        },
+      },
+      userEdits: {
+        type: 'array',
+        maxItems: 2,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['side', 'label', 'diff'],
+          properties: {
+            side: { type: 'string', enum: ['current', 'proposal'] },
+            label: { type: 'string', minLength: 1, maxLength: 128 },
+            diff: { type: 'string', minLength: 1, maxLength: 24000 },
           },
         },
       },

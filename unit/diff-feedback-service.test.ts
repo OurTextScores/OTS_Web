@@ -94,6 +94,56 @@ describe('diff-feedback-service', () => {
     expect(prompt).toContain('GLOBAL NOTE: "Dynamics are too strong"');
   });
 
+  it('includes authoritative compare-pane edit diffs in the next-cycle prompt', () => {
+    const prompt = buildFeedbackPrompt({
+      iteration: 1,
+      blocks: [],
+      userEdits: [{
+        side: 'proposal',
+        label: 'Assistant proposal',
+        diff: '@@ -1 +1 @@\n-<rest/>\n+<note/>',
+      }],
+    });
+
+    expect(prompt).toContain('MANUAL COMPARE-PANE EDITS');
+    expect(prompt).toContain('Assistant proposal (proposal)');
+    expect(prompt).toContain('-<rest/>');
+    expect(prompt).toContain('+<note/>');
+    expect(prompt).toContain('preserves the authoritative manual score edits');
+  });
+
+  it('accepts an edit-only feedback cycle', async () => {
+    mocked.runMusicPatchService.mockResolvedValue(successPatchBody());
+
+    const result = await runDiffFeedbackService({
+      content: SESSION_BASE_XML,
+      iteration: 0,
+      provider: 'openai',
+      model: 'gpt-5.5',
+      apiKey: 'sk-test',
+      blocks: [],
+      userEdits: [{
+        side: 'current',
+        label: 'Current score',
+        diff: '@@ -1 +1 @@\n-<measure/>\n+<measure><note/></measure>',
+      }],
+    });
+
+    expect(result.status).toBe(200);
+    expect(mocked.runMusicPatchService).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: SESSION_BASE_XML,
+        prompt: expect.stringContaining('Current score (current)'),
+      }),
+      undefined,
+    );
+    expect(result.body).toMatchObject({
+      audit: {
+        manualEditCount: 1,
+      },
+    });
+  });
+
   it('runs feedback flow and returns patch plus proposedXml', async () => {
     const onProgress = vi.fn();
     mocked.runMusicPatchService.mockResolvedValue({

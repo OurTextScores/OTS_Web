@@ -114,6 +114,7 @@ import {
     AiCompareWorkspace,
     AiCompareWorkspaceActions,
 } from './score-editor/AiCompareWorkspace';
+import { ComparePaneEditorControls } from './score-editor/ComparePaneEditorControls';
 import { AiDiffBlockReview } from './score-editor/AiDiffBlockReview';
 import { XmlDiffView } from './score-editor/XmlDiffView';
 import {
@@ -128,6 +129,11 @@ import {
     type MusicXmlPatchOp,
 } from './score-editor/ai-assistant-types';
 import { type AiScoreBridge } from './score-editor/ai-score-bridge';
+import {
+    buildCompareUserEditDiff,
+    type CompareScoreRole,
+    type CompareUserEditDiff,
+} from '../lib/compare-user-edit-diff';
 
 type SelectionBox = {
     index: number | null;
@@ -600,6 +606,8 @@ type MutationMethods = Pick<
     | 'redo'
     | 'relayout'
     | 'setTimeSignature'
+    | 'setTimeSignatureWithType'
+    | 'setKeySignature'
     | 'setHarmonyVoiceLiteral'
     | 'setChordSymbolStylePreset'
     | 'setClef'
@@ -1354,7 +1362,35 @@ export default function ScoreEditor() {
     const [compareRightPageCount, setCompareRightPageCount] = useState(1);
     const [compareRightLoading, setCompareRightLoading] = useState(false);
     const [compareRightError, setCompareRightError] = useState<string | null>(null);
+    const [compareFitZoom, setCompareFitZoom] = useState(0.5);
     const [compareZoom, setCompareZoom] = useState<number | null>(null);
+    const [compareActiveSide, setCompareActiveSide] = useState<'left' | 'right' | null>(null);
+    const [compareEditBusy, setCompareEditBusy] = useState(false);
+    const compareEditBusyRef = useRef(false);
+    const compareEditGenerationRef = useRef(0);
+    const comparePendingOperationsRef = useRef<Set<Promise<unknown>>>(new Set());
+    const compareScoreTeardownQueueRef = useRef<Promise<void>>(Promise.resolve());
+    const [compareEditedRoles, setCompareEditedRoles] = useState<CompareScoreRole[]>([]);
+    const compareEditBaselinesRef = useRef<Record<CompareScoreRole, string | null>>({
+        current: null,
+        proposal: null,
+    });
+    const [compareNoteInputByRole, setCompareNoteInputByRole] = useState<Record<CompareScoreRole, boolean>>({
+        current: false,
+        proposal: false,
+    });
+    const compareNoteInputByRoleRef = useRef<Record<CompareScoreRole, boolean>>({
+        current: false,
+        proposal: false,
+    });
+    const [compareHasSelectionByRole, setCompareHasSelectionByRole] = useState<Record<CompareScoreRole, boolean>>({
+        current: false,
+        proposal: false,
+    });
+    const [compareSelectionBoxesByRole, setCompareSelectionBoxesByRole] = useState<Record<CompareScoreRole, SelectionBox[]>>({
+        current: [],
+        proposal: [],
+    });
     const [compareLeftSvgSize, setCompareLeftSvgSize] = useState<{ width: number; height: number } | null>(null);
     const [compareRightSvgSize, setCompareRightSvgSize] = useState<{ width: number; height: number } | null>(null);
     const [compareLeftMeasurePositions, setCompareLeftMeasurePositions] = useState<Positions | null>(null);
@@ -2912,6 +2948,26 @@ export default function ScoreEditor() {
         : '';
     const compareLeftIsCurrent = compareLeftScore === score;
     const compareRightIsCurrent = compareRightScoreDisplay === score;
+    const compareLeftRole: CompareScoreRole | null = compareLeftScore
+        ? (compareLeftIsCurrent ? 'current' : 'proposal')
+        : null;
+    const compareRightRole: CompareScoreRole | null = compareRightScoreDisplay
+        ? (compareRightIsCurrent ? 'current' : 'proposal')
+        : null;
+    const compareActiveScore = compareActiveSide === 'left'
+        ? compareLeftScore
+        : compareActiveSide === 'right'
+            ? compareRightScoreDisplay
+            : null;
+    const compareActiveRole: CompareScoreRole | null = compareActiveScore
+        ? (compareActiveScore === score ? 'current' : 'proposal')
+        : null;
+    const compareLeftSelectionBoxes = compareLeftRole
+        ? compareSelectionBoxesByRole[compareLeftRole]
+        : [];
+    const compareRightSelectionBoxes = compareRightRole
+        ? compareSelectionBoxesByRole[compareRightRole]
+        : [];
     const compareSupportsReflow = Boolean(
         score?.measureLineBreaks
         && score?.setMeasureLineBreaks
@@ -3250,16 +3306,19 @@ export default function ScoreEditor() {
     );
     const aiDiffCommentTotal = aiDiffCommentCount + aiMeasureNoteCount;
     const hasGlobalNote = aiDiffGlobalComment.trim().length > 0;
+    const compareManualEditCount = compareEditedRoles.length;
     const canSendDiffFeedback = useMemo(
         () => !aiBusy
             && !aiDiffFeedbackBusy
             && !compareSwapBusy
+            && !compareEditBusy
             && (
                 (aiDiffRejectedCount + aiDiffCommentTotal > 0)
                 || hasGlobalNote
+                || compareManualEditCount > 0
                 || (aiDiffPendingCount > 0 && aiDiffAcceptedCount > 0)
             ),
-        [aiBusy, aiDiffFeedbackBusy, compareSwapBusy, aiDiffRejectedCount, aiDiffCommentTotal, hasGlobalNote, aiDiffPendingCount, aiDiffAcceptedCount],
+        [aiBusy, aiDiffFeedbackBusy, compareSwapBusy, compareEditBusy, aiDiffRejectedCount, aiDiffCommentTotal, hasGlobalNote, compareManualEditCount, aiDiffPendingCount, aiDiffAcceptedCount],
     );
     const diffFeedbackButtonLabel = useMemo(() => {
         const parts: string[] = [];
@@ -3272,15 +3331,17 @@ export default function ScoreEditor() {
         if (hasGlobalNote) {
             parts.push('global note');
         }
+        if (compareManualEditCount > 0) {
+            parts.push(`${compareManualEditCount} edited score${compareManualEditCount === 1 ? '' : 's'}`);
+        }
         if (aiDiffPendingCount > 0 && aiDiffAcceptedCount > 0 && aiDiffRejectedCount + aiDiffCommentTotal === 0 && !hasGlobalNote) {
             parts.push(`${aiDiffPendingCount} pending`);
         }
         return parts.length
             ? `Send Feedback (${parts.join(', ')})`
             : 'Send Feedback';
-    }, [aiDiffCommentTotal, aiDiffRejectedCount, hasGlobalNote, aiDiffPendingCount, aiDiffAcceptedCount]);
-    const compareDefaultZoom = 0.5;
-    const compareEffectiveZoom = compareZoom ?? compareDefaultZoom;
+    }, [aiDiffCommentTotal, aiDiffRejectedCount, hasGlobalNote, compareManualEditCount, aiDiffPendingCount, aiDiffAcceptedCount]);
+    const compareEffectiveZoom = compareZoom ?? compareFitZoom;
 
     const compareGutterRegionRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -5265,6 +5326,73 @@ ${partsBodyXml}
         }
     }, []);
 
+    const invalidateCompareOperations = useCallback(() => {
+        compareEditGenerationRef.current += 1;
+        return compareEditGenerationRef.current;
+    }, []);
+
+    const trackCompareOperation = useCallback(<T,>(operation: Promise<T>): Promise<T> => {
+        const trackedOperation = operation.finally(() => {
+            comparePendingOperationsRef.current.delete(trackedOperation);
+        });
+        comparePendingOperationsRef.current.add(trackedOperation);
+        return trackedOperation;
+    }, []);
+
+    const waitForCompareOperations = useCallback(async () => {
+        // New work is rejected once a lifecycle transition invalidates the current
+        // generation. Loop so an operation already queued from the same browser event
+        // cannot escape the first snapshot.
+        while (comparePendingOperationsRef.current.size > 0) {
+            await Promise.allSettled(Array.from(comparePendingOperationsRef.current));
+        }
+    }, []);
+
+    const queueCompareScoreTeardown = useCallback((
+        auxiliaryScore: Score | null,
+        liveScore: Score | null,
+        label: string,
+    ) => {
+        const priorTeardown = compareScoreTeardownQueueRef.current;
+        const teardown = priorTeardown
+            .catch(() => {})
+            .then(async () => {
+                await waitForCompareOperations();
+
+                const scoresToDisable = Array.from(new Set(
+                    [liveScore, auxiliaryScore].filter((entry): entry is Score => Boolean(entry)),
+                ));
+                for (const targetScore of scoresToDisable) {
+                    // A preceding teardown may already have retired the captured
+                    // auxiliary score. Never call back into a destroyed instance.
+                    if (targetScore === auxiliaryScore && compareRightScoreRef.current !== auxiliaryScore) {
+                        continue;
+                    }
+                    if (!targetScore.setNoteEntryMode) {
+                        continue;
+                    }
+                    try {
+                        await runSerializedScoreOperation(
+                            () => Promise.resolve(targetScore.setNoteEntryMode!(false)),
+                            `compare-note-input-off:${label}`,
+                        );
+                    } catch (err) {
+                        console.warn(`Failed to disable compare note input during ${label}:`, err);
+                    }
+                }
+
+                if (auxiliaryScore && compareRightScoreRef.current === auxiliaryScore) {
+                    compareRightScoreRef.current = null;
+                    auxiliaryScore.destroy();
+                }
+            });
+        const guardedTeardown = teardown.catch((err) => {
+            console.warn(`Failed to retire compare score during ${label}:`, err);
+        });
+        compareScoreTeardownQueueRef.current = guardedTeardown;
+        return guardedTeardown;
+    }, [runSerializedScoreOperation, waitForCompareOperations]);
+
     const scheduleLargeScoreInteractionPrime = useCallback((
         targetScore: Score,
     ) => {
@@ -6415,13 +6543,618 @@ ${partsBodyXml}
         return currentPage;
     }, [compareContinuousMode, score, compareRightScore, currentPage, compareRightPageCount]);
 
+    const getCompareScoreRole = useCallback((targetScore: Score): CompareScoreRole => (
+        targetScore === score ? 'current' : 'proposal'
+    ), [score]);
+
+    const refreshCompareSelectionGeometry = useCallback(async (
+        targetScore: Score,
+        role: CompareScoreRole,
+        side: 'left' | 'right',
+        selected?: boolean,
+        isCurrent?: () => boolean,
+    ) => {
+        if (isCurrent && !isCurrent()) {
+            return [] as SelectionBox[];
+        }
+        if (selected === false) {
+            setCompareSelectionBoxesByRole((prev) => ({ ...prev, [role]: [] }));
+            setCompareHasSelectionByRole((prev) => ({ ...prev, [role]: false }));
+            return [] as SelectionBox[];
+        }
+
+        const hasGeometryBinding = Boolean(
+            targetScore.getSelectionBoundingBoxes || targetScore.getSelectionBoundingBox,
+        );
+        let rawBoxes: Array<{
+            page: number;
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        }> = [];
+        try {
+            if (targetScore.getSelectionBoundingBoxes) {
+                const result = await runSerializedScoreOperation(
+                    () => Promise.resolve(targetScore.getSelectionBoundingBoxes!()),
+                    `compare-selection-boxes:${side}`,
+                );
+                rawBoxes = Array.isArray(result) ? result : [];
+            }
+            if (rawBoxes.length === 0 && targetScore.getSelectionBoundingBox) {
+                const result = await runSerializedScoreOperation(
+                    () => Promise.resolve(targetScore.getSelectionBoundingBox!()),
+                    `compare-selection-box:${side}`,
+                );
+                if (result) {
+                    rawBoxes = [result];
+                }
+            }
+        } catch (err) {
+            console.warn(`Failed to read ${side} compare selection geometry:`, err);
+        }
+
+        let boxes: SelectionBox[] = rawBoxes
+            .filter((box) => (
+                Number.isFinite(box.x)
+                && Number.isFinite(box.y)
+                && Number.isFinite(box.width)
+                && Number.isFinite(box.height)
+                && box.width > 0
+                && box.height > 0
+            ))
+            .map((box, index) => ({
+                index,
+                page: box.page,
+                x: box.x,
+                y: box.y,
+                w: box.width,
+                h: box.height,
+                centerX: box.x + (box.width / 2),
+                centerY: box.y + (box.height / 2),
+                classes: '',
+            }));
+
+        // Older bindings may expose selection in the highlighted SVG without a
+        // bounding-box method. Mirror the main editor's DOM fallback so a selected
+        // note still gets the same blue interaction rectangle.
+        if (boxes.length === 0) {
+            const container = side === 'left'
+                ? compareLeftContainerRef.current
+                : compareRightContainerRef.current;
+            if (container) {
+                const containerRect = container.getBoundingClientRect();
+                const candidates = Array.from(new Set(
+                    ['.selected', '.note-selected', '.ms-selection']
+                        .flatMap((selector) => Array.from(container.querySelectorAll(selector))),
+                ));
+                const page = getCompareTargetPage(targetScore);
+                boxes = candidates
+                    .map((candidate, index): SelectionBox | null => {
+                        const rect = candidate.getBoundingClientRect();
+                        const x = (rect.left - containerRect.left) / compareEffectiveZoom;
+                        const y = (rect.top - containerRect.top) / compareEffectiveZoom;
+                        const w = rect.width / compareEffectiveZoom;
+                        const h = rect.height / compareEffectiveZoom;
+                        if (!(w > 0 && h > 0)) {
+                            return null;
+                        }
+                        return {
+                            index,
+                            page,
+                            x,
+                            y,
+                            w,
+                            h,
+                            centerX: x + (w / 2),
+                            centerY: y + (h / 2),
+                            classes: candidate.getAttribute('class') ?? '',
+                        };
+                    })
+                    .filter((box): box is SelectionBox => Boolean(box));
+            }
+        }
+
+        const targetPage = getCompareTargetPage(targetScore);
+        const visibleBoxes = compareContinuousMode
+            ? boxes
+            : boxes.filter((box) => box.page === targetPage);
+        if (isCurrent && !isCurrent()) {
+            return [] as SelectionBox[];
+        }
+        setCompareSelectionBoxesByRole((prev) => ({ ...prev, [role]: visibleBoxes }));
+        setCompareHasSelectionByRole((prev) => ({
+            ...prev,
+            [role]: boxes.length > 0 || (selected === true && !hasGeometryBinding),
+        }));
+        return visibleBoxes;
+    }, [
+        compareContinuousMode,
+        compareEffectiveZoom,
+        getCompareTargetPage,
+        runSerializedScoreOperation,
+    ]);
+
+    const renderEditedCompareScore = useCallback(async (
+        targetScore: Score,
+        side: 'left' | 'right',
+        highlightSelection = true,
+    ) => {
+        const container = side === 'left' ? compareLeftContainerRef.current : compareRightContainerRef.current;
+        const setSize = side === 'left' ? setCompareLeftSvgSize : setCompareRightSvgSize;
+        const setPositions = side === 'left' ? setCompareLeftMeasurePositions : setCompareRightMeasurePositions;
+        const targetPage = getCompareTargetPage(targetScore);
+        await renderScoreToContainer(targetScore, container, targetPage, highlightSelection);
+        syncCompareSvgSize(container, setSize);
+        await refreshMeasurePositions(targetScore, setPositions);
+    }, [getCompareTargetPage, refreshMeasurePositions, renderScoreToContainer, syncCompareSvgSize]);
+
+    const persistCompareScoreEdit = useCallback(async (
+        targetScore: Score,
+        side: 'left' | 'right',
+        beforeXml: string,
+        isCurrentGeneration: () => boolean,
+    ) => {
+        const role = getCompareScoreRole(targetScore);
+        const fallbackXml = role === 'current'
+            ? compareView?.currentXml ?? null
+            : compareView?.checkpointXml ?? null;
+        const afterXml = await getScoreMusicXmlText(targetScore, fallbackXml);
+        if (!isCurrentGeneration()) {
+            return null;
+        }
+        if (!afterXml) {
+            throw new Error('Unable to export the edited compare score.');
+        }
+        if (afterXml === beforeXml) {
+            await renderEditedCompareScore(targetScore, side, true);
+            if (!isCurrentGeneration()) {
+                return null;
+            }
+            await refreshCompareSelectionGeometry(
+                targetScore,
+                role,
+                side,
+                undefined,
+                isCurrentGeneration,
+            );
+            return isCurrentGeneration() ? afterXml : null;
+        }
+        const editBaseline = compareEditBaselinesRef.current[role] ?? beforeXml;
+        if (afterXml === editBaseline) {
+            compareEditBaselinesRef.current[role] = null;
+            setCompareEditedRoles((prev) => prev.filter((entry) => entry !== role));
+        } else {
+            compareEditBaselinesRef.current[role] = editBaseline;
+            setCompareEditedRoles((prev) => prev.includes(role) ? prev : [...prev, role]);
+        }
+        if (role === 'proposal') {
+            // This update came from the already-loaded auxiliary Score. Mark the
+            // exported XML as loaded so the compare lifecycle does not destroy and
+            // recreate that same instance in response to our state update.
+            compareLoadedCheckpointXmlRef.current = afterXml;
+            setCompareView((prev) => prev ? { ...prev, checkpointXml: afterXml } : prev);
+        } else {
+            setScoreDirtySinceCheckpoint(true);
+            setScoreDirtySinceXml(true);
+            setCompareView((prev) => prev ? { ...prev, currentXml: afterXml } : prev);
+            if (isAiCompareMode) {
+                try {
+                    await recordAiProposalAppliedXml(afterXml);
+                    setAiProposalApplyError(null);
+                } catch (hashError) {
+                    const message = errorMessage(hashError)
+                        || 'The score was edited, but proposal continuity could not be advanced.';
+                    invalidateAiProposalExpectedCurrent(message);
+                    setAiProposalApplyError(message);
+                }
+            }
+            if (!isCurrentGeneration()) {
+                return null;
+            }
+            // Keep the editor underneath the modal current for when the modal closes.
+            await renderScore(targetScore, currentPageRef.current);
+        }
+        if (!isCurrentGeneration()) {
+            return null;
+        }
+        await renderEditedCompareScore(targetScore, side, true);
+        if (!isCurrentGeneration()) {
+            return null;
+        }
+        await refreshCompareSelectionGeometry(
+            targetScore,
+            role,
+            side,
+            undefined,
+            isCurrentGeneration,
+        );
+        if (!isCurrentGeneration()) {
+            return null;
+        }
+        setCompareAlignmentRevision((value) => value + 1);
+        return afterXml;
+    }, [
+        compareView,
+        getCompareScoreRole,
+        getScoreMusicXmlText,
+        invalidateAiProposalExpectedCurrent,
+        isAiCompareMode,
+        recordAiProposalAppliedXml,
+        refreshCompareSelectionGeometry,
+        renderScore,
+        renderEditedCompareScore,
+        setAiProposalApplyError,
+    ]);
+
+    const performCompareMutation = useCallback(async (
+        label: string,
+        action: (targetScore: Score) => Promise<unknown> | unknown,
+        options?: { side?: 'left' | 'right'; skipRelayout?: boolean },
+    ) => {
+        const side = options?.side ?? compareActiveSide;
+        const targetScore = side === 'left'
+            ? compareLeftScore
+            : side === 'right'
+                ? compareRightScoreDisplay
+                : null;
+        if (
+            !compareView
+            || !side
+            || !targetScore
+            || compareEditBusyRef.current
+            || compareSwapBusy
+            || aiDiffFeedbackBusy
+        ) {
+            return false;
+        }
+        const generation = invalidateCompareOperations();
+        const isCurrentGeneration = () => compareEditGenerationRef.current === generation;
+        setCompareActiveSide(side);
+        compareEditBusyRef.current = true;
+        setCompareEditBusy(true);
+        const operation = trackCompareOperation((async () => {
+            const role = getCompareScoreRole(targetScore);
+            const fallbackXml = role === 'current' ? compareView.currentXml : compareView.checkpointXml;
+            const beforeXml = await getScoreMusicXmlText(targetScore, fallbackXml);
+            if (!isCurrentGeneration()) {
+                return false;
+            }
+            if (!beforeXml) {
+                throw new Error('Unable to snapshot the compare score before editing.');
+            }
+            const result = await runSerializedScoreOperation(
+                () => Promise.resolve(action(targetScore)),
+                `compare-edit:${label}`,
+            );
+            if (!isCurrentGeneration() || result === false) {
+                return false;
+            }
+            if (!options?.skipRelayout && targetScore.relayout) {
+                await runSerializedScoreOperation(
+                    () => Promise.resolve(targetScore.relayout!()),
+                    `compare-relayout:${label}`,
+                );
+                if (!isCurrentGeneration()) {
+                    return false;
+                }
+            }
+            if (targetScore === score) {
+                await refreshPageCount(targetScore, currentPageRef.current);
+            } else if (targetScore.npages) {
+                const pages = await runSerializedScoreOperation(
+                    () => Promise.resolve(targetScore.npages!()),
+                    'npages(compare-edit)',
+                );
+                if (!isCurrentGeneration()) {
+                    return false;
+                }
+                setCompareRightPageCount(Math.max(1, pages));
+            }
+            const persistedXml = await persistCompareScoreEdit(
+                targetScore,
+                side,
+                beforeXml,
+                isCurrentGeneration,
+            );
+            return Boolean(persistedXml && isCurrentGeneration());
+        })());
+        try {
+            return await operation;
+        } catch (err) {
+            if (!isCurrentGeneration()) {
+                return false;
+            }
+            console.error(`Compare mutation "${label}" failed:`, err);
+            alert(`Unable to ${label} in the compare score. Check the console for details.`);
+            return false;
+        } finally {
+            compareEditBusyRef.current = false;
+            setCompareEditBusy(false);
+        }
+    }, [
+        aiDiffFeedbackBusy,
+        compareActiveSide,
+        compareLeftScore,
+        compareRightScoreDisplay,
+        compareSwapBusy,
+        compareView,
+        getCompareScoreRole,
+        getScoreMusicXmlText,
+        invalidateCompareOperations,
+        persistCompareScoreEdit,
+        refreshPageCount,
+        runSerializedScoreOperation,
+        score,
+        trackCompareOperation,
+    ]);
+
+    const setCompareNoteInputMode = useCallback(async (
+        enabled: boolean,
+        side: 'left' | 'right' = compareActiveSide ?? 'left',
+    ) => {
+        const targetScore = side === 'left' ? compareLeftScore : compareRightScoreDisplay;
+        if (
+            !targetScore?.setNoteEntryMode
+            || compareEditBusyRef.current
+            || compareSwapBusy
+            || aiDiffFeedbackBusy
+        ) {
+            return;
+        }
+        const generation = invalidateCompareOperations();
+        setCompareActiveSide(side);
+        const role = getCompareScoreRole(targetScore);
+        const operation = trackCompareOperation((async () => {
+            if (enabled && targetScore.setInputStateFromSelection) {
+                await runSerializedScoreOperation(
+                    () => Promise.resolve(targetScore.setInputStateFromSelection!()),
+                    `compare-note-input-selection:${side}`,
+                ).catch(() => {});
+                if (compareEditGenerationRef.current !== generation) {
+                    return;
+                }
+            }
+            await runSerializedScoreOperation(
+                () => Promise.resolve(targetScore.setNoteEntryMode!(enabled)),
+                `compare-note-input:${side}`,
+            );
+            if (compareEditGenerationRef.current !== generation) {
+                return;
+            }
+            compareNoteInputByRoleRef.current = {
+                ...compareNoteInputByRoleRef.current,
+                [role]: enabled,
+            };
+            setCompareNoteInputByRole(compareNoteInputByRoleRef.current);
+        })());
+        try {
+            await operation;
+        } catch (err) {
+            console.warn('Failed to toggle compare note input mode:', err);
+        }
+    }, [
+        aiDiffFeedbackBusy,
+        compareActiveSide,
+        compareLeftScore,
+        compareRightScoreDisplay,
+        compareSwapBusy,
+        getCompareScoreRole,
+        invalidateCompareOperations,
+        runSerializedScoreOperation,
+        trackCompareOperation,
+    ]);
+
+    const handleCompareAddBar = useCallback((side: 'left' | 'right') => {
+        void performCompareMutation('add a bar', async (targetScore) => {
+            if (!targetScore.insertMeasures) {
+                alert('This build of webmscore does not expose "insertMeasures".');
+                return false;
+            }
+            return targetScore.insertMeasures(1, measureInsertTargetMap.end);
+        }, { side });
+    }, [performCompareMutation]);
+
+    const handleCompareApplyFloatingPaletteItem = useCallback((item: ScorePaletteItem) => {
+        const methodAndArgs: Partial<Record<ScorePaletteItem['kind'], [keyof MutationMethods, ...unknown[]]>> = {
+            clef: ['setClef', item.subtype],
+            dynamic: ['addDynamic', item.subtype],
+            ottava: ['addOttava', item.subtype],
+            trill: ['addTrill', item.subtype],
+            glissando: ['addGlissando', item.subtype],
+            arpeggio: ['addArpeggio', item.subtype],
+            fermata: ['addFermata', item.subtype],
+            breath: ['addBreath', item.subtype],
+            tremolo: ['addTremolo', item.subtype],
+            marker: ['addMarker', item.subtype],
+            jump: ['addJump', item.subtype],
+            notehead: ['setNoteheadGroup', item.subtype],
+            beam: ['setBeamMode', item.subtype],
+            accidental: ['setAccidental', item.subtype],
+            gracenote: ['addGraceNote', item.subtype],
+            hairpin: ['addHairpin', item.subtype],
+            pedal: ['addPedal', item.subtype],
+            keysig: ['setKeySignature', item.subtype],
+            barline: ['setBarLineType', item.subtype],
+            volta: ['addVolta', item.subtype],
+            'repeat-count': ['setRepeatCount', item.subtype],
+        };
+        if (item.kind === 'articulation') {
+            const articulation = articulationOptions[item.subtype];
+            if (articulation) {
+                methodAndArgs.articulation = ['addArticulation', articulation.symbol];
+            }
+        } else if (item.kind === 'timesig') {
+            const [numerator, denominator, timeSigType] = item.args ?? [];
+            if (numerator && denominator) {
+                methodAndArgs.timesig = typeof timeSigType === 'number'
+                    ? ['setTimeSignatureWithType', numerator, denominator, timeSigType]
+                    : ['setTimeSignature', numerator, denominator];
+            }
+        } else if (item.kind === 'repeat-start') {
+            methodAndArgs['repeat-start'] = ['toggleRepeatStart'];
+        } else if (item.kind === 'repeat-end') {
+            methodAndArgs['repeat-end'] = ['toggleRepeatEnd'];
+        }
+        const binding = methodAndArgs[item.kind];
+        if (!binding) {
+            console.warn(`Palette item "${item.kind}" is not editable in compare mode.`);
+            return;
+        }
+        const [methodName, ...args] = binding;
+        void performCompareMutation(`apply ${item.label}`, (targetScore) => {
+            const fn = (targetScore as MutationMethods)[methodName];
+            if (typeof fn !== 'function') {
+                alert(`This build of webmscore does not expose "${String(methodName)}".`);
+                return false;
+            }
+            return (fn as (...values: unknown[]) => unknown).apply(targetScore, args);
+        });
+    }, [performCompareMutation]);
+
+    const handleComparePaneClick = useCallback((
+        event: React.MouseEvent<HTMLDivElement>,
+        side: 'left' | 'right',
+    ) => {
+        const targetScore = side === 'left' ? compareLeftScore : compareRightScoreDisplay;
+        const positions = side === 'left' ? compareLeftMeasurePositions : compareRightMeasurePositions;
+        const wrapper = side === 'left' ? compareLeftWrapperRef.current : compareRightWrapperRef.current;
+        if (!targetScore || !positions || !wrapper) {
+            return;
+        }
+        setCompareActiveSide(side);
+        if (compareEditBusyRef.current || compareSwapBusy || aiDiffFeedbackBusy) {
+            return;
+        }
+        const role = getCompareScoreRole(targetScore);
+        const measureIndex = hitTestMeasure(
+            positions,
+            event.clientX,
+            event.clientY,
+            side === 'left' ? compareLeftWrapperRef : compareRightWrapperRef,
+            compareEffectiveZoom,
+        );
+        const measure = measureIndex >= 0 ? positions.elements[measureIndex] : null;
+        const rect = wrapper.getBoundingClientRect();
+        const x = (event.clientX - rect.left) / compareEffectiveZoom;
+        const absoluteY = (event.clientY - rect.top) / compareEffectiveZoom;
+        const pageHeight = positions.pageSize?.height ?? 0;
+        const legacyMeasureHeight = measure
+            ? (measure as unknown as Record<string, unknown>).height
+            : null;
+        const rawMeasureHeight = measure
+            ? (typeof measure.sy === 'number'
+                ? measure.sy
+                : typeof legacyMeasureHeight === 'number'
+                    ? legacyMeasureHeight
+                    : 0)
+            : 0;
+        const usesPageOffset = Boolean(
+            measure
+            && pageHeight > 0
+            && measure.page > 0
+            && (measure.y + rawMeasureHeight) <= pageHeight * 1.2,
+        );
+        const renderedPage = getCompareTargetPage(targetScore);
+        const page = compareContinuousMode ? (measure?.page ?? renderedPage) : renderedPage;
+        const y = compareContinuousMode && usesPageOffset ? absoluteY - page * pageHeight : absoluteY;
+
+        if (compareNoteInputByRoleRef.current[role]) {
+            void performCompareMutation('place a note', async (activeScore) => {
+                if (!activeScore.putNote) {
+                    alert('This build of webmscore does not expose "putNote".');
+                    return false;
+                }
+                const result = await activeScore.putNote(page, x, y);
+                if (result !== false) {
+                    setCompareHasSelectionByRole((prev) => ({ ...prev, [role]: true }));
+                }
+                return result;
+            }, { side });
+            return;
+        }
+
+        handleCompareScoreClick(event, side);
+        if (!targetScore.selectElementAtPoint && !targetScore.selectElementAtPointWithMode) {
+            return;
+        }
+        const hasExistingSelection = compareHasSelectionByRole[role];
+        const selectionMode: 0 | 2 | 3 = (event.ctrlKey || event.metaKey)
+            ? 2
+            : event.shiftKey && hasExistingSelection
+                ? 3
+                : 0;
+        const generation = invalidateCompareOperations();
+        const selectionOperation = trackCompareOperation(
+            runSerializedScoreOperation(
+                () => Promise.resolve(
+                    targetScore.selectElementAtPointWithMode
+                        ? targetScore.selectElementAtPointWithMode(page, x, y, selectionMode)
+                        : targetScore.selectElementAtPoint!(page, x, y),
+                ),
+                `compare-select:${side}`,
+            ).then(async (selected) => {
+                if (compareEditGenerationRef.current !== generation) {
+                    return;
+                }
+                if (selected === false && selectionMode === 0 && targetScore.clearSelection) {
+                    await runSerializedScoreOperation(
+                        () => Promise.resolve(targetScore.clearSelection!()),
+                        `compare-selection-clear:${side}`,
+                    );
+                }
+                await renderEditedCompareScore(targetScore, side, true);
+                if (compareEditGenerationRef.current !== generation) {
+                    return;
+                }
+                await refreshCompareSelectionGeometry(
+                    targetScore,
+                    role,
+                    side,
+                    selected !== false,
+                    () => compareEditGenerationRef.current === generation,
+                );
+            }),
+        );
+        void selectionOperation.catch((err) => {
+            if (compareEditGenerationRef.current !== generation) {
+                return;
+            }
+            console.warn('Failed to select an element in compare score:', err);
+        });
+    }, [
+        aiDiffFeedbackBusy,
+        compareEffectiveZoom,
+        compareContinuousMode,
+        compareLeftMeasurePositions,
+        compareLeftScore,
+        compareRightMeasurePositions,
+        compareRightScoreDisplay,
+        compareHasSelectionByRole,
+        compareSwapBusy,
+        getCompareScoreRole,
+        getCompareTargetPage,
+        handleCompareScoreClick,
+        hitTestMeasure,
+        invalidateCompareOperations,
+        performCompareMutation,
+        refreshCompareSelectionGeometry,
+        renderEditedCompareScore,
+        runSerializedScoreOperation,
+        trackCompareOperation,
+    ]);
+
     const handleCompareOverwriteBlock = useCallback(async (
         sourceScore: Score | null,
         targetScore: Score | null,
         partIndex: number,
         pairs: Array<{ leftIndex: number; rightIndex: number }>,
     ): Promise<boolean> => {
-        if (compareSwapBusy) {
+        if (
+            compareSwapBusy
+            || compareEditBusyRef.current
+            || comparePendingOperationsRef.current.size > 0
+        ) {
             return false;
         }
         if (!sourceScore || !targetScore) {
@@ -6547,7 +7280,11 @@ ${partsBodyXml}
         if (!score) {
             return;
         }
-        if (compareSwapBusy) {
+        if (
+            compareSwapBusy
+            || compareEditBusyRef.current
+            || comparePendingOperationsRef.current.size > 0
+        ) {
             return;
         }
 
@@ -6611,7 +7348,14 @@ ${partsBodyXml}
     // expectation, so the refreshed diff shows any drift and Apply/Apply All work again.
     // Nothing is written to the score here — Apply remains the only commit path.
     const rebaseAiProposalOntoLive = useCallback(async () => {
-        if (!compareView || compareView.title !== 'Assistant Proposal' || !score || compareSwapBusy) {
+        if (
+            !compareView
+            || compareView.title !== 'Assistant Proposal'
+            || !score
+            || compareSwapBusy
+            || compareEditBusyRef.current
+            || comparePendingOperationsRef.current.size > 0
+        ) {
             return;
         }
         setCompareSwapBusy(true);
@@ -6927,7 +7671,14 @@ ${partsBodyXml}
     }, []);
 
     const handleSendDiffFeedback = useCallback(async () => {
-        if (!compareView || !isAiCompareMode || aiBusy || aiDiffFeedbackBusy) {
+        if (
+            !compareView
+            || !isAiCompareMode
+            || aiBusy
+            || aiDiffFeedbackBusy
+            || compareEditBusyRef.current
+            || comparePendingOperationsRef.current.size > 0
+        ) {
             return;
         }
         if (!aiApiKey.trim()) {
@@ -6997,9 +7748,6 @@ ${partsBodyXml}
         const commentBlockKeys = feedbackEntries
             .filter((block) => block.status === 'comment')
             .map((block) => block.blockKey);
-        if (!allFeedbackBlocks.length && !aiDiffGlobalComment.trim()) {
-            return;
-        }
 
         const currentXml = await aiScoreBridge.getLiveXml(compareView.currentXml);
         if (!currentXml?.trim()) {
@@ -7009,8 +7757,27 @@ ${partsBodyXml}
             setCompareRightError(message);
             return;
         }
+        const proposalXml = await getScoreMusicXmlText(compareRightScore, compareView.checkpointXml)
+            || compareView.checkpointXml;
+        const userEditDiffs = compareEditedRoles
+            .map((role): CompareUserEditDiff | null => {
+                const beforeXml = compareEditBaselinesRef.current[role];
+                const afterXml = role === 'current' ? currentXml : proposalXml;
+                if (!beforeXml) {
+                    return null;
+                }
+                const label = role === 'current' ? 'Current score' : 'Assistant proposal';
+                const diff = buildCompareUserEditDiff(beforeXml, afterXml, label);
+                return diff ? { side: role, label, diff } : null;
+            })
+            .filter((edit): edit is CompareUserEditDiff => edit !== null);
+        if (!allFeedbackBlocks.length && !aiDiffGlobalComment.trim() && !userEditDiffs.length) {
+            return;
+        }
         const previousCheckpointXml = compareView.checkpointXml;
         const previousContinuity = snapshotAiProposalContinuity();
+        const previousEditBaselines = { ...compareEditBaselinesRef.current };
+        const previousEditedRoles = [...compareEditedRoles];
         const editRequest = beginAiEdit('feedback', 'Preparing feedback context');
         const requestController = editRequest.controller;
         let requestOutcome: 'success' | 'failure' | 'cancelled' = 'failure';
@@ -7019,6 +7786,7 @@ ${partsBodyXml}
         setAiDiffFeedbackError(null);
         setXmlSidebarTab('assistant');
         setXmlSidebarMode((prev) => (prev === 'closed' ? 'open' : prev));
+        invalidateCompareOperations();
         setCompareView(null);
         setCompareRightLoading(false);
         setCompareRightError(null);
@@ -7052,6 +7820,7 @@ ${partsBodyXml}
                 body: JSON.stringify({
                     content: currentXml,
                     blocks: allFeedbackBlocks,
+                    userEdits: userEditDiffs,
                     globalComment: aiDiffGlobalComment,
                     iteration: aiDiffIteration,
                     provider: aiProvider,
@@ -7101,6 +7870,11 @@ ${partsBodyXml}
             setAiPatchError(null);
             setAiPatchedXml(proposedXml);
             setAiBaseXml(proposalBaseXml);
+            // A successful response begins a new proposal cycle. Do this explicitly
+            // rather than relying on the transient closed-modal effect so a second
+            // edit cannot diff against the prior proposal generation.
+            compareEditBaselinesRef.current = { current: null, proposal: null };
+            setCompareEditedRoles([]);
             // Keep the standard orientation (Current left/red, Proposal right/green) so Apply
             // writes the proposal into the document. See openAiProposalCompare.
             setCompareSwapped(true);
@@ -7166,10 +7940,12 @@ ${partsBodyXml}
             setCompareView({
                 title: 'Assistant Proposal',
                 currentXml,
-                checkpointXml: previousCheckpointXml,
+                checkpointXml: proposalXml || previousCheckpointXml,
                 currentLabel: 'Current',
                 checkpointLabel: 'Assistant Proposal',
             });
+            compareEditBaselinesRef.current = previousEditBaselines;
+            setCompareEditedRoles(previousEditedRoles);
             restoreAiProposalContinuity({
                 ...previousContinuity,
                 baseXml: previousContinuity.baseXml || currentXml,
@@ -7196,6 +7972,8 @@ ${partsBodyXml}
         aiModel,
         aiProvider,
         aiDiffReviews,
+        compareEditedRoles,
+        compareRightScore,
         aiMeasureThreads,
         mergeAiAnnotations,
         aiDiffCurrentBlocks,
@@ -7203,6 +7981,8 @@ ${partsBodyXml}
         getReviewStatusForFeedback,
         aiDiffGlobalComment,
         aiDiffIteration,
+        getScoreMusicXmlText,
+        invalidateCompareOperations,
         aiChatMessages,
         aiIncludeChat,
         aiBusy,
@@ -8130,21 +8910,45 @@ ${partsBodyXml}
         window.open('/score-editor/index.html', '_blank');
     }, [activeLaunchContext, compareView, compareLeftXml, compareRightXml, compareLeftLabel, compareRightLabel]);
 
+    const handleCloseCompareView = useCallback(() => {
+        // Invalidate synchronously in the click event; waiting for the effect that
+        // observes compareView=null would leave a window for stale async work to
+        // publish or render.
+        invalidateCompareOperations();
+        setCompareView(null);
+    }, [invalidateCompareOperations]);
+
     useEffect(() => {
         if (!compareView) {
+            invalidateCompareOperations();
             void stopCompareSideAudio('left');
             void stopCompareSideAudio('right');
-            if (compareRightScoreRef.current) {
-                compareRightScoreRef.current.destroy();
-                compareRightScoreRef.current = null;
-            }
+            const auxiliaryScore = compareRightScoreRef.current;
+            void queueCompareScoreTeardown(
+                auxiliaryScore,
+                scoreRef.current,
+                'compare-close',
+            );
             compareLoadedCheckpointXmlRef.current = null;
             setCompareRightScore(null);
             setCompareRightParts([]);
             setCompareRightPageCount(1);
             setCompareRightLoading(false);
             setCompareRightError(null);
+            setCompareFitZoom(0.5);
             setCompareZoom(null);
+            setCompareActiveSide(null);
+            if (!compareEditBusyRef.current) {
+                setCompareEditBusy(false);
+            }
+            setCompareEditedRoles([]);
+            compareEditBaselinesRef.current = { current: null, proposal: null };
+            compareNoteInputByRoleRef.current = { current: false, proposal: false };
+            setCompareNoteInputByRole({ current: false, proposal: false });
+            setCompareHasSelectionByRole({ current: false, proposal: false });
+            setCompareSelectionBoxesByRole({ current: [], proposal: [] });
+            setPalettesOpen(false);
+            setPaletteCategory(null);
             setCompareLeftSvgSize(null);
             setCompareRightSvgSize(null);
             setCompareLeftMeasurePositions(null);
@@ -8173,18 +8977,35 @@ ${partsBodyXml}
             return;
         }
 
+        invalidateCompareOperations();
         let canceled = false;
         const loadCompareScore = async () => {
             // The checkpoint side is being replaced -- stop whichever visual side is
             // currently playing it before the underlying Score instance is destroyed.
             await stopCompareSideAudio('left');
             await stopCompareSideAudio('right');
+            if (canceled) {
+                return;
+            }
             setCompareRightLoading(true);
             setCompareRightError(null);
-            if (compareRightScoreRef.current) {
-                compareRightScoreRef.current.destroy();
-                compareRightScoreRef.current = null;
+            const scoreToReplace = compareRightScoreRef.current;
+            await queueCompareScoreTeardown(
+                scoreToReplace,
+                null,
+                'compare-checkpoint-reload',
+            );
+            if (canceled) {
+                return;
             }
+            setCompareRightScore(null);
+            setCompareSelectionBoxesByRole((prev) => ({ ...prev, proposal: [] }));
+            setCompareHasSelectionByRole((prev) => ({ ...prev, proposal: false }));
+            compareNoteInputByRoleRef.current = {
+                ...compareNoteInputByRoleRef.current,
+                proposal: false,
+            };
+            setCompareNoteInputByRole(compareNoteInputByRoleRef.current);
             try {
                 const WebMscore = await loadWebMscore();
                 const data = new TextEncoder().encode(compareView.checkpointXml);
@@ -8228,18 +9049,28 @@ ${partsBodyXml}
         return () => {
             canceled = true;
         };
-    }, [compareView, parsePartsFromMetadata, aiDiffFeedbackBusy, clearAiProposal]);
+    }, [
+        compareView,
+        parsePartsFromMetadata,
+        aiDiffFeedbackBusy,
+        clearAiProposal,
+        invalidateCompareOperations,
+        queueCompareScoreTeardown,
+    ]);
 
     useEffect(() => {
         return () => {
+            invalidateCompareOperations();
             void stopCompareSideAudio('left');
             void stopCompareSideAudio('right');
-            if (compareRightScoreRef.current) {
-                compareRightScoreRef.current.destroy();
-                compareRightScoreRef.current = null;
-            }
+            const auxiliaryScore = compareRightScoreRef.current;
+            void queueCompareScoreTeardown(
+                auxiliaryScore,
+                scoreRef.current,
+                'score-editor-unmount',
+            );
         };
-    }, []);
+    }, [invalidateCompareOperations, queueCompareScoreTeardown]);
 
     // compareLeftScore/compareRightScoreDisplay resolve to whichever of `score` /
     // compareRightScore is currently shown on that visual side, and that mapping can
@@ -8264,6 +9095,18 @@ ${partsBodyXml}
         }
         prevCompareRightScoreRef.current = compareRightScoreDisplay;
     }, [compareRightScoreDisplay]);
+    const prevCompareLiveSelectionScoreRef = useRef<Score | null>(null);
+    useEffect(() => {
+        if (
+            compareView
+            && prevCompareLiveSelectionScoreRef.current
+            && prevCompareLiveSelectionScoreRef.current !== score
+        ) {
+            setCompareSelectionBoxesByRole((prev) => ({ ...prev, current: [] }));
+            setCompareHasSelectionByRole((prev) => ({ ...prev, current: false }));
+        }
+        prevCompareLiveSelectionScoreRef.current = score;
+    }, [compareView, score]);
 
     useEffect(() => {
         if (!compareView || !compareLeftScore) {
@@ -8279,7 +9122,7 @@ ${partsBodyXml}
             }
         }
         const targetPage = getCompareTargetPage(compareLeftScore);
-        void renderScoreToContainer(compareLeftScore, compareLeftContainerRef.current, targetPage, false)
+        void renderScoreToContainer(compareLeftScore, compareLeftContainerRef.current, targetPage, true)
             .then(() => {
                 syncCompareSvgSize(compareLeftContainerRef.current, setCompareLeftSvgSize);
                 void refreshMeasurePositions(compareLeftScore, setCompareLeftMeasurePositions);
@@ -8315,7 +9158,7 @@ ${partsBodyXml}
         }
         const targetPage = getCompareTargetPage(compareRightScoreDisplay);
         compareRightRenderInFlightRef.current = true;
-        void renderScoreToContainer(compareRightScoreDisplay, compareRightContainerRef.current, targetPage, false)
+        void renderScoreToContainer(compareRightScoreDisplay, compareRightContainerRef.current, targetPage, true)
             .then((rendered) => {
                 if (!rendered && !compareRightError && isCheckpoint) {
                     setCompareRightError('Unable to render compare score. The proposal may contain invalid MusicXML.');
@@ -8392,9 +9235,9 @@ ${partsBodyXml}
                 setCompareContinuousMode(true);
                 const targetPage = 0;
                 // Use swapped scores to render to the correct panes
-                await renderScoreToContainer(leftScore, compareLeftContainerRef.current, targetPage, false);
+                await renderScoreToContainer(leftScore, compareLeftContainerRef.current, targetPage, true);
                 syncCompareSvgSize(compareLeftContainerRef.current, setCompareLeftSvgSize);
-                await renderScoreToContainer(rightScore, compareRightContainerRef.current, targetPage, false);
+                await renderScoreToContainer(rightScore, compareRightContainerRef.current, targetPage, true);
                 syncCompareSvgSize(compareRightContainerRef.current, setCompareRightSvgSize);
             } catch (err) {
                 console.warn('Failed to enable continuous layout for compare:', err);
@@ -8453,12 +9296,12 @@ ${partsBodyXml}
                 applyMeasureLineBreaks(compareRightScore, restore.right),
             ]).then(() => {
                 const targetPage = compareContinuousMode ? 0 : currentPageRef.current;
-                void renderScoreToContainer(score, compareLeftContainerRef.current, targetPage, false)
+                void renderScoreToContainer(score, compareLeftContainerRef.current, targetPage, true)
                     .then(() => {
                         syncCompareSvgSize(compareLeftContainerRef.current, setCompareLeftSvgSize);
                         void refreshMeasurePositions(score, setCompareLeftMeasurePositions);
                     });
-                void renderScoreToContainer(compareRightScore, compareRightContainerRef.current, targetPage, false)
+                void renderScoreToContainer(compareRightScore, compareRightContainerRef.current, targetPage, true)
                     .then(() => {
                         syncCompareSvgSize(compareRightContainerRef.current, setCompareRightSvgSize);
                         void refreshMeasurePositions(compareRightScore, setCompareRightMeasurePositions)
@@ -8526,10 +9369,10 @@ ${partsBodyXml}
                 return;
             }
             const targetPage = compareContinuousMode ? 0 : currentPageRef.current;
-            await renderScoreToContainer(score, compareLeftContainerRef.current, targetPage, false);
+            await renderScoreToContainer(score, compareLeftContainerRef.current, targetPage, true);
             syncCompareSvgSize(compareLeftContainerRef.current, setCompareLeftSvgSize);
             await refreshMeasurePositions(score, setCompareLeftMeasurePositions);
-            await renderScoreToContainer(compareRightScore, compareRightContainerRef.current, targetPage, false);
+            await renderScoreToContainer(compareRightScore, compareRightContainerRef.current, targetPage, true);
             syncCompareSvgSize(compareRightContainerRef.current, setCompareRightSvgSize);
             const rightPositionsOk = await refreshMeasurePositions(compareRightScore, setCompareRightMeasurePositions);
             if (!rightPositionsOk) {
@@ -8788,8 +9631,8 @@ ${partsBodyXml}
                     return;
                 }
                 const nextZoom = Math.max(0.2, Math.min(fitZoom, 1.5));
-                setCompareZoom((currentZoom) => (
-                    currentZoom === null || Math.abs(currentZoom - nextZoom) > 0.01
+                setCompareFitZoom((currentZoom) => (
+                    Math.abs(currentZoom - nextZoom) > 0.01
                         ? nextZoom
                         : currentZoom
                 ));
@@ -12069,6 +12912,194 @@ ${partsBodyXml}
         return fn(clip.mimeType, clip.data);
     }, { skipWasmReselect: true });
 
+    const handleCompareKeyboardShortcut = useCallback((event: KeyboardEvent) => {
+        if (!compareView || !compareActiveSide || !compareActiveScore || !compareActiveRole) {
+            return false;
+        }
+        const rawKey = event.key;
+        const key = rawKey.toLowerCase();
+        const isMod = event.ctrlKey || event.metaKey;
+        const hasSelection = compareHasSelectionByRole[compareActiveRole];
+        const noteMode = compareNoteInputByRoleRef.current[compareActiveRole];
+        const mutate = (
+            label: string,
+            methodName: keyof MutationMethods,
+            args: unknown[] = [],
+            skipRelayout = false,
+        ) => {
+            void performCompareMutation(label, (targetScore) => {
+                const fn = (targetScore as MutationMethods)[methodName];
+                if (typeof fn !== 'function') {
+                    alert(`This build of webmscore does not expose "${String(methodName)}".`);
+                    return false;
+                }
+                return (fn as (...values: unknown[]) => unknown).apply(targetScore, args);
+            }, { skipRelayout });
+        };
+        const updateInputState = (methodName: keyof MutationMethods, args: unknown[] = []) => {
+            const fn = (compareActiveScore as MutationMethods)[methodName];
+            if (typeof fn === 'function') {
+                const generation = compareEditGenerationRef.current;
+                const operation = trackCompareOperation(runSerializedScoreOperation(
+                    () => Promise.resolve(
+                        (fn as (...values: unknown[]) => unknown).apply(compareActiveScore, args),
+                    ),
+                    `compare-input:${String(methodName)}`,
+                ));
+                void operation.catch((err) => {
+                    if (compareEditGenerationRef.current === generation) {
+                        console.warn(`Compare input shortcut "${String(methodName)}" failed:`, err);
+                    }
+                });
+            }
+        };
+
+        if (isMod) {
+            if (key === 'z') {
+                event.preventDefault();
+                mutate(event.shiftKey ? 'redo' : 'undo', event.shiftKey ? 'redo' : 'undo');
+                return true;
+            }
+            if (key === 'y') {
+                event.preventDefault();
+                mutate('redo', 'redo');
+                return true;
+            }
+            if (key === 'a') {
+                event.preventDefault();
+                mutate('select all', 'selectAll', [], true);
+                setCompareHasSelectionByRole((prev) => ({ ...prev, [compareActiveRole]: true }));
+                return true;
+            }
+        }
+
+        if (key === 'escape' && noteMode) {
+            event.preventDefault();
+            void setCompareNoteInputMode(false, compareActiveSide);
+            return true;
+        }
+        if (!isMod && key === 'n' && !event.altKey && !event.shiftKey) {
+            event.preventDefault();
+            void setCompareNoteInputMode(!noteMode, compareActiveSide);
+            return true;
+        }
+
+        const durationMap: Record<string, number> = {
+            '1': 8,
+            '2': 7,
+            '3': 6,
+            '4': 5,
+            '5': 4,
+            '6': 3,
+            '7': 2,
+            '8': 1,
+        };
+        if (noteMode && rawKey in durationMap) {
+            event.preventDefault();
+            updateInputState('setInputDurationType', [durationMap[rawKey]]);
+            return true;
+        }
+        if (noteMode && rawKey === '.') {
+            event.preventDefault();
+            updateInputState('toggleInputDot');
+            return true;
+        }
+        if (noteMode && (rawKey === '+' || rawKey === '-' || rawKey === '=')) {
+            event.preventDefault();
+            updateInputState('setInputAccidentalType', [rawKey === '+' ? 3 : rawKey === '-' ? 1 : 2]);
+            return true;
+        }
+        const noteMap: Record<string, number> = { c: 0, d: 1, e: 2, f: 3, g: 4, a: 5, b: 6 };
+        if (noteMode && !isMod && !event.altKey && key in noteMap) {
+            event.preventDefault();
+            mutate('add a pitch', 'addPitchByStep', [noteMap[key], event.shiftKey, false]);
+            return true;
+        }
+        if (!hasSelection) {
+            return false;
+        }
+
+        if (rawKey in durationMap) {
+            event.preventDefault();
+            mutate('set duration', 'setDurationType', [durationMap[rawKey]]);
+            return true;
+        }
+        if (rawKey === '0') {
+            event.preventDefault();
+            mutate('enter a rest', 'enterRest');
+            return true;
+        }
+        if (rawKey === '.') {
+            event.preventDefault();
+            mutate('toggle dot', 'toggleDot');
+            return true;
+        }
+        if (rawKey === '+' || rawKey === '-' || rawKey === '=') {
+            event.preventDefault();
+            mutate('set accidental', 'setAccidental', [rawKey === '+' ? 3 : rawKey === '-' ? 1 : 2]);
+            return true;
+        }
+        if (rawKey === 'T') {
+            event.preventDefault();
+            mutate('add a tie', 'addTie');
+            return true;
+        }
+        if (!event.altKey && key === 's' && !event.shiftKey && !noteMode) {
+            event.preventDefault();
+            mutate('add a slur', 'addSlur');
+            return true;
+        }
+        if (!isMod && !event.altKey && key in noteMap) {
+            event.preventDefault();
+            mutate('add a pitch', 'addPitchByStep', [noteMap[key], event.shiftKey, false]);
+            return true;
+        }
+        if (key === 'arrowup' || key === 'arrowdown') {
+            event.preventDefault();
+            if (event.shiftKey) {
+                mutate(
+                    `extend selection ${key === 'arrowup' ? 'up' : 'down'}`,
+                    key === 'arrowup' ? 'extendSelectionStaffAbove' : 'extendSelectionStaffBelow',
+                    [],
+                    true,
+                );
+            } else if (isMod) {
+                mutate('transpose an octave', 'transpose', [key === 'arrowup' ? 12 : -12]);
+            } else {
+                mutate(key === 'arrowup' ? 'raise pitch' : 'lower pitch', key === 'arrowup' ? 'pitchUp' : 'pitchDown');
+            }
+            return true;
+        }
+        if (key === 'arrowleft' || key === 'arrowright') {
+            event.preventDefault();
+            const forward = key === 'arrowright';
+            const methodName = event.shiftKey
+                ? (isMod
+                    ? (forward ? 'extendSelectionNextMeasure' : 'extendSelectionPrevMeasure')
+                    : (forward ? 'extendSelectionNextChord' : 'extendSelectionPrevChord'))
+                : (forward ? 'selectNextChord' : 'selectPrevChord');
+            mutate('move compare selection', methodName, [], true);
+            return true;
+        }
+        if (key === 'delete' || key === 'backspace') {
+            event.preventDefault();
+            mutate('delete selection', 'deleteSelection');
+            setCompareHasSelectionByRole((prev) => ({ ...prev, [compareActiveRole]: false }));
+            return true;
+        }
+        return false;
+    }, [
+        compareActiveRole,
+        compareActiveScore,
+        compareActiveSide,
+        compareHasSelectionByRole,
+        compareView,
+        performCompareMutation,
+        runSerializedScoreOperation,
+        setCompareNoteInputMode,
+        trackCompareOperation,
+    ]);
+
     const isEditableTarget = (target: EventTarget | null) => {
         if (!(target instanceof HTMLElement)) {
             return false;
@@ -12083,6 +13114,10 @@ ${partsBodyXml}
                 return;
             }
             if (isEditableTarget(event.target)) {
+                return;
+            }
+            if (compareView) {
+                handleCompareKeyboardShortcut(event);
                 return;
             }
 
@@ -12322,6 +13357,8 @@ ${partsBodyXml}
         return () => window.removeEventListener('keydown', onKeyDown);
     }, [
         score,
+        compareView,
+        handleCompareKeyboardShortcut,
         interactiveMutationEnabled,
         selectedElement,
         selectionBoxes.length,
@@ -15402,11 +16439,15 @@ ${partsBodyXml}
             </div>
             )}
 
-            {!isEmbedMode && palettesOpen && (
+            {palettesOpen && (!isEmbedMode || Boolean(compareView)) && (
                 <FloatingPalettes
-                    disabled={!interactiveMutationEnabled || (!selectedElement && selectionBoxes.length === 0 && !selectedPoint)}
-                    dragEnabled={Boolean(interactiveMutationEnabled && score?.applyDropAtPoint)}
-                    onApply={handleApplyFloatingPaletteItem}
+                    disabled={compareView
+                        ? (!compareActiveScore
+                            || !compareActiveRole
+                            || !compareHasSelectionByRole[compareActiveRole])
+                        : (!interactiveMutationEnabled || (!selectedElement && selectionBoxes.length === 0 && !selectedPoint))}
+                    dragEnabled={Boolean(!compareView && interactiveMutationEnabled && score?.applyDropAtPoint)}
+                    onApply={compareView ? handleCompareApplyFloatingPaletteItem : handleApplyFloatingPaletteItem}
                     onClose={() => setPalettesOpen(false)}
                     category={paletteCategory}
                 />
@@ -17771,7 +18812,7 @@ ${partsBodyXml}
                             <div className="flex items-center gap-2">
                                 {compareView.title === 'Assistant Proposal' && (
                                     <AiCompareWorkspaceActions
-                                        applyBusy={compareSwapBusy}
+                                        applyBusy={compareSwapBusy || compareEditBusy}
                                         feedbackBusy={aiDiffFeedbackBusy}
                                         canSendFeedback={canSendDiffFeedback}
                                         feedbackLabel={diffFeedbackButtonLabel}
@@ -17781,7 +18822,7 @@ ${partsBodyXml}
                                 )}
                                 <button
                                     type="button"
-                                    onClick={() => setCompareView(null)}
+                                    onClick={handleCloseCompareView}
                                     className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
                                 >
                                     {isAiCompareMode ? 'Done - Close' : 'Close'}
@@ -17800,7 +18841,7 @@ ${partsBodyXml}
                                     feedbackError={aiDiffFeedbackError}
                                     onGlobalCommentChange={setAiDiffGlobalComment}
                                     onRebase={() => void rebaseAiProposalOntoLive()}
-                                    rebaseBusy={compareSwapBusy}
+                                    rebaseBusy={compareSwapBusy || compareEditBusy}
                                 />
                             )}
                             <div className="flex min-w-0 flex-none overflow-x-hidden" style={{ height: '100dvh' }}>
@@ -17870,11 +18911,34 @@ ${partsBodyXml}
                                             </div>
                                             )}
                                         </div>
+                                        <ComparePaneEditorControls
+                                            side="left"
+                                            active={compareActiveSide === 'left'}
+                                            busy={compareEditBusy || compareSwapBusy || aiDiffFeedbackBusy || !compareLeftScore}
+                                            noteInputActive={compareLeftRole ? compareNoteInputByRole[compareLeftRole] : false}
+                                            zoom={compareEffectiveZoom}
+                                            onActivate={() => setCompareActiveSide('left')}
+                                            onZoomOut={() => setCompareZoom((value) => Math.max(0.2, (value ?? compareEffectiveZoom) - 0.1))}
+                                            onZoomIn={() => setCompareZoom((value) => Math.min(1.5, (value ?? compareEffectiveZoom) + 0.1))}
+                                            onAddBar={() => handleCompareAddBar('left')}
+                                            onToggleNoteInput={() => {
+                                                setCompareActiveSide('left');
+                                                if (compareLeftRole) {
+                                                    void setCompareNoteInputMode(!compareNoteInputByRoleRef.current[compareLeftRole], 'left');
+                                                }
+                                            }}
+                                            onOpenPalettes={() => {
+                                                setCompareActiveSide('left');
+                                                setPaletteCategory(null);
+                                                setPalettesOpen(true);
+                                            }}
+                                        />
                                         <div className="flex min-h-0 flex-1 flex-col gap-3">
                                             <div
                                                 ref={compareLeftScrollRef}
-                                                className="relative min-h-0 min-w-0 flex-1 overflow-auto rounded border border-gray-200 bg-white"
+                                                className={`relative min-h-0 min-w-0 flex-1 overflow-auto rounded border bg-white ${compareActiveSide === 'left' ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200'}`}
                                                 data-testid="compare-pane-left"
+                                                onPointerDown={() => setCompareActiveSide('left')}
                                             >
                                                 {!compareLeftScore && (
                                                     <div className="p-3 text-xs text-gray-500">
@@ -17883,6 +18947,7 @@ ${partsBodyXml}
                                                 )}
                                             <div
                                                 ref={compareLeftWrapperRef}
+                                                data-testid="compare-score-wrapper-left"
                                                 className="relative origin-top-left"
                                                 style={compareZoomStyle}
                                             >
@@ -17932,6 +18997,20 @@ ${partsBodyXml}
                                                             }}
                                                         />
                                                     ))}
+                                                    {compareActiveSide === 'left' && compareLeftSelectionBoxes.map((box, index) => (
+                                                        <div
+                                                            key={`compare-left-selection-${index}`}
+                                                            data-testid="compare-selection-overlay-left"
+                                                            aria-hidden="true"
+                                                            className="absolute border-2 border-blue-600"
+                                                            style={{
+                                                                left: `${box.x}px`,
+                                                                top: `${box.y}px`,
+                                                                width: `${box.w}px`,
+                                                                height: `${box.h}px`,
+                                                            }}
+                                                        />
+                                                    ))}
                                                     {compareFocusedHighlights.left && (
                                                         <div
                                                             className="absolute rounded-sm border-2 border-blue-500 ring-2 ring-blue-300/50"
@@ -17947,8 +19026,8 @@ ${partsBodyXml}
                                                         <div
                                                             className="absolute inset-0 cursor-pointer"
                                                             style={{ pointerEvents: 'auto' }}
-                                                            title="Click a bar to highlight and annotate it"
-                                                            onClick={(e) => handleCompareScoreClick(e, 'left')}
+                                                            title="Click to select this score and an element; click its bar to annotate"
+                                                            onClick={(e) => handleComparePaneClick(e, 'left')}
                                                         />
                                                     )}
                                                 </div>
@@ -18450,6 +19529,7 @@ ${partsBodyXml}
                                                                                 }}
                                                                                 disabled={{
                                                                                     apply: compareSwapBusy
+                                                                                        || compareEditBusy
                                                                                         || compareAlignmentLoading
                                                                                         || !compareLeftScore
                                                                                         || !compareRightScoreDisplay
@@ -18480,7 +19560,7 @@ ${partsBodyXml}
                                                                             <div className="mt-1 flex items-center justify-between gap-2">
                                                                                 <button
                                                                                     type="button"
-                                                                                    disabled={compareSwapBusy || !compareLeftScore || !compareRightScoreDisplay}
+                                                                                    disabled={compareSwapBusy || compareEditBusy || !compareLeftScore || !compareRightScoreDisplay}
                                                                                     className="flex h-6 w-10 items-center justify-center rounded border border-gray-200 bg-gray-100 text-[10px] text-gray-500 disabled:opacity-50"
                                                                                     aria-label={`Overwrite right with ${leftLabel}`}
                                                                                     onClick={() => handleCompareOverwriteBlock(
@@ -18494,7 +19574,7 @@ ${partsBodyXml}
                                                                                 </button>
                                                                                 <button
                                                                                     type="button"
-                                                                                    disabled={compareSwapBusy || !compareLeftScore || !compareRightScoreDisplay}
+                                                                                    disabled={compareSwapBusy || compareEditBusy || !compareLeftScore || !compareRightScoreDisplay}
                                                                                     className="flex h-6 w-10 items-center justify-center rounded border border-gray-200 bg-gray-100 text-[10px] text-gray-500 disabled:opacity-50"
                                                                                     aria-label={`Overwrite left with ${rightLabel}`}
                                                                                     onClick={() => handleCompareOverwriteBlock(
@@ -18664,11 +19744,34 @@ ${partsBodyXml}
                                             </div>
                                             )}
                                         </div>
+                                        <ComparePaneEditorControls
+                                            side="right"
+                                            active={compareActiveSide === 'right'}
+                                            busy={compareEditBusy || compareSwapBusy || aiDiffFeedbackBusy || !compareRightScoreDisplay}
+                                            noteInputActive={compareRightRole ? compareNoteInputByRole[compareRightRole] : false}
+                                            zoom={compareEffectiveZoom}
+                                            onActivate={() => setCompareActiveSide('right')}
+                                            onZoomOut={() => setCompareZoom((value) => Math.max(0.2, (value ?? compareEffectiveZoom) - 0.1))}
+                                            onZoomIn={() => setCompareZoom((value) => Math.min(1.5, (value ?? compareEffectiveZoom) + 0.1))}
+                                            onAddBar={() => handleCompareAddBar('right')}
+                                            onToggleNoteInput={() => {
+                                                setCompareActiveSide('right');
+                                                if (compareRightRole) {
+                                                    void setCompareNoteInputMode(!compareNoteInputByRoleRef.current[compareRightRole], 'right');
+                                                }
+                                            }}
+                                            onOpenPalettes={() => {
+                                                setCompareActiveSide('right');
+                                                setPaletteCategory(null);
+                                                setPalettesOpen(true);
+                                            }}
+                                        />
                                         <div className="flex min-h-0 flex-1 flex-col gap-3">
                                             <div
                                                 ref={compareRightScrollRef}
-                                                className="relative min-h-0 min-w-0 flex-1 overflow-auto rounded border border-gray-200 bg-white"
+                                                className={`relative min-h-0 min-w-0 flex-1 overflow-auto rounded border bg-white ${compareActiveSide === 'right' ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200'}`}
                                                 data-testid="compare-pane-right"
+                                                onPointerDown={() => setCompareActiveSide('right')}
                                             >
                                                 {(compareRightLoading || compareRightError || !compareRightScore) && (
                                                     <div className="absolute inset-0 flex items-center justify-center bg-white/80 p-3 text-xs text-gray-500">
@@ -18677,6 +19780,7 @@ ${partsBodyXml}
                                                 )}
                                             <div
                                                 ref={compareRightWrapperRef}
+                                                data-testid="compare-score-wrapper-right"
                                                 className="relative origin-top-left"
                                                 style={compareRightZoomStyle}
                                             >
@@ -18726,6 +19830,20 @@ ${partsBodyXml}
                                                             }}
                                                         />
                                                     ))}
+                                                    {compareActiveSide === 'right' && compareRightSelectionBoxes.map((box, index) => (
+                                                        <div
+                                                            key={`compare-right-selection-${index}`}
+                                                            data-testid="compare-selection-overlay-right"
+                                                            aria-hidden="true"
+                                                            className="absolute border-2 border-blue-600"
+                                                            style={{
+                                                                left: `${box.x}px`,
+                                                                top: `${box.y}px`,
+                                                                width: `${box.w}px`,
+                                                                height: `${box.h}px`,
+                                                            }}
+                                                        />
+                                                    ))}
                                                     {compareFocusedHighlights.right && (
                                                         <div
                                                             className="absolute rounded-sm border-2 border-blue-500 ring-2 ring-blue-300/50"
@@ -18741,8 +19859,8 @@ ${partsBodyXml}
                                                         <div
                                                             className="absolute inset-0 cursor-pointer"
                                                             style={{ pointerEvents: 'auto' }}
-                                                            title="Click a bar to highlight and annotate it"
-                                                            onClick={(e) => handleCompareScoreClick(e, 'right')}
+                                                            title="Click to select this score and an element; click its bar to annotate"
+                                                            onClick={(e) => handleComparePaneClick(e, 'right')}
                                                         />
                                                     )}
                                                 </div>

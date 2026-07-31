@@ -93,6 +93,12 @@ describe('music service tool contracts', () => {
     expect(MUSIC_DIFF_FEEDBACK_TOOL_CONTRACT.description.length).toBeGreaterThan(0);
     expect(MUSIC_DIFF_FEEDBACK_TOOL_CONTRACT.inputSchema).toMatchObject({
       type: 'object',
+      properties: {
+        userEdits: {
+          type: 'array',
+          maxItems: 2,
+        },
+      },
     });
     expect(MUSIC_DIFF_FEEDBACK_TOOL_CONTRACT.outputSchema).toMatchObject({
       oneOf: expect.any(Array),

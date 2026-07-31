@@ -235,6 +235,80 @@ test.describe('Embed Mode - External XML Comparison', () => {
         await expect(openInEditorButtons.nth(1)).toBeVisible();
     });
 
+    test('should edit either compare pane and route shortcuts to the active score', async ({ page }) => {
+        await page.goto(`/?compareLeft=${encodeURIComponent('/sample-left.xml')}&compareRight=${encodeURIComponent('/sample-right.xml')}&leftLabel=Left&rightLabel=Right`);
+        await expect(page.getByTestId('compare-pane-left').locator('svg').first()).toBeVisible({ timeout: 30000 });
+        await expect(page.getByTestId('compare-pane-right').locator('svg').first()).toBeVisible({ timeout: 30000 });
+
+        await page.getByTestId('btn-compare-activate-left').click();
+        await expect(page.getByTestId('btn-compare-activate-left')).toHaveAttribute('aria-pressed', 'true');
+        const leftNote = page.getByTestId('compare-pane-left').locator('svg .Note').first();
+        let leftNoteBox: Awaited<ReturnType<typeof leftNote.boundingBox>> = null;
+        await expect.poll(async () => {
+            leftNoteBox = await leftNote.boundingBox();
+            return leftNoteBox?.width ?? 0;
+        }, {
+            timeout: 30000,
+        }).toBeGreaterThan(0);
+        const renderedLeftNoteBox = leftNoteBox as {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        } | null;
+        expect(renderedLeftNoteBox).not.toBeNull();
+        if (!renderedLeftNoteBox) {
+            throw new Error('Expected the left compare score to render a clickable note.');
+        }
+        await page.mouse.click(
+            renderedLeftNoteBox.x + (renderedLeftNoteBox.width / 2),
+            renderedLeftNoteBox.y + (renderedLeftNoteBox.height / 2),
+        );
+        await expect(page.getByTestId('compare-selection-overlay-left').first()).toBeVisible();
+        await expect(page.getByTestId('compare-selection-overlay-right')).toHaveCount(0);
+        const selectedNoteCount = () => page.getByTestId('compare-pane-left').locator('svg .Note').evaluateAll(
+            (notes) => notes.filter((note) => getComputedStyle(note).fill === 'rgb(0, 101, 191)').length,
+        );
+        await expect.poll(selectedNoteCount).toBe(1);
+
+        const zoomValue = page.getByTestId('compare-zoom-value-left');
+        const wrapper = page.getByTestId('compare-score-wrapper-left');
+        const initialZoom = Number.parseInt((await zoomValue.textContent()) ?? '', 10);
+        const initialWrapperWidth = (await wrapper.boundingBox())?.width ?? 0;
+        await page.getByTestId('btn-compare-zoom-in-left').click();
+        await expect(zoomValue).toHaveText(`${initialZoom + 10}%`);
+        await expect.poll(async () => (await wrapper.boundingBox())?.width ?? 0).toBeGreaterThan(initialWrapperWidth);
+        // Auto-fit remains active for container resizes, but must not overwrite a
+        // zoom chosen by the user or rerender away the engine's selected-note color.
+        await page.waitForTimeout(750);
+        await expect(zoomValue).toHaveText(`${initialZoom + 10}%`);
+        await expect.poll(selectedNoteCount).toBe(1);
+        await page.getByTestId('btn-compare-add-bar-left').click();
+
+        await page.evaluate(() => {
+            window.open = () => null;
+        });
+        await page.getByRole('button', { name: /Open in Editor/ }).first().click();
+        await expect.poll(async () => page.evaluate(
+            () => JSON.parse(sessionStorage.getItem('openInEditor') || '{}').xml || '',
+        )).toContain('measure number="2"');
+
+        await page.getByTestId('btn-compare-activate-right').click();
+        await page.keyboard.press('n');
+        await expect(page.getByTestId('btn-compare-note-input-right')).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.getByTestId('btn-compare-note-input-left')).toHaveAttribute('aria-pressed', 'false');
+        // Note-input pitch entry must not depend on a prior click-selection.
+        await page.keyboard.press('c');
+        await page.getByRole('button', { name: /Open in Editor/ }).nth(1).click();
+        await expect.poll(async () => page.evaluate(() => {
+            const xml = JSON.parse(sessionStorage.getItem('openInEditor') || '{}').xml || '';
+            return (xml.match(/<note(?:\s|>)/g) || []).length;
+        })).toBeGreaterThan(1);
+
+        await page.getByTestId('btn-compare-palettes-right').click();
+        await expect(page.getByTestId('floating-palettes')).toBeVisible();
+    });
+
     test('should keep compare labels and score contents on the same side', async ({ page }) => {
         await page.goto(`/?compareLeft=${encodeURIComponent(leftXmlUrl)}&compareRight=${encodeURIComponent(rightXmlUrl)}&leftLabel=Left&rightLabel=Right`);
         await page.waitForTimeout(3000);

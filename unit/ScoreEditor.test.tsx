@@ -154,9 +154,14 @@ describe('ScoreEditor', () => {
   };
 
   let scoreParamValue: string | null = null;
+  let searchParamValues: Record<string, string> = {};
 
   const searchParams = {
-    get: (key: string) => (key === 'score' ? scoreParamValue : null),
+    get: (key: string) => (
+      key === 'score'
+        ? scoreParamValue
+        : searchParamValues[key] ?? null
+    ),
   };
 
   const boundingRect = {
@@ -179,6 +184,7 @@ describe('ScoreEditor', () => {
 
   beforeEach(() => {
     scoreParamValue = null;
+    searchParamValues = {};
     mocked.loadWebMscore.mockReset();
     mocked.loadWebMscoreInProcess.mockReset();
     mocked.loadWebMscoreInProcess.mockImplementation(() => mocked.loadWebMscore());
@@ -240,6 +246,116 @@ describe('ScoreEditor', () => {
     await waitFor(() => expect(score.setClef).toHaveBeenCalledWith(0));
     expect(score.relayout).toHaveBeenCalled();
     expect(score.selectElementAtPoint.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('highlights a compare selection and retires its score safely during an in-flight edit', async () => {
+    const user = userEvent.setup();
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list>
+  <part id="P1"><measure number="1"><note><rest/><duration>4</duration><type>whole</type></note></measure></part>
+</score-partwise>`;
+    let resolveInsert!: (value: boolean) => void;
+    const insertPending = new Promise<boolean>((resolve) => {
+      resolveInsert = resolve;
+    });
+    const makeScore = (overrides: Record<string, unknown> = {}) => ({
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg width="100" height="40"></svg>'),
+      saveXml: vi.fn(async () => new TextEncoder().encode(xml)),
+      setSoundFont: vi.fn(async () => {}),
+      setNoteEntryMode: vi.fn(async () => true),
+      metadata: vi.fn(async () => ({ parts: [{ name: 'Music' }] })),
+      measurePositions: vi.fn(async () => ({
+        elements: [{ id: 0, x: 0, y: 0, sx: 100, sy: 40, page: 0 }],
+        events: [],
+        pageSize: { width: 100, height: 40 },
+      })),
+      segmentPositions: vi.fn(async () => ({})),
+      npages: vi.fn(async () => 1),
+      relayout: vi.fn(async () => true),
+      selectElementAtPointWithMode: vi.fn(async () => true),
+      getSelectionBoundingBoxes: vi.fn(async () => [{
+        page: 0,
+        x: 12,
+        y: 8,
+        width: 18,
+        height: 14,
+      }]),
+      ...overrides,
+    });
+    const mainScore: any = makeScore();
+    const auxiliaryScore: any = makeScore({
+      insertMeasures: vi.fn(() => insertPending),
+    });
+    const webmscore: any = {
+      ready: Promise.resolve(),
+      load: vi.fn()
+        .mockResolvedValueOnce(mainScore)
+        .mockResolvedValueOnce(auxiliaryScore),
+    };
+
+    searchParamValues = {
+      compareLeft: '/left.musicxml',
+      compareRight: '/right.musicxml',
+    };
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    (globalThis as any).fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/left.musicxml') || url.endsWith('/right.musicxml')) {
+        return {
+          ok: true,
+          text: async () => xml,
+          arrayBuffer: async () => new TextEncoder().encode(xml).buffer,
+        };
+      }
+      return {
+        ok: false,
+        text: async () => '',
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    });
+
+    const { unmount } = render(<ScoreEditor />);
+    await waitFor(() => expect(auxiliaryScore.saveSvg).toHaveBeenCalled());
+    const leftPane = await screen.findByTestId('compare-pane-left');
+    const selectionSurface = leftPane.querySelector('[title^="Click to select this score"]');
+    expect(selectionSurface).toBeTruthy();
+    fireEvent.click(selectionSurface!, { clientX: 30, clientY: 20 });
+    await waitFor(() => expect(auxiliaryScore.selectElementAtPointWithMode).toHaveBeenCalledWith(
+      0,
+      expect.any(Number),
+      expect.any(Number),
+      0,
+    ));
+    await waitFor(() => expect(screen.getByTestId('compare-selection-overlay-left')).toHaveStyle({
+      left: '12px',
+      top: '8px',
+      width: '18px',
+      height: '14px',
+    }));
+    auxiliaryScore.getSelectionBoundingBoxes.mockResolvedValueOnce([]);
+    fireEvent.click(selectionSurface!, { clientX: 30, clientY: 20, ctrlKey: true });
+    await waitFor(() => expect(auxiliaryScore.selectElementAtPointWithMode).toHaveBeenLastCalledWith(
+      0,
+      expect.any(Number),
+      expect.any(Number),
+      2,
+    ));
+    await waitFor(() => expect(screen.queryByTestId('compare-selection-overlay-left')).not.toBeInTheDocument());
+    expect(auxiliaryScore.saveSvg.mock.calls.every((call: unknown[]) => call[2] === true)).toBe(true);
+
+    await user.click(await screen.findByTestId('btn-compare-add-bar-left'));
+    await waitFor(() => expect(auxiliaryScore.insertMeasures).toHaveBeenCalledWith(1, 3));
+
+    unmount();
+    expect(auxiliaryScore.destroy).not.toHaveBeenCalled();
+
+    resolveInsert(true);
+    await waitFor(() => expect(auxiliaryScore.destroy).toHaveBeenCalledOnce());
+    expect(auxiliaryScore.setNoteEntryMode).toHaveBeenLastCalledWith(false);
+    expect(auxiliaryScore.setNoteEntryMode.mock.invocationCallOrder.at(-1))
+      .toBeLessThan(auxiliaryScore.destroy.mock.invocationCallOrder[0]);
   });
 
   it('detects .mxl uploads and loads them with mxl format', async () => {
