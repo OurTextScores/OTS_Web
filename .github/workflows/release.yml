@@ -22,11 +22,24 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: .nvmrc
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
+
+      # TD-07 L3 / AC-24. next.config.ts sets ignoreBuildErrors when
+      # BUILD_MODE === 'embed', so `npm run build:embed` cannot fail on a type
+      # error by itself. These gates must run before the build, and must not be
+      # marked continue-on-error: a release may not ship while the application
+      # typecheck is failing.
+      - name: Typecheck before build
+        run: |
+          npm run typecheck:audit
+          npm run typecheck
+
+      - name: Verify webmscore bridge
+        run: npm run check:bridge
 
       - name: Generate static data
         run: npm run generate:data

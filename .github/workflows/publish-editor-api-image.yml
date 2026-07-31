@@ -39,6 +39,23 @@ jobs:
             exit 1
           fi
 
+      # TD-07 L3 / AC-24. Dockerfile.editor-api runs `next build` inside the image,
+      # where ignoreBuildErrors applies, so a type error would otherwise be published.
+      # Gate on the host before spending a Docker build.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck before image build
+        run: |
+          npm run typecheck:audit
+          npm run typecheck
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

@@ -9,17 +9,75 @@ on:
 permissions:
   contents: read
 
+# TD-06: every job here is a required deterministic gate. No API keys, no external
+# model or tooling dependencies, no continue-on-error. Credential-dependent
+# integration suites stay out of this workflow on purpose. Node is pinned through
+# .nvmrc so PR CI and the release workflow cannot drift apart.
 jobs:
   typecheck:
-    name: Application typecheck
+    name: Typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       - run: npm run typecheck:audit
       - run: npm run typecheck:app
+      - run: npm run typecheck:tests
+
+  lint:
+    name: Lint (strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint -- --max-warnings=0
+      - run: npm run check:score-editor-globals
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run test
+
+  bridge:
+    name: webmscore bridge audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run check:bridge
+
+  debt:
+    name: Technical debt ratchet
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run check:debt
