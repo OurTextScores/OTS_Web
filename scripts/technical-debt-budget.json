@@ -3,6 +3,12 @@
   "_raisesComment": "check:debt compares this file against the base ref and fails on any increase that is not declared below with its exact before/after values and a reason. Entries are a permanent log: matching on 'from' as well as 'to' stops an old entry from re-authorizing a later raise. Lowering a budget needs no entry. A raise is for work that genuinely could not fit, not for making a red check green.",
   "raises": [
     {
+      "key": "scoreEditor.maxBytes",
+      "from": 774130,
+      "to": 774539,
+      "reason": "Fixing an AC-14 line breach cost bytes: the clipboard read moved to lib/selection-clipboard.ts, which removes 42 lines from ScoreEditor but leaves a slightly longer call site than the pre-fix code. Lines are the budget that was breached and they are back under it; bytes remain 100,461 under theirs."
+    },
+    {
       "key": "scoreEditor.maxLines",
       "from": 17478,
       "to": 17489,
@@ -40,8 +46,8 @@
     }
   ],
   "scoreEditor": {
-    "maxLines": 17489,
-    "maxBytes": 774130
+    "maxLines": 17488,
+    "maxBytes": 774539
   },
   "modules": {
     "components/score-editor/ai-tools/NotaGenPanel.tsx": {
