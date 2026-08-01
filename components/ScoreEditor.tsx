@@ -29,6 +29,7 @@ import {
     type ScoreSummary,
 } from '../lib/checkpoints';
 import { type CodeEditorThemeMode } from './CodeMirrorEditor';
+import { asRecord } from '../lib/as-record';
 import { Toolbar, type MeasureInsertTarget, type HeaderTextTarget } from './Toolbar';
 import { InspectorPanel } from './InspectorPanel';
 import { FloatingPalettes } from './FloatingPalettes';
@@ -346,10 +347,6 @@ type MeasureAlignmentRow = {
 };
 
 type SynthBatchIterator = SynthAudioBatchIterator;
-
-const asRecord = (value: unknown): Record<string, unknown> | null => (
-    value && typeof value === 'object' ? value as Record<string, unknown> : null
-);
 
 const findAiEditProposal = (value: unknown): AiEditProposal | null => {
     const visited = new Set<unknown>();

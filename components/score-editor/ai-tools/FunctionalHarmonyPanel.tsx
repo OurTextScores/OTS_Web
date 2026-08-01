@@ -1,5 +1,5 @@
 import { CodeMirrorEditor, type CodeEditorThemeMode } from '../../CodeMirrorEditor';
-import { asRecord } from '@/lib/music-services/common';
+import { asRecord } from '@/lib/as-record';
 
 /**
  * The functional-harmony (Roman numeral) tab of the AI tools sidebar.
