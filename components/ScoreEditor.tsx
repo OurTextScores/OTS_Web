@@ -1739,6 +1739,9 @@ export default function ScoreEditor() {
         }
     }, []);
 
+    /** In-flight Ctrl+C, so a Ctrl+V arriving behind it does not read an empty clipboard. */
+    const copyInFlightRef = useRef<Promise<boolean> | null>(null);
+
     const runSerializedScoreOperation = useCallback(async <T,>(operation: () => Promise<T>, label: string): Promise<T> => {
         const waitForPriorOperation = scoreOperationQueueRef.current;
         let releaseQueueSlot: (() => void) | null = null;
@@ -12821,29 +12824,67 @@ ${partsBodyXml}
         await refreshScoreMetadata(score);
     };
 
-    const handleCopySelection = async () => {
-        if (!score) {
-            return false;
-        }
-        await ensureSelectionInWasm();
-        const getType = requireMutation('selectionMimeType');
-        const getData = requireMutation('selectionMimeData');
-        if (!getType || !getData) {
-            return false;
-        }
-        const mimeType = await getType();
-        if (!mimeType) {
-            return false;
-        }
-        const data = await getData();
-        if (!data || data.length === 0) {
-            return false;
-        }
-        clipboardRef.current = { mimeType, data: data instanceof Uint8Array ? data : new Uint8Array(data) };
-        return true;
+    const handleCopySelection = () => {
+        const run = (async () => {
+            if (!score) {
+                return false;
+            }
+            const getType = requireMutation('selectionMimeType');
+            const getData = requireMutation('selectionMimeData');
+            if (!getType || !getData) {
+                return false;
+            }
+
+            // Both reads are issued here, before this function yields for anything else.
+            // The worker handles RPCs in order, so they see the selection as it was when
+            // Ctrl+C was pressed. Awaiting anything first -- ensureSelectionInWasm, or
+            // even just the type before requesting the data -- lets the user's next click
+            // reach the engine in between, and the copy then captures whatever is selected
+            // by then: a range copy silently became a single-note copy, which the engine
+            // accepted and the paste discarded.
+            const readSelection = async () => {
+                const typePromise = Promise.resolve(getType());
+                const dataPromise = Promise.resolve(getData());
+                const [mimeType, data] = await Promise.all([typePromise, dataPromise]);
+                if (!mimeType || !data || data.length === 0) {
+                    return null;
+                }
+                return { mimeType, data };
+            };
+
+            let selection = await readSelection();
+            if (!selection) {
+                // Nothing in the engine yet: project the UI's selection and read once more.
+                await ensureSelectionInWasm();
+                selection = await readSelection();
+            }
+            if (!selection) {
+                return false;
+            }
+            const { mimeType, data } = selection;
+            // Detach from the engine's buffer, as useCompareClipboard does for the compare
+            // panes: `selectionMimeData()` hands back a view into the WASM heap, which the
+            // next operation can reuse.
+            clipboardRef.current = {
+                mimeType,
+                data: data instanceof Uint8Array ? data.slice() : new Uint8Array(data),
+            };
+            return true;
+        })();
+        copyInFlightRef.current = run;
+        void run.finally(() => {
+            if (copyInFlightRef.current === run) {
+                copyInFlightRef.current = null;
+            }
+        });
+        return run;
     };
 
     const handlePasteSelection = () => performMutation('paste selection', async () => {
+        // Ctrl+C starts an async read and Ctrl+V is a separate event, so the paste can
+        // arrive first -- it did, reading a null clipboard and reporting "nothing copied"
+        // for a range the user had just copied. Wait for a copy that is still resolving.
+        await copyInFlightRef.current?.catch(() => false);
         const clip = clipboardRef.current;
         if (!clip) {
             alert('Nothing copied yet.');
