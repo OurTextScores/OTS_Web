@@ -121,6 +121,7 @@ import { FunctionalHarmonyPanel } from './score-editor/ai-tools/FunctionalHarmon
 import { HarmonyPanel, type HarmonyRhythmMode } from './score-editor/ai-tools/HarmonyPanel';
 import { NotaGenPanel } from './score-editor/ai-tools/NotaGenPanel';
 import { NewScoreDialog } from './score-editor/NewScoreDialog';
+import { ChangeReviewScorePanel } from './score-editor/ChangeReviewScorePanel';
 import { resolveComparePaneStatus } from './score-editor/compare/compare-pane-status';
 import { CompareScorePane } from './score-editor/compare/CompareScorePane';
 import { XmlDiffView } from './score-editor/XmlDiffView';
@@ -16668,129 +16669,30 @@ ${partsBodyXml}
             </div>
 
             {isChangeReviewSingleScoreMode && (
-                <aside
-                    ref={changeReviewGutterRef}
-                    className="relative w-80 shrink-0 overflow-hidden border-l border-slate-200 bg-slate-50"
-                    data-testid="change-review-gutter"
-                >
-                    <div className="sticky top-0 z-[60] border-b border-slate-200 bg-white px-3 py-2">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-700">{reviewLabel}</div>
-                        <div className="mt-1 text-[10px] text-slate-500">Select any bar to leave a comment.</div>
-                        {changeReviewLoading && <div className="mt-1 text-[10px] text-slate-500">Loading review...</div>}
-                        {(changeReviewError || changeReviewActionError) && (
-                            <div className="mt-1 text-[10px] text-rose-700">{changeReviewError || changeReviewActionError}</div>
-                        )}
-                    </div>
-                    <div className="relative min-h-full" style={{ height: `${Math.max(900, (changeReviewMeasurePositions?.pageSize?.height || 900) * zoom + 160)}px` }}>
-                        {changeReviewGutterBars.map(({ bar, top }) => {
-                            const thread = changeReviewThreadsByAnchor.get(bar.anchorId);
-                            const selected = changeReviewFocusedAnchorId === bar.anchorId;
-                            return (
-                                <div
-                                    key={`gutter-${bar.anchorId}`}
-                                    className={`absolute left-2 right-2 rounded border bg-white p-2 text-xs shadow-sm ${selected ? 'z-50 border-sky-400 ring-2 ring-sky-300' : 'z-10 border-slate-300'}`}
-                                    style={{ top: `${64 + top * zoom}px` }}
-                                    onClick={() => setChangeReviewFocusedAnchorId(bar.anchorId)}
-                                >
-                                    <div className="flex items-center justify-between gap-2">
-                                        <span className="font-semibold text-slate-800">{bar.label}</span>
-                                        {bar.changeType && (
-                                            <span className={`rounded px-1 py-0.5 text-[9px] uppercase ${bar.changeType === 'added' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                                {bar.changeType}
-                                            </span>
-                                        )}
-                                    </div>
-                                    {selected && bar.summary && <div className="mt-1 text-[10px] text-slate-500">{bar.summary}</div>}
-                                    {!thread && selected && changeReviewDetail?.permissions.canAddThread && (
-                                        <div className="mt-2 grid gap-2">
-                                            {changeReviewNewThreadAnchorId === bar.anchorId ? (
-                                                <>
-                                                    <label className="font-semibold text-slate-800" htmlFor={`change-review-comment-${bar.anchorId}`}>
-                                                        Write a comment on this bar.
-                                                    </label>
-                                                    <textarea
-                                                        id={`change-review-comment-${bar.anchorId}`}
-                                                        autoFocus
-                                                        value={changeReviewNewThreadContent}
-                                                        onChange={(event) => setChangeReviewNewThreadContent(event.target.value)}
-                                                        rows={4}
-                                                        placeholder="Enter your review comment"
-                                                        className="w-full rounded border border-sky-400 bg-white px-2 py-1 text-xs text-slate-900 placeholder:text-slate-600"
-                                                        disabled={changeReviewActionBusy}
-                                                        onClick={(event) => event.stopPropagation()}
-                                                    />
-                                                    <div className="flex justify-end gap-2">
-                                                        <button
-                                                            type="button"
-                                                            disabled={changeReviewActionBusy}
-                                                            className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 disabled:opacity-50"
-                                                            onClick={(event) => {
-                                                                event.stopPropagation();
-                                                                setChangeReviewNewThreadAnchorId(null);
-                                                                setChangeReviewNewThreadContent('');
-                                                            }}
-                                                        >
-                                                            Cancel
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            disabled={changeReviewActionBusy || !changeReviewNewThreadContent.trim()}
-                                                            className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 disabled:opacity-50"
-                                                            onClick={(event) => {
-                                                                event.stopPropagation();
-                                                                void runChangeReviewAction(async () => {
-                                                                    await fetchJsonOrThrow(`/api/proxy/change-reviews/${encodeURIComponent(changeReviewId)}/threads`, {
-                                                                        method: 'POST',
-                                                                        body: JSON.stringify({
-                                                                            anchorId: bar.anchorId,
-                                                                            content: changeReviewNewThreadContent,
-                                                                            patchsetNumber: changeReviewPatchset ? Number(changeReviewPatchset) : undefined,
-                                                                        }),
-                                                                    });
-                                                                    setChangeReviewNewThreadAnchorId(null);
-                                                                    setChangeReviewNewThreadContent('');
-                                                                });
-                                                            }}
-                                                        >
-                                                            Submit
-                                                        </button>
-                                                    </div>
-                                                </>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    disabled={changeReviewActionBusy}
-                                                    className="rounded border border-sky-400 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-800 disabled:opacity-50"
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        setChangeReviewNewThreadAnchorId(bar.anchorId);
-                                                        setChangeReviewNewThreadContent('');
-                                                    }}
-                                                >
-                                                    Add Thread
-                                                </button>
-                                            )}
-                                        </div>
-                                    )}
-                                    {thread && (selected || thread.status === 'open') && renderChangeReviewThread(thread)}
-                                    {thread && !selected && thread.status === 'resolved' && (
-                                        <div className="mt-1 text-[10px] text-emerald-700">Resolved · {thread.comments.length} comment{thread.comments.length === 1 ? '' : 's'}</div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                        {changeReviewScoreView?.removedRegions.map((region, index) => {
-                            const thread = changeReviewThreadsByAnchor.get(region.anchorId);
-                            return (
-                                <div key={region.anchorId} className="absolute bottom-2 left-2 right-2 rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-800" style={{ transform: `translateY(${-index * 52}px)` }}>
-                                    <div className="font-semibold">{region.label}</div>
-                                    <div className="text-[10px]">Removed from the head score</div>
-                                    {thread && renderChangeReviewThread(thread)}
-                                </div>
-                            );
-                        })}
-                    </div>
-                </aside>
+                <ChangeReviewScorePanel
+                    review={{
+                        detail: changeReviewDetail,
+                        barBoxes: changeReviewGutterBars,
+                        threadsByAnchor: changeReviewThreadsByAnchor,
+                        focusedAnchorId: changeReviewFocusedAnchorId,
+                        newThreadAnchorId: changeReviewNewThreadAnchorId,
+                        newThreadContent: changeReviewNewThreadContent,
+                        loading: changeReviewLoading,
+                        error: changeReviewError,
+                        actionBusy: changeReviewActionBusy,
+                        actionError: changeReviewActionError,
+                        measurePositions: changeReviewMeasurePositions,
+                        scoreView: changeReviewScoreView,
+                        renderThread: renderChangeReviewThread,
+                        createThread: createChangeReviewThread,
+                        setFocusedAnchorId: setChangeReviewFocusedAnchorId,
+                        setNewThreadAnchorId: setChangeReviewNewThreadAnchorId,
+                        setNewThreadContent: setChangeReviewNewThreadContent,
+                    }}
+                    gutterRef={changeReviewGutterRef}
+                    reviewLabel={reviewLabel}
+                    zoom={zoom}
+                />
             )}
 
             {!isEmbedMode && panelsVisible && (
