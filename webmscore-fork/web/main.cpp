@@ -112,22 +112,6 @@
 #include "./wasmres.h"
 #include "./audio/audio.h"
 
-/**
- * Debug tracing for interactive paths.
- *
- * These fire on every selection, preview and stem flip -- once per click -- and each one
- * sits beside a LOGI()/LOGW() that already records the same thing through MuseScore's
- * logging. A release build should not pay for the formatting or push engine internals to
- * the browser console (SECURITY_CORRECTNESS_FINDINGS L2).
- *
- * Define WEBMSCORE_DEBUG_TRACE at build time to get them back.
- */
-#ifdef WEBMSCORE_DEBUG_TRACE
-#define WEBMSCORE_TRACE(...) printf(__VA_ARGS__)
-#else
-#define WEBMSCORE_TRACE(...) ((void)0)
-#endif
-
 using namespace mu;
 using project::INotationWriter;
 
@@ -3075,7 +3059,7 @@ bool _selectElementAtPoint(uintptr_t score_ptr, int pageNumber, double x, double
         return false;
     }
 
-    WEBMSCORE_TRACE("[WASM SELECT] page=%d x=%.2f y=%.2f type=%d tick=%d\n",
+    printf("[WASM SELECT] page=%d x=%.2f y=%.2f type=%d tick=%d\n",
            pageNumber,
            x,
            y,
@@ -4277,11 +4261,11 @@ bool _triggerSelectionPreview(uintptr_t score_ptr, int excerptId)
 
     if (!selected) {
         LOGW() << "triggerSelectionPreview: no playable selection found";
-        WEBMSCORE_TRACE("[WASM PREVIEW] no playable selection\n");
+        printf("[WASM PREVIEW] no playable selection\n");
         return false;
     }
 
-    WEBMSCORE_TRACE("[WASM PREVIEW] type=%d tick=%d\n",
+    printf("[WASM PREVIEW] type=%d tick=%d\n",
            static_cast<int>(selected->type()),
            selected->tick().ticks());
 
@@ -4711,11 +4695,11 @@ bool _pitchDown(uintptr_t score_ptr, int excerptId)
 
 bool _flipStem(uintptr_t score_ptr, int excerptId)
 {
-    WEBMSCORE_TRACE("[DEBUG] _flipStem called\n");
+    printf("[DEBUG] _flipStem called\n");
     MainScore score(score_ptr, excerptId);
     if (score->selection().isNone()) {
         LOGW() << "flipStem: no selection";
-        WEBMSCORE_TRACE("[DEBUG] flipStem: no selection\n");
+        printf("[DEBUG] flipStem: no selection\n");
         return false;
     }
 
@@ -4744,7 +4728,7 @@ bool _flipStem(uintptr_t score_ptr, int excerptId)
 
     if (chords.empty()) {
         LOGW() << "flipStem: selection is not a chord or note";
-        WEBMSCORE_TRACE("[DEBUG] flipStem: selection is not a chord or note\n");
+        printf("[DEBUG] flipStem: selection is not a chord or note\n");
         return false;
     }
 
