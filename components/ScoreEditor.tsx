@@ -87,15 +87,8 @@ import {
     isGoogleDriveScoreUrl,
     resolvePublicScoreUrl,
 } from '../lib/public-score-url';
-import {
-    MMA_ARRANGEMENT_PRESETS,
-    type MmaArrangementPreset,
-} from '../lib/music-mma-presets';
-import {
-    DEFAULT_MMA_GROOVE,
-    findMmaGrooveOption,
-    MMA_GROOVE_OPTION_GROUPS,
-} from '../lib/music-mma-grooves';
+import { type MmaArrangementPreset } from '../lib/music-mma-presets';
+import { DEFAULT_MMA_GROOVE } from '../lib/music-mma-grooves';
 import {
     advanceClientProposalSession,
     buildProposalSessionRequestPayload,
@@ -122,6 +115,7 @@ import {
 } from './score-editor/compare/CompareMeasureComments';
 import { CompareDiffGutter } from './score-editor/compare/CompareDiffGutter';
 import { buildCompareReflowPlan } from './score-editor/compare/compare-reflow-plan';
+import { MmaPanel, type MmaStarterPreset } from './score-editor/ai-tools/MmaPanel';
 import { resolveComparePaneStatus } from './score-editor/compare/compare-pane-status';
 import { CompareScorePane } from './score-editor/compare/CompareScorePane';
 import { XmlDiffView } from './score-editor/XmlDiffView';
@@ -579,7 +573,6 @@ type AiPromptSection = {
     content: string;
 };
 
-type MmaStarterPreset = 'blank' | 'lead-sheet' | 'blues';
 type HarmonyRhythmMode = 'auto' | 'measure' | 'beat';
 
 
@@ -17545,257 +17538,44 @@ ${partsBodyXml}
                             />
                         )}
                         {xmlSidebarTab === 'mma' && (
-                            <div className="mt-3 space-y-3 text-sm text-gray-700">
-                                <div className="rounded border border-gray-200 bg-gray-50/70 p-3 space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                                            MMA (Accompaniment)
-                                        </div>
-                                        <a
-                                            href="https://www.mellowood.ca/mma/"
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            title="MMA project documentation"
-                                            aria-label="Open MMA project documentation"
-                                            className="text-sm leading-none text-gray-500 hover:text-gray-700"
-                                        >
-                                            ⓘ
-                                        </a>
-                                    </div>
-                                    <div className="grid gap-2 sm:grid-cols-3">
-                                        <label className="flex flex-col gap-1">
-                                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                                Starter
-                                            </span>
-                                            <select
-                                                value={mmaStarterPreset}
-                                                onChange={(event) => handleMmaStarterPresetChange(event.target.value as MmaStarterPreset)}
-                                                className="rounded border border-gray-300 px-2 py-1 text-sm"
-                                                data-testid="select-mma-starter"
-                                            >
-                                                <option value="blank">Blank</option>
-                                                <option value="lead-sheet">Lead Sheet (auto)</option>
-                                                <option value="blues">12-bar Blues (demo)</option>
-                                            </select>
-                                        </label>
-                                        <label className="flex flex-col gap-1">
-                                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                                Arrangement
-                                            </span>
-                                            <select
-                                                value={mmaArrangementPreset}
-                                                onChange={(event) => setMmaArrangementPreset(event.target.value as MmaArrangementPreset)}
-                                                className="rounded border border-gray-300 px-2 py-1 text-sm"
-                                                data-testid="select-mma-arrangement"
-                                            >
-                                                {MMA_ARRANGEMENT_PRESETS.map((preset) => (
-                                                    <option key={preset.id} value={preset.id}>
-                                                        {preset.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </label>
-                                        <label className="flex flex-col gap-1">
-                                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                                Groove
-                                            </span>
-                                            <select
-                                                value={mmaGroove}
-                                                onChange={(event) => setMmaGroove(event.target.value)}
-                                                className="rounded border border-gray-300 px-2 py-1 text-sm"
-                                                data-testid="select-mma-groove"
-                                            >
-                                                {MMA_GROOVE_OPTION_GROUPS.map((group) => (
-                                                    <optgroup key={group.id} label={group.label}>
-                                                        {group.options.map((option) => (
-                                                            <option key={option.value} value={option.value}>
-                                                                {option.label}
-                                                            </option>
-                                                        ))}
-                                                    </optgroup>
-                                                ))}
-                                            </select>
-                                        </label>
-                                    </div>
-                                    <div className="grid gap-2 sm:grid-cols-2">
-                                        <div className="rounded border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600">
-                                            {MMA_ARRANGEMENT_PRESETS.find((preset) => preset.id === mmaArrangementPreset)?.description
-                                                || 'Use the groove as-is with its default accompaniment layers.'}
-                                        </div>
-                                        <div className="rounded border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600">
-                                            {findMmaGrooveOption(mmaGroove)?.description
-                                                || 'Curated MMA groove from the local installed groove library.'}
-                                        </div>
-                                    </div>
-                                    <div className="grid gap-2 sm:grid-cols-2">
-                                        <div className="flex items-end">
-                                            <button
-                                                type="button"
-                                                onClick={handleMmaGenerateTemplate}
-                                                disabled={mmaBusy}
-                                                className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                data-testid="btn-mma-generate-template"
-                                            >
-                                                {mmaBusy ? 'Working...' : 'Generate from Score'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                                        <div>For better MMA results, generate chord tags first with Chordify.</div>
-                                        <div className="mt-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => setXmlSidebarTab('harmony')}
-                                                className="rounded border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100"
-                                            >
-                                                Open Chordify
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div className="flex flex-wrap gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => void handleHarmonyAnalyze({ applyImmediately: false, persistArtifacts: true, generateMmaTemplate: true })}
-                                            disabled={mmaBusy || harmonyBusy}
-                                            className="w-full rounded border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            data-testid="btn-mma-analyze-harmony-template"
-                                        >
-                                            {(mmaBusy || harmonyBusy) ? 'Working...' : 'Chordify + Generate'}
-                                        </button>
-                                    </div>
-                                    <div className="space-y-2">
-                                        <div className="flex items-center justify-between text-xs text-gray-500">
-                                            <span>MMA Script</span>
-                                            <span>{mmaScript.trim() ? `${mmaScript.length} chars` : 'No script'}</span>
-                                        </div>
-                                        <CodeMirrorEditor
-                                            testId="mma-editor"
-                                            value={mmaScript}
-                                            onChange={(nextValue) => setMmaScript(nextValue)}
-                                            readOnly={mmaBusy}
-                                            placeholderText="Paste or author an MMA script."
-                                            language="none"
-                                            height={200}
-                                            maxHeight={320}
-                                            themeMode={codeEditorTheme}
-                                        />
-                                    </div>
-                                    <div className="flex flex-wrap gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => void handleMmaRender(false)}
-                                            disabled={mmaBusy || !mmaScript.trim()}
-                                            className="flex-1 rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            data-testid="btn-mma-render-midi"
-                                        >
-                                            {mmaBusy ? 'Rendering...' : 'Render MIDI'}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => void handleMmaRender(true)}
-                                            disabled={mmaBusy || !mmaScript.trim()}
-                                            className="flex-1 rounded border border-blue-600 bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            data-testid="btn-mma-render-xml"
-                                        >
-                                            {mmaBusy ? 'Rendering...' : 'Render + Convert to XML'}
-                                        </button>
-                                    </div>
-                                </div>
-                                <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                                    Applying MMA output appends accompaniment instruments as new parts in the current score.
-                                </div>
-                                {mmaError && (
-                                    <div className="text-xs text-red-600">
-                                        {mmaError}
-                                    </div>
-                                )}
-                                {mmaWarnings.length > 0 && (
-                                    <div className="space-y-1">
-                                        {mmaWarnings.map((warning, index) => (
-                                            <div key={`mma-warning-${index}`} className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                                                {warning}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                                {mmaSanitizedStderr && (
-                                    <div className="space-y-1">
-                                        <div className="text-xs text-gray-500">MMA diagnostics (sanitized)</div>
-                                        <pre className="max-h-40 overflow-auto rounded border border-gray-200 bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-700 whitespace-pre-wrap">
-                                            {mmaSanitizedStderr}
-                                        </pre>
-                                    </div>
-                                )}
-                                {(mmaMidiBase64 || mmaGeneratedXml) && (
-                                    <div className="flex flex-wrap gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => handleMmaDownload('mma')}
-                                            disabled={!mmaScript.trim()}
-                                            className="rounded border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            data-testid="btn-mma-download-script"
-                                        >
-                                            Download .mma
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleMmaDownload('midi')}
-                                            disabled={!mmaMidiBase64.trim()}
-                                            className="rounded border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            data-testid="btn-mma-download-midi"
-                                        >
-                                            Download .mid
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleMmaDownload('musicxml')}
-                                            disabled={!mmaGeneratedXml.trim()}
-                                            className="rounded border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            data-testid="btn-mma-download-xml"
-                                        >
-                                            Download .musicxml
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={handleApplyMmaOutput}
-                                            disabled={mmaBusy || !mmaGeneratedXml.trim()}
-                                            className="rounded border border-blue-600 bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            data-testid="btn-mma-apply-xml"
-                                        >
-                                            Append Parts to Score
-                                        </button>
-                                    </div>
-                                )}
-                                {mmaGeneratedXml && (
-                                    <div className="space-y-2">
-                                        <div className="flex items-center justify-between text-xs text-gray-500">
-                                            <span>Generated MusicXML</span>
-                                            <span>Review before applying</span>
-                                        </div>
-                                        <CodeMirrorEditor
-                                            testId="mma-generated-xml"
-                                            value={mmaGeneratedXml}
-                                            onChange={(nextValue) => setMmaGeneratedXml(nextValue)}
-                                            readOnly={false}
-                                            language="xml"
-                                            placeholderText="Rendered MusicXML will appear here."
-                                            height={220}
-                                            maxHeight={360}
-                                            themeMode={codeEditorTheme}
-                                        />
-                                    </div>
-                                )}
-                                {mmaResultPayload && (
-                                    <details className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
-                                        <summary className="cursor-pointer text-xs font-medium text-gray-700">
-                                            MMA Response
-                                        </summary>
-                                        <pre className="mt-2 max-h-64 overflow-auto text-[11px] leading-relaxed text-gray-700 whitespace-pre-wrap">
-                                            {JSON.stringify(mmaResultPayload, null, 2)}
-                                        </pre>
-                                    </details>
-                                )}
-                            </div>
+                            <MmaPanel
+                                config={{
+                                    starterPreset: mmaStarterPreset,
+                                    arrangementPreset: mmaArrangementPreset,
+                                    groove: mmaGroove,
+                                    script: mmaScript,
+                                    setStarterPreset: handleMmaStarterPresetChange,
+                                    setArrangementPreset: setMmaArrangementPreset,
+                                    setGroove: setMmaGroove,
+                                    setScript: setMmaScript,
+                                    editorTheme: codeEditorTheme,
+                                }}
+                                status={{
+                                    busy: mmaBusy,
+                                    harmonyBusy,
+                                    error: mmaError,
+                                }}
+                                result={{
+                                    generatedXml: mmaGeneratedXml,
+                                    midiBase64: mmaMidiBase64,
+                                    warnings: mmaWarnings,
+                                    sanitizedStderr: mmaSanitizedStderr,
+                                    payload: mmaResultPayload,
+                                    setGeneratedXml: setMmaGeneratedXml,
+                                }}
+                                actions={{
+                                    generateTemplate: handleMmaGenerateTemplate,
+                                    chordifyAndGenerate: () => void handleHarmonyAnalyze({
+                                        applyImmediately: false,
+                                        persistArtifacts: true,
+                                        generateMmaTemplate: true,
+                                    }),
+                                    render: (includeMusicXml) => void handleMmaRender(includeMusicXml),
+                                    download: handleMmaDownload,
+                                    applyOutput: handleApplyMmaOutput,
+                                    openChordify: () => setXmlSidebarTab('harmony'),
+                                }}
+                            />
                         )}
                         {xmlSidebarTab === 'harmony' && (
                             <div className="mt-3 space-y-3 text-sm text-gray-700">

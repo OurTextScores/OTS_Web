@@ -28,10 +28,14 @@
     }
   ],
   "scoreEditor": {
-    "maxLines": 18913,
-    "maxBytes": 882785
+    "maxLines": 18693,
+    "maxBytes": 866021
   },
   "modules": {
+    "components/score-editor/ai-tools/MmaPanel.tsx": {
+      "maxLines": 900,
+      "maxBytes": 36000
+    },
     "components/score-editor/compare/CompareDiffGutter.tsx": {
       "maxLines": 900,
       "maxBytes": 52000
