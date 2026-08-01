@@ -1,5 +1,7 @@
 {
   "_comment": "Ratchet, not a baseline. Tighten these whenever a work package lands; never raise one to make a commit pass. ScoreEditor is pinned at its current size so it can only shrink toward the TD-03 exit budget of 17500 lines / 875000 bytes. Compare module caps encode sprint AC-15 (900 lines without a written ownership justification accepted in review).",
+  "_raisesComment": "check:debt compares this file against the base ref and fails on any increase that is not declared below with its exact before/after values and a reason. Entries are a permanent log: matching on 'from' as well as 'to' stops an old entry from re-authorizing a later raise. Lowering a budget needs no entry. A raise is for work that genuinely could not fit, not for making a red check green.",
+  "raises": [],
   "scoreEditor": {
     "maxLines": 18887,
     "maxBytes": 881728

@@ -2,11 +2,28 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { analyzeRatchetDirection } from './ratchet-direction.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const checkBudget = process.argv.includes('--check');
 const jsonOutput = process.argv.includes('--json');
-const budget = JSON.parse(readFileSync(resolve(root, 'scripts/technical-debt-budget.json'), 'utf8'));
+const budgetPath = 'scripts/technical-debt-budget.json';
+const budget = JSON.parse(readFileSync(resolve(root, budgetPath), 'utf8'));
+
+const git = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+
+/**
+ * The ref the budget file is compared against to detect a raise. A PR is judged against
+ * its target branch, so a raise anywhere in the branch must be declared; locally the
+ * last commit is the useful comparison, which catches a raise before it is committed.
+ */
+const resolveBaseRef = () => {
+  const explicit = process.argv.indexOf('--base');
+  if (explicit >= 0 && process.argv[explicit + 1]) return process.argv[explicit + 1];
+  if (process.env.GITHUB_BASE_REF) return `origin/${process.env.GITHUB_BASE_REF}`;
+  if (git(['rev-parse', '--verify', '--quiet', 'origin/main']).status === 0) return 'origin/main';
+  return 'HEAD';
+};
 const ownedRoots = ['app', 'components', 'lib', 'unit', 'tests'];
 
 const readOwnedFiles = () => {
@@ -199,7 +216,63 @@ if (jsonOutput) {
   }
 }
 
+/**
+ * Budgets may only move down. A raise has to be declared in the budget file itself with
+ * its exact before/after values and a reason, so `check:debt` cannot be made green by
+ * quietly widening the target it checks against.
+ */
+const checkRatchetDirection = () => {
+  const preferredRef = resolveBaseRef();
+  // A base ref that predates the budget file proves nothing. Fall back to the last
+  // commit, which still catches a raise — just over a shorter span.
+  const candidates = preferredRef === 'HEAD' ? ['HEAD'] : [preferredRef, 'HEAD'];
+  let baseRef = null;
+  let baseFile = null;
+  for (const candidate of candidates) {
+    const result = git(['show', `${candidate}:${budgetPath}`]);
+    if (result.status === 0) {
+      baseRef = candidate;
+      baseFile = result;
+      break;
+    }
+  }
+
+  if (!baseFile) {
+    const detail = `${budgetPath} does not exist at ${candidates.join(' or ')}`;
+    if (process.env.CI) {
+      console.error(`[debt:audit] ratchet direction unverifiable: ${detail}.`);
+      console.error('[debt:audit] the debt job needs full history (fetch-depth: 0) to compare budgets.');
+      return false;
+    }
+    console.warn(`[debt:audit] ratchet direction not checked: ${detail}.`);
+    return true;
+  }
+  if (baseRef !== preferredRef) {
+    console.log(`[debt:audit] ${preferredRef} predates ${budgetPath}; comparing budgets against ${baseRef}.`);
+  }
+
+  const { raises, failures: directionFailures } = analyzeRatchetDirection(
+    JSON.parse(baseFile.stdout),
+    budget,
+  );
+  if (directionFailures.length > 0) {
+    console.error(`[debt:audit] budget raised against ${baseRef}:`);
+    for (const failure of directionFailures) {
+      console.error(`  ${failure.rule}: ${failure.detail}`);
+    }
+    return false;
+  }
+  for (const raise of raises) {
+    console.log(`[debt:audit] declared raise: ${raise.key} ${raise.from} -> ${raise.to}`);
+  }
+  return true;
+};
+
 if (checkBudget) {
+  const directionOk = checkRatchetDirection();
+  if (!directionOk) {
+    process.exitCode = 1;
+  }
   if (failures.length > 0 || missingModules.length > 0) {
     console.error('[debt:audit] budget regression:');
     for (const [label, actual, maximum] of failures) {
@@ -209,7 +282,7 @@ if (checkBudget) {
       console.error(`  ${entry.path}: budgeted module is missing`);
     }
     process.exitCode = 1;
-  } else {
+  } else if (directionOk) {
     console.log('[debt:audit] all ratchets pass.');
   }
 }
