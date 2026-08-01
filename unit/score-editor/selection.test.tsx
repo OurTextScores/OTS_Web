@@ -87,9 +87,21 @@ describe('ScoreEditor: selection geometry and overlay refresh', () => {
   // re-scrape the SVG and restore a selection box. That is the same stale-refresh race
   // as SECURITY_CORRECTNESS_FINDINGS L5 and docs/private/SELECTION_WORK_HANDOFF.md #3.
   //
-  // Owner/decision: TD-07 L5, which section 3.3 scopes as a stretch item to be taken only
-  // after TD-03 is stable. Un-skip it as part of that fix; do not relax the assertions to
-  // make it green.
+  // Re-checked 2026-08-01 under TD-07 L5, with the mechanism traced further than before.
+  // refreshSelectionFromSvg() clears blockOverlayRefreshRef and bumps the overlay
+  // generation at entry, so it re-mints itself as "current". That is correct when it
+  // starts before a newer click, and wrong when the first click's async flow only reaches
+  // it *after* the second click's clearSelectionState() has run: the stale refresh
+  // unblocks the overlay, renders, and rebuilds a selection box the user just dismissed.
+  // The reappearing box in this test carries the harness bounding rect, which is what a
+  // fallback-index rebuild produces.
+  //
+  // The fix is to thread a click generation captured at click time into
+  // refreshSelectionFromSvg and bail when the ref has moved, rather than bumping
+  // unconditionally. That is a change to the hot selection path, and section 3.3 scopes
+  // L5 as a stretch item precisely so it is not attempted without the deterministic
+  // browser matrix run against it. Un-skip it as part of that fix; do not relax the
+  // assertions to make it green.
   it.skip('clears selection when clicking blank space and allows re-selecting notes', async () => {
     const user = userEvent.setup();
 
