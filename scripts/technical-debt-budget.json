@@ -1,10 +1,23 @@
 {
   "_comment": "Ratchet, not a baseline. Tighten these whenever a work package lands; never raise one to make a commit pass. ScoreEditor is pinned at its current size so it can only shrink toward the TD-03 exit budget of 17500 lines / 875000 bytes. Compare module caps encode sprint AC-15 (900 lines without a written ownership justification accepted in review).",
   "_raisesComment": "check:debt compares this file against the base ref and fails on any increase that is not declared below with its exact before/after values and a reason. Entries are a permanent log: matching on 'from' as well as 'to' stops an old entry from re-authorizing a later raise. Lowering a budget needs no entry. A raise is for work that genuinely could not fit, not for making a red check green.",
-  "raises": [],
+  "raises": [
+    {
+      "key": "scoreEditor.maxLines",
+      "from": 18887,
+      "to": 18893,
+      "reason": "Bug fix, not new debt: the compare pane viewport status now resolves through an explicit pane/score orientation mapping instead of reading auxiliary-keyed state straight into the right pane. Costs six lines at the call site and moves the rule into compare-pane-status.ts."
+    },
+    {
+      "key": "scoreEditor.maxBytes",
+      "from": 881728,
+      "to": 881893,
+      "reason": "Same change as the maxLines raise above: the orientation mapping and the comment recording why it exists."
+    }
+  ],
   "scoreEditor": {
-    "maxLines": 18887,
-    "maxBytes": 881728
+    "maxLines": 18893,
+    "maxBytes": 881893
   },
   "modules": {
     "components/score-editor/compare/CompareDiffGutter.tsx": {

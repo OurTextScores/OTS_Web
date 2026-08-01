@@ -122,6 +122,7 @@ import {
 } from './score-editor/compare/CompareMeasureComments';
 import { CompareDiffGutter } from './score-editor/compare/CompareDiffGutter';
 import { buildCompareReflowPlan } from './score-editor/compare/compare-reflow-plan';
+import { resolveComparePaneStatus } from './score-editor/compare/compare-pane-status';
 import { CompareScorePane } from './score-editor/compare/CompareScorePane';
 import { XmlDiffView } from './score-editor/XmlDiffView';
 import {
@@ -2921,6 +2922,16 @@ export default function ScoreEditor() {
     const compareRightXml = compareView
         ? (compareSwapped ? compareView.checkpointXml : compareView.currentXml)
         : '';
+    // Load state is auxiliary-score-keyed; the viewport status it feeds is pane-keyed.
+    // Resolve the mapping once, here, rather than letting a compareRight*-named value
+    // reach the right pane on the assumption that the auxiliary is always drawn there.
+    const comparePaneStatus = resolveComparePaneStatus({
+        liveIsLeftPane: compareSwapped,
+        liveScorePresent: Boolean(score),
+        auxiliaryScorePresent: Boolean(compareRightScore),
+        auxiliaryLoading: compareRightLoading,
+        auxiliaryError: compareRightError,
+    });
     const compareLeftIsCurrent = compareLeftScore === score;
     const compareRightIsCurrent = compareRightScoreDisplay === score;
     const compareLeftRole: CompareScoreRole | null = compareLeftScore
@@ -18646,7 +18657,7 @@ ${partsBodyXml}
                                             wrapperStyle: compareZoomStyle,
                                             transport: compareTransport.left,
                                             checkpoint: isEmbedMode ? null : { label: compareLeftCheckpointLabel, busy: checkpointBusy },
-                                            viewportStatus: compareLeftScore ? null : { message: 'Load a score to compare.', overlay: false },
+                                            viewportStatus: comparePaneStatus.left,
                                             diffHighlights: compareLeftHighlights,
                                             positiveDiffStatus: 'new-diff',
                                             negativeDiffStatus: null,
@@ -18816,12 +18827,7 @@ ${partsBodyXml}
                                             wrapperStyle: compareRightZoomStyle,
                                             transport: compareTransport.right,
                                             checkpoint: isEmbedMode ? null : { label: compareRightCheckpointLabel, busy: checkpointBusy },
-                                            viewportStatus: compareRightLoading || compareRightError || !compareRightScore
-                                                ? {
-                                                    message: compareRightError ?? (compareRightLoading ? 'Loading checkpoint score...' : 'Score not loaded.'),
-                                                    overlay: true,
-                                                }
-                                                : null,
+                                            viewportStatus: comparePaneStatus.right,
                                             diffHighlights: compareRightHighlights,
                                             positiveDiffStatus: 'new-diff',
                                             negativeDiffStatus: 'old-diff',
