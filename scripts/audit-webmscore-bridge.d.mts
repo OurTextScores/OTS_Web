@@ -52,6 +52,8 @@ export type BridgeReport = {
         scoreMembers: number;
     };
     unproxiedNative: string[];
+    /** Synced pairs with no local build to compare against; reported, not failed. */
+    unverifiableSync: string[];
 };
 
 export function analyzeBridge(

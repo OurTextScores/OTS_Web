@@ -149,12 +149,12 @@ export function analyzeBridge(sources, manifest) {
     const unproxiedNative = [...native].filter((name) => !reachableNative.has(name)).sort();
 
     // Layer 6: the generated artifacts the app actually loads.
-    const generatedFailures = analyzeGeneratedArtifacts(sources.generated, manifest, {
+    const generated = analyzeGeneratedArtifacts(sources.generated, manifest, {
         native,
         rpcTargets,
         mainThread,
     });
-    failures.push(...generatedFailures);
+    failures.push(...generated.failures);
 
     return {
         report: {
@@ -166,6 +166,7 @@ export function analyzeBridge(sources, manifest) {
                 scoreMembers: scoreMembers.size,
             },
             unproxiedNative,
+            unverifiableSync: generated.unverifiable,
         },
         failures,
     };
@@ -195,7 +196,7 @@ const declaresName = (source, name) => (
  */
 export function analyzeGeneratedArtifacts(generated, manifest, parsed) {
     const config = manifest.generated;
-    if (!config) return [];
+    if (!config) return { failures: [], unverifiable: [] };
 
     const failures = [];
     const fail = (rule, detail) => failures.push({ rule, detail });
@@ -234,10 +235,16 @@ export function analyzeGeneratedArtifacts(generated, manifest, parsed) {
         }
     }
 
+    // The fork's build outputs are gitignored -- only the copies under public/ are
+    // committed -- so a fresh clone has nothing to compare against. That is normal in CI
+    // and is reported, not failed: with no locally built artifact there is simply nothing
+    // this rule can prove. It fails only where both sides exist and disagree, which is a
+    // developer or release machine that built but forgot to sync.
+    const unverifiable = [];
     for (const [shipped, source] of Object.entries(config.synced || {})) {
         const digests = artifacts.digests || {};
         if (!digests[source]) {
-            fail('generated-artifact-missing', `build artifact not found at ${source}`);
+            unverifiable.push(`${shipped}: no local build at ${source}`);
             continue;
         }
         if (!digests[shipped]) {
@@ -252,7 +259,7 @@ export function analyzeGeneratedArtifacts(generated, manifest, parsed) {
         }
     }
 
-    return failures;
+    return { failures, unverifiable };
 }
 
 function main() {
@@ -313,6 +320,9 @@ function main() {
         console.log(`[bridge:audit] Score interface members: ${report.counts.scoreMembers}`);
         console.log(`[bridge:audit] native exports not reachable from the worker: ${unproxiedNative.length} (informational)`);
         for (const name of unproxiedNative) console.log(`    ${name}`);
+        for (const note of report.unverifiableSync || []) {
+            console.log(`[bridge:audit] sync not verifiable here -- ${note}`);
+        }
     }
 
     if (failures.length > 0) {

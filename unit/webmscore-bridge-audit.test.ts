@@ -258,7 +258,23 @@ describe('webmscore generated artifacts', () => {
             .toContain('generated-artifact-missing');
         expect(rules(analyze(withGenerated({ bundles: { 'webmscore.mjs': null } }), generatedManifest)))
             .toContain('generated-artifact-missing');
+        // A missing *shipped* copy is still a failure: those are committed.
         expect(rules(analyze(withGenerated({ digests: { 'fork/webmscore.lib.wasm': 'abc123' } }), generatedManifest)))
             .toContain('generated-artifact-missing');
+    });
+
+    it('reports, rather than fails, when there is no local build to compare against', () => {
+        // The fork's build outputs are gitignored, so a fresh clone -- every CI run --
+        // has the shipped copy and no source to diff it against. Failing there would
+        // have made the bridge job red on every PR.
+        const result = analyze(
+            withGenerated({ digests: { 'public/webmscore.lib.wasm': 'abc123' } }),
+            generatedManifest,
+        );
+
+        expect(result.failures).toEqual([]);
+        expect(result.report?.unverifiableSync).toEqual([
+            'public/webmscore.lib.wasm: no local build at fork/webmscore.lib.wasm',
+        ]);
     });
 });
