@@ -48,6 +48,10 @@
       "maxLines": 900,
       "maxBytes": 36000
     },
+    "components/score-editor/compare/compare-pane-status.ts": {
+      "maxLines": 900,
+      "maxBytes": 36000
+    },
     "components/score-editor/compare/compare-reflow-plan.ts": {
       "maxLines": 900,
       "maxBytes": 36000
