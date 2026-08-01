@@ -122,6 +122,9 @@ import { HarmonyPanel, type HarmonyRhythmMode } from './score-editor/ai-tools/Ha
 import { NotaGenPanel } from './score-editor/ai-tools/NotaGenPanel';
 import { NewScoreDialog } from './score-editor/NewScoreDialog';
 import { ChangeReviewScorePanel } from './score-editor/ChangeReviewScorePanel';
+import { PngExportDialog } from './score-editor/PngExportDialog';
+import { GoogleDriveExportDialog } from './score-editor/GoogleDriveExportDialog';
+import { ShareLinkDialog } from './score-editor/ShareLinkDialog';
 import { AiToolsTabStrip, type AiToolsTab } from './score-editor/ai-tools/AiToolsTabStrip';
 import { resolveComparePaneStatus } from './score-editor/compare/compare-pane-status';
 import { CompareScorePane } from './score-editor/compare/CompareScorePane';
@@ -17168,184 +17171,37 @@ ${partsBodyXml}
             })()}
 
             {pngExportDialogOpen && (
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
-                    data-testid="png-export-modal"
-                >
-                    <form
-                        onSubmit={handleConfirmExportPng}
-                        className="w-full max-w-sm rounded bg-white p-4 shadow-lg"
-                    >
-                        <div className="flex items-center justify-between">
-                            <div className="text-sm font-semibold text-gray-800">
-                                Export PNG
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setPngExportDialogOpen(false)}
-                                disabled={pngExportBusy}
-                                className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                Close
-                            </button>
-                        </div>
-                        <div className="mt-4 grid gap-3 text-sm text-gray-700">
-                            <label className="flex flex-col gap-1">
-                                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                    Page
-                                </span>
-                                <input
-                                    data-testid="png-export-page-input"
-                                    type="number"
-                                    min={1}
-                                    max={Math.max(1, pageCount)}
-                                    value={pngExportPageInput}
-                                    onChange={(event) => setPngExportPageInput(event.target.value)}
-                                    className="rounded border border-gray-300 px-2 py-1 text-sm"
-                                />
-                            </label>
-                            <div className="text-xs text-gray-500">
-                                Current score has {Math.max(1, pageCount)} {Math.max(1, pageCount) === 1 ? 'page' : 'pages'}.
-                            </div>
-                        </div>
-                        <div className="mt-4 flex gap-2">
-                            <button
-                                type="submit"
-                                data-testid="btn-confirm-export-png"
-                                disabled={pngExportBusy}
-                                className="flex-1 rounded border border-gray-300 bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                {pngExportBusy ? 'Exporting...' : 'Export'}
-                            </button>
-                            <button
-                                type="button"
-                                data-testid="btn-cancel-export-png"
-                                onClick={() => setPngExportDialogOpen(false)}
-                                disabled={pngExportBusy}
-                                className="flex-1 rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </form>
-                </div>
+                <PngExportDialog
+                    pageCount={pageCount}
+                    pageInput={pngExportPageInput}
+                    setPageInput={setPngExportPageInput}
+                    busy={pngExportBusy}
+                    onConfirm={handleConfirmExportPng}
+                    onClose={() => setPngExportDialogOpen(false)}
+                />
             )}
 
             {googleDriveExportDialogOpen && (
-                <div
-                    className="fixed inset-0 z-50 overflow-y-auto bg-black/40"
-                    data-testid="google-drive-export-modal"
-                >
-                  <div className="flex min-h-full items-center justify-center p-6">
-                    <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
-                        <div className="flex items-center justify-between gap-4">
-                            <div className="text-base font-semibold text-gray-900">Export to Google Drive</div>
-                            <button
-                                type="button"
-                                onClick={() => setGoogleDriveExportDialogOpen(false)}
-                                className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100"
-                            >
-                                Close
-                            </button>
-                        </div>
-                        <ol className="mt-5 list-decimal space-y-2.5 pl-5 text-sm text-gray-700">
-                            <li><strong>score.mscz</strong> has been downloaded.</li>
-                            <li>Open Google Drive and upload the downloaded file.</li>
-                            <li>Set General access to <strong>Anyone with the link</strong>, then copy its share link.</li>
-                        </ol>
-                        <div className="mt-6 flex flex-wrap gap-3">
-                            <a
-                                href="https://drive.google.com/drive/my-drive"
-                                target="_blank"
-                                rel="noreferrer"
-                                className="rounded border border-blue-600 bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                            >
-                                Open Google Drive
-                            </a>
-                            <button
-                                type="button"
-                                data-testid="btn-drive-next-share-link"
-                                onClick={handleOpenShareLinkDialog}
-                                className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                            >
-                                Create Shareable Link
-                            </button>
-                        </div>
-                    </div>
-                  </div>
-                </div>
+                <GoogleDriveExportDialog
+                    onOpenShareLink={handleOpenShareLinkDialog}
+                    onClose={() => setGoogleDriveExportDialogOpen(false)}
+                />
             )}
 
             {shareLinkDialogOpen && (
-                <div
-                    className="fixed inset-0 z-50 overflow-y-auto bg-black/40"
-                    data-testid="share-link-modal"
-                >
-                    <div className="flex min-h-full items-center justify-center p-6">
-                        <form onSubmit={handleGenerateShareLink} className="w-full max-w-xl rounded-lg bg-white p-6 shadow-xl">
-                            <div className="flex items-center justify-between gap-4">
-                                <div className="text-base font-semibold text-gray-900">Create Shareable Editor Link</div>
-                                <button
-                                    type="button"
-                                    onClick={() => setShareLinkDialogOpen(false)}
-                                    className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100"
-                                >
-                                    Close
-                                </button>
-                            </div>
-                            <p className="mt-3 text-sm text-gray-600">
-                                Paste the public Google Drive file link. The generated URL opens this editor and loads that score.
-                            </p>
-                            <label className="mt-4 flex flex-col gap-1.5">
-                                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Google Drive share link</span>
-                                <input
-                                    data-testid="google-drive-share-url"
-                                    type="url"
-                                    value={googleDriveShareUrl}
-                                    onChange={(event) => {
-                                        setGoogleDriveShareUrl(event.target.value);
-                                        setGeneratedShareUrl('');
-                                        setShareLinkError('');
-                                        setShareLinkCopied(false);
-                                    }}
-                                    placeholder="https://drive.google.com/file/d/.../view?usp=sharing"
-                                    className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                                    autoFocus
-                                />
-                            </label>
-                            {shareLinkError && <div className="mt-2 text-sm text-red-600">{shareLinkError}</div>}
-                            <button
-                                type="submit"
-                                data-testid="btn-generate-share-link"
-                                className="mt-4 rounded border border-blue-600 bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                            >
-                                Generate Link
-                            </button>
-                            {generatedShareUrl && (
-                                <div className="mt-5 rounded-md border border-green-200 bg-green-50 p-4">
-                                    <label className="flex flex-col gap-1.5">
-                                        <span className="text-xs font-semibold uppercase tracking-wide text-green-800">Shareable editor link</span>
-                                        <input
-                                            data-testid="generated-share-link"
-                                            readOnly
-                                            value={generatedShareUrl}
-                                            onFocus={(event) => event.currentTarget.select()}
-                                            className="rounded border border-green-300 bg-white px-3 py-2 text-sm text-gray-900"
-                                        />
-                                    </label>
-                                    <button
-                                        type="button"
-                                        data-testid="btn-copy-share-link"
-                                        onClick={() => { void handleCopyShareLink(); }}
-                                        className="mt-3 rounded border border-green-700 bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-800"
-                                    >
-                                        {shareLinkCopied ? 'Copied' : 'Copy Link'}
-                                    </button>
-                                </div>
-                            )}
-                        </form>
-                    </div>
-                </div>
+                <ShareLinkDialog
+                    driveUrl={googleDriveShareUrl}
+                    setDriveUrl={setGoogleDriveShareUrl}
+                    generatedUrl={generatedShareUrl}
+                    setGeneratedUrl={setGeneratedShareUrl}
+                    copied={shareLinkCopied}
+                    setCopied={setShareLinkCopied}
+                    error={shareLinkError}
+                    setError={setShareLinkError}
+                    onGenerate={handleGenerateShareLink}
+                    onCopy={() => void handleCopyShareLink()}
+                    onClose={() => setShareLinkDialogOpen(false)}
+                />
             )}
 
             {newScoreDialogOpen && (

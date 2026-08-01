@@ -28,8 +28,8 @@
     }
   ],
   "scoreEditor": {
-    "maxLines": 17696,
-    "maxBytes": 787986
+    "maxLines": 17552,
+    "maxBytes": 778593
   },
   "modules": {
     "components/score-editor/ai-tools/NotaGenPanel.tsx": {
@@ -44,7 +44,19 @@
       "maxLines": 900,
       "maxBytes": 36000
     },
+    "components/score-editor/GoogleDriveExportDialog.tsx": {
+      "maxLines": 900,
+      "maxBytes": 36000
+    },
     "components/score-editor/NewScoreDialog.tsx": {
+      "maxLines": 900,
+      "maxBytes": 36000
+    },
+    "components/score-editor/PngExportDialog.tsx": {
+      "maxLines": 900,
+      "maxBytes": 36000
+    },
+    "components/score-editor/ShareLinkDialog.tsx": {
       "maxLines": 900,
       "maxBytes": 36000
     },
