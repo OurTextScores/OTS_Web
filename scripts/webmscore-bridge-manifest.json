@@ -6,16 +6,13 @@
     "worker": "webmscore-fork/web-public/src/worker-helper.js",
     "typescript": "lib/webmscore-loader.ts"
   },
-  "_generatedComment": "Layer 5/6 of the AGENTS.md checklist. The four source layers above are hand-edited; these are built from them, and a bridge change that skips compile, bundle or sync is consistent in source and broken at runtime. 'glue' and 'bundles' are name-presence checks, so they catch a new, renamed or removed entry point but not an edited body; 'synced' is exact, comparing the served copy in public/ against the build output byte for byte -- but only where a local build exists. The fork's binary outputs are gitignored (only the copies under public/ are committed), so a fresh clone has nothing to diff against and the rule reports 'sync not verifiable here' instead of failing. It catches the real case: a machine that compiled and forgot to run sync:wasm.",
+  "_generatedComment": "Layer 5/6 of the AGENTS.md checklist. The four source layers above are hand-edited; these are built from them, and a bridge change that skips compile, bundle or sync is consistent in source and broken at runtime. 'glue' and 'bundles' are name-presence checks, so they catch a new, renamed or removed entry point but not an edited body; Only artifacts committed to the repo may be declared here: a fresh clone is all CI has, and a declaration it cannot satisfy fails the job rather than finding a defect. public/webmscore.lib.js is gitignored and so is not listed. 'synced' is exact, comparing the served copy in public/ against the build output byte for byte -- but only where a local build exists. The fork's binary outputs are gitignored (only the copies under public/ are committed), so a fresh clone has nothing to diff against and the rule reports 'sync not verifiable here' instead of failing. It catches the real case: a machine that compiled and forgot to run sync:wasm.",
   "generated": {
     "glue": "webmscore-fork/web-public/webmscore.lib.js",
     "bundles": {
-      "webmscore-fork/web-public/webmscore.mjs": "package.json \"module\" — what a bundler resolves for the app.",
-      "webmscore-fork/web-public/webmscore.webpack.mjs": "package.json \"browser\" — the browser build the editor loads.",
-      "webmscore-fork/web-public/webmscore.nodejs.cjs": "package.json \"main\" — used by the in-process Node runtime and unit tests."
+      "webmscore-fork/web-public/webmscore.webpack.mjs": "package.json \"browser\" -- the bundle the editor actually loads, and the only rollup output committed to the repo. webmscore.mjs and webmscore.nodejs.cjs are covered by the fork's own .gitignore, so CI never has them and declaring them here failed the bridge job on every run."
     },
     "synced": {
-      "public/webmscore.lib.js": "webmscore-fork/web-public/webmscore.lib.js",
       "public/webmscore.lib.wasm": "webmscore-fork/web-public/webmscore.lib.wasm",
       "public/webmscore.lib.data": "webmscore-fork/web-public/webmscore.lib.data",
       "public/webmscore.lib.mem.wasm": "webmscore-fork/web-public/webmscore.lib.mem.wasm"
