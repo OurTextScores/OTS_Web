@@ -28,7 +28,7 @@ import {
     type CheckpointSummary,
     type ScoreSummary,
 } from '../lib/checkpoints';
-import { CodeMirrorEditor, type CodeEditorThemeMode } from './CodeMirrorEditor';
+import { type CodeEditorThemeMode } from './CodeMirrorEditor';
 import { Toolbar, type MeasureInsertTarget, type HeaderTextTarget } from './Toolbar';
 import { InspectorPanel } from './InspectorPanel';
 import { FloatingPalettes } from './FloatingPalettes';
@@ -125,6 +125,7 @@ import { ChangeReviewScorePanel } from './score-editor/ChangeReviewScorePanel';
 import { PngExportDialog } from './score-editor/PngExportDialog';
 import { GoogleDriveExportDialog } from './score-editor/GoogleDriveExportDialog';
 import { ShareLinkDialog } from './score-editor/ShareLinkDialog';
+import { MusicXmlPanel, CODE_EDITOR_THEME_OPTIONS } from './score-editor/MusicXmlPanel';
 import { AiToolsTabStrip, type AiToolsTab } from './score-editor/ai-tools/AiToolsTabStrip';
 import { resolveComparePaneStatus } from './score-editor/compare/compare-pane-status';
 import { CompareScorePane } from './score-editor/compare/CompareScorePane';
@@ -803,12 +804,6 @@ const MUSIC_SPECIALISTS_DEFAULT_NOTAGEN_SPACE_INSTRUMENTATION = (process.env.NEX
 const MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_SPACE_ID = (process.env.NEXT_PUBLIC_MUSIC_TRANSCODA_SPACE_ID || 'jhlusko/transcoda').trim();
 const MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_MODEL = (process.env.NEXT_PUBLIC_MUSIC_TRANSCODA_MODEL_ID || 'btrkeks/transcoda-59M-zeroshot-v1').trim();
 const MUSIC_SPECIALISTS_DEFAULT_TRANSCODA_REVISION = (process.env.NEXT_PUBLIC_MUSIC_TRANSCODA_REVISION || 'b529f8aa5d996d9224df3395b5b92d0867343c91').trim();
-const CODE_EDITOR_THEME_OPTIONS: Array<{ value: CodeEditorThemeMode; label: string }> = [
-    { value: 'light', label: 'Light' },
-    { value: 'light-contrast', label: 'Light High Contrast' },
-    { value: 'dark', label: 'Dark' },
-    { value: 'dark-contrast', label: 'Dark High Contrast' },
-];
 const CODE_EDITOR_THEME_VALUES = new Set<CodeEditorThemeMode>(CODE_EDITOR_THEME_OPTIONS.map((option) => option.value));
 
 const TEXT_ELEMENT_CLASS_NAMES = [
@@ -16713,89 +16708,31 @@ ${partsBodyXml}
             )}
 
             {!isEmbedMode && panelsVisible && musicXmlOpen && (
-                <aside
-                    style={{ width: 384 }}
-                    className="flex shrink-0 border-l bg-white text-sm"
-                    data-testid="musicxml-sidebar"
-                >
-                    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                        <div className="flex items-center justify-between p-4">
-                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">MusicXML</span>
-                            <button
-                                type="button"
-                                data-testid="btn-musicxml-toggle"
-                                aria-expanded
-                                aria-label="Close MusicXML sidebar"
-                                title="Close MusicXML sidebar"
-                                onClick={() => setMusicXmlOpen(false)}
-                                className="rounded p-1 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                            >
-                                <PanelRightClose size={16} />
-                            </button>
-                        </div>
-                        {(
-                            <div className="flex flex-1 flex-col overflow-y-auto px-4 pb-4">
-                                <div className="flex items-center justify-end pb-2">
-                                    <label className="flex items-center gap-2">
-                                        <span className="text-[11px] uppercase tracking-wide text-gray-500">Theme</span>
-                                        <select
-                                            value={codeEditorTheme}
-                                            onChange={(event) => setCodeEditorTheme(event.target.value as CodeEditorThemeMode)}
-                                            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700"
-                                            data-testid="select-musicxml-theme"
-                                        >
-                                            {CODE_EDITOR_THEME_OPTIONS.map((option) => (
-                                                <option key={option.value} value={option.value}>{option.label}</option>
-                                            ))}
-                                        </select>
-                                    </label>
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                    <button
-                                        type="button"
-                                        data-testid="btn-xml-apply"
-                                        onClick={handleApplyXmlEdits}
-                                        disabled={xmlApplyDisabled}
-                                        title="Applying edits will auto-checkpoint if the score has unsaved changes."
-                                        className={`flex-1 rounded border px-3 py-1 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
-                                            xmlApplyEnabled ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700' : 'border-gray-300 bg-white text-gray-700'
-                                        }`}
-                                    >
-                                        Apply edits
-                                    </button>
-                                    <button
-                                        type="button"
-                                        data-testid="btn-xml-reload"
-                                        onClick={handleRefreshXml}
-                                        disabled={!xmlReloadEnabled}
-                                        title={xmlReloadEnabled ? 'The score has changed, reload to update XML. Any XML changes will be lost on update.' : undefined}
-                                        className={`flex-1 rounded border px-3 py-1 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
-                                            xmlReloadEnabled ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700' : 'border-gray-300 bg-white text-gray-700'
-                                        }`}
-                                    >
-                                        Reload
-                                    </button>
-                                </div>
-                                <div className="mt-2">
-                                    <CodeMirrorEditor
-                                        testId="xml-editor"
-                                        value={xmlText}
-                                        onChange={(nextValue) => {
-                                            setXmlText(nextValue);
-                                            setXmlDirty(true);
-                                        }}
-                                        readOnly={xmlControlsDisabled}
-                                        placeholderText={score ? 'MusicXML will appear here.' : 'Load a score to view MusicXML.'}
-                                        language="xml"
-                                        height={xmlEditorHeight}
-                                        maxHeight={xmlEditorMaxHeight}
-                                        themeMode={codeEditorTheme}
-                                    />
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </aside>
+                <MusicXmlPanel
+                    text={xmlText}
+                    setText={setXmlText}
+                    setDirty={setXmlDirty}
+                    scoreLoaded={Boolean(score)}
+                    layout={{
+                        editorHeight: xmlEditorHeight,
+                        editorMaxHeight: xmlEditorMaxHeight,
+                    }}
+                    permissions={{
+                        applyEnabled: xmlApplyEnabled,
+                        applyDisabled: xmlApplyDisabled,
+                        reloadEnabled: xmlReloadEnabled,
+                        controlsDisabled: xmlControlsDisabled,
+                    }}
+                    theme={{
+                        mode: codeEditorTheme,
+                        setMode: setCodeEditorTheme,
+                    }}
+                    actions={{
+                        apply: () => void handleApplyXmlEdits(),
+                        refresh: () => void handleRefreshXml(),
+                        close: () => setMusicXmlOpen(false),
+                    }}
+                />
             )}
 
             {!isEmbedMode && panelsVisible && aiToolsSidebarOpen && (

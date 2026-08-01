@@ -1,5 +1,5 @@
 {
-  "_comment": "Ratchet, not a baseline. Tighten these whenever a work package lands; never raise one to make a commit pass. ScoreEditor is pinned at its current size so it can only shrink toward the TD-03 exit budget of 17500 lines / 875000 bytes. Compare module caps encode sprint AC-15 (900 lines without a written ownership justification accepted in review).",
+  "_comment": "Ratchet, not a baseline. Tighten these whenever a work package lands; never raise one to make a commit pass. ScoreEditor is now inside the TD-03 exit budget of 17500 lines / 875000 bytes and is pinned below it, so it can only shrink further. Compare module caps encode sprint AC-15 (900 lines without a written ownership justification accepted in review).",
   "_raisesComment": "check:debt compares this file against the base ref and fails on any increase that is not declared below with its exact before/after values and a reason. Entries are a permanent log: matching on 'from' as well as 'to' stops an old entry from re-authorizing a later raise. Lowering a budget needs no entry. A raise is for work that genuinely could not fit, not for making a red check green.",
   "raises": [
     {
@@ -28,8 +28,8 @@
     }
   ],
   "scoreEditor": {
-    "maxLines": 17552,
-    "maxBytes": 778593
+    "maxLines": 17489,
+    "maxBytes": 773888
   },
   "modules": {
     "components/score-editor/ai-tools/NotaGenPanel.tsx": {
@@ -45,6 +45,10 @@
       "maxBytes": 36000
     },
     "components/score-editor/GoogleDriveExportDialog.tsx": {
+      "maxLines": 900,
+      "maxBytes": 36000
+    },
+    "components/score-editor/MusicXmlPanel.tsx": {
       "maxLines": 900,
       "maxBytes": 36000
     },
