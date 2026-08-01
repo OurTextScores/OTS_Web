@@ -432,4 +432,118 @@ describe('diff-feedback-service', () => {
     });
     expect(mocked.runMusicPatchService).not.toHaveBeenCalled();
   });
+
+  // AC-25 of the editable-compare design: the server bounds userEdits. The limits were
+  // implemented but nothing exercised them; the existing "entry limit" case covers the
+  // block list, not these.
+  describe('userEdits bounds (AC-24, AC-25)', () => {
+    const editDiff = '@@ -1 +1 @@\n-<measure/>\n+<measure><note/></measure>';
+
+    it('rejects more than two edit entries without calling the model', async () => {
+      const result = await runDiffFeedbackService({
+        content: SESSION_BASE_XML,
+        blocks: [],
+        userEdits: [
+          { side: 'current', diff: editDiff },
+          { side: 'proposal', diff: editDiff },
+          { side: 'current', diff: editDiff },
+        ],
+      });
+
+      expect(result.status).toBe(400);
+      expect(String(result.body.error)).toContain('2 entry limit');
+      expect(mocked.runMusicPatchService).not.toHaveBeenCalled();
+    });
+
+    it('accepts exactly two, one per role', async () => {
+      mocked.runMusicPatchService.mockResolvedValue(successPatchBody());
+
+      const result = await runDiffFeedbackService({
+        content: SESSION_BASE_XML,
+        blocks: [],
+        userEdits: [
+          { side: 'current', diff: editDiff },
+          { side: 'proposal', diff: editDiff },
+        ],
+      });
+
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ audit: { manualEditCount: 2 } });
+    });
+
+    it('bounds an oversized diff rather than rejecting the cycle', async () => {
+      mocked.runMusicPatchService.mockResolvedValue(successPatchBody());
+      // The filler is a repeated token, so the tail must carry a distinctive marker:
+      // any arbitrary window of the filler also appears in the part that survives.
+      const oversized = `${editDiff}\n${'+<note/>'.repeat(6000)}\n+<!--TAIL-BEYOND-THE-CAP-->`;
+      expect(oversized.length).toBeGreaterThan(24_000);
+
+      const result = await runDiffFeedbackService({
+        content: SESSION_BASE_XML,
+        blocks: [],
+        userEdits: [{ side: 'current', diff: oversized }],
+      });
+
+      expect(result.status).toBe(200);
+      const { prompt } = mocked.runMusicPatchService.mock.calls.at(-1)![0] as { prompt: string };
+      // Truncated to the cap: the head of the diff survives, the tail does not.
+      expect(prompt).toContain('@@ -1 +1 @@');
+      expect(prompt).not.toContain('TAIL-BEYOND-THE-CAP');
+    });
+
+    it('labels each role by default when the client sends no label', async () => {
+      mocked.runMusicPatchService.mockResolvedValue(successPatchBody());
+
+      await runDiffFeedbackService({
+        content: SESSION_BASE_XML,
+        blocks: [],
+        userEdits: [
+          { side: 'current', diff: editDiff },
+          { side: 'proposal', diff: editDiff },
+        ],
+      });
+
+      const { prompt } = mocked.runMusicPatchService.mock.calls.at(-1)![0] as { prompt: string };
+      expect(prompt).toContain('Current score (current)');
+      expect(prompt).toContain('Assistant proposal (proposal)');
+    });
+
+    it('rejects an entry whose side is neither role', async () => {
+      const result = await runDiffFeedbackService({
+        content: SESSION_BASE_XML,
+        blocks: [],
+        userEdits: [{ side: 'left', diff: editDiff }],
+      });
+
+      expect(result.status).toBe(400);
+      expect(String(result.body.error)).toContain('side must be current or proposal');
+      expect(mocked.runMusicPatchService).not.toHaveBeenCalled();
+    });
+
+    it('rejects an entry with no diff', async () => {
+      const result = await runDiffFeedbackService({
+        content: SESSION_BASE_XML,
+        blocks: [],
+        userEdits: [{ side: 'current', diff: '   ' }],
+      });
+
+      expect(result.status).toBe(400);
+      expect(String(result.body.error)).toContain('diff is required');
+    });
+
+    it('strips control characters out of a diff before it reaches the prompt', async () => {
+      mocked.runMusicPatchService.mockResolvedValue(successPatchBody());
+
+      await runDiffFeedbackService({
+        content: SESSION_BASE_XML,
+        blocks: [],
+        userEdits: [{ side: 'current', diff: `${editDiff}\u0007\u001b[31m` }],
+      });
+
+      const { prompt } = mocked.runMusicPatchService.mock.calls.at(-1)![0] as { prompt: string };
+      expect(prompt).not.toContain('\u0007');
+      expect(prompt).not.toContain('\u001b');
+    });
+  });
+
 });
