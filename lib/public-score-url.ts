@@ -1,4 +1,8 @@
 import type { InputFileFormat } from './webmscore-loader';
+import { isZipArchive, readZipEntryNames } from './zip-central-directory';
+
+/** Fallback probe window for archives whose central directory cannot be read. */
+const TAIL_PROBE_BYTES = 64 * 1024;
 
 const GOOGLE_DRIVE_HOSTS = new Set([
   'drive.google.com',
@@ -53,15 +57,21 @@ export function resolvePublicScoreUrl(source: string): string {
   }
 }
 
-function containsAscii(data: Uint8Array, value: string): boolean {
-  if (data.byteLength < value.length) {
+/**
+ * Bounded fallback for archives whose central directory cannot be read: probe only the
+ * tail, where the directory would have been, instead of the whole buffer. The old
+ * implementation scanned every byte of files that can be tens of megabytes.
+ */
+function tailContainsAscii(data: Uint8Array, value: string): boolean {
+  const window = data.subarray(Math.max(0, data.byteLength - TAIL_PROBE_BYTES));
+  if (window.byteLength < value.length) {
     return false;
   }
   const needle = new TextEncoder().encode(value.toLowerCase());
-  for (let index = 0; index <= data.byteLength - needle.length; index += 1) {
+  for (let index = 0; index <= window.byteLength - needle.length; index += 1) {
     let matches = true;
     for (let offset = 0; offset < needle.length; offset += 1) {
-      const byte = data[index + offset];
+      const byte = window[index + offset];
       const lowerByte = byte >= 65 && byte <= 90 ? byte + 32 : byte;
       if (lowerByte !== needle[offset]) {
         matches = false;
@@ -92,16 +102,27 @@ export function detectScoreInputFormat(source: string, data?: Uint8Array): Input
   }
 
   if (data?.byteLength) {
-    const isZip = data[0] === 0x50 && data[1] === 0x4b;
-    // MuseScore 4.x MSCZ files are ZIPs that also contain META-INF/container.xml,
-    // so check for a .mscx entry (the MuseScore signature) before checking for MXL.
-    if (isZip && containsAscii(data, '.mscx')) {
-      return 'mscz';
-    }
-    if (isZip && containsAscii(data, 'META-INF/container.xml')) {
-      return 'mxl';
-    }
-    if (isZip) {
+    if (isZipArchive(data)) {
+      // MuseScore 4.x MSCZ files are ZIPs that also contain META-INF/container.xml, so
+      // an .mscx entry (the MuseScore signature) decides before the MXL check.
+      const entries = readZipEntryNames(data);
+      if (entries) {
+        if (entries.some((name) => name.toLowerCase().endsWith('.mscx'))) {
+          return 'mscz';
+        }
+        if (entries.some((name) => name.toLowerCase() === 'meta-inf/container.xml')) {
+          return 'mxl';
+        }
+        return 'mscz';
+      }
+      // Unreadable directory (truncated download, ZIP64): fall back to a tail probe
+      // rather than the whole-buffer scan this replaced.
+      if (tailContainsAscii(data, '.mscx')) {
+        return 'mscz';
+      }
+      if (tailContainsAscii(data, 'META-INF/container.xml')) {
+        return 'mxl';
+      }
       return 'mscz';
     }
 
