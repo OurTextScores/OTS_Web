@@ -34,3 +34,75 @@ describe('trace-http session propagation', () => {
     expect(responseHeaders.get('x-client-session-id')).toBe('session-xyz98765');
   });
 });
+
+describe('inbound correlation values (L6)', () => {
+    const contextFor = (headers: Record<string, string>) => resolveTraceContext(new Headers(headers));
+
+    it('keeps a well-formed request id', () => {
+        expect(contextFor({ 'x-request-id': 'req-01HZX.9:abc_' }).requestId).toBe('req-01HZX.9:abc_');
+    });
+
+    it('replaces a request id carrying anything a log line should not contain', () => {
+        // Only values that can actually arrive. The platform already blocks the worst
+        // ones -- `Headers` rejects NUL, CR, LF and anything above U+00FF -- so what
+        // reaches this code is escape sequences, whitespace and high Latin-1. That is
+        // what is left to validate, and it is enough to derail a log line.
+        for (const hostile of ['\u001b[31mred', 'has space', 'tab\there', 'semi;colon', 'caf\u00e9']) {
+            const { requestId } = contextFor({ 'x-request-id': hostile });
+            expect(requestId, hostile).not.toBe(hostile);
+            // Still correlatable: a generated UUID, not an empty string.
+            expect(requestId).toMatch(/^[0-9a-f-]{36}$/);
+        }
+    });
+
+    it('replaces an unbounded request id', () => {
+        const { requestId } = contextFor({ 'x-request-id': 'a'.repeat(129) });
+
+        expect(requestId).toMatch(/^[0-9a-f-]{36}$/);
+    });
+
+    it('keeps tracestate and baggage that are within spec', () => {
+        const context = contextFor({
+            tracestate: 'vendor=t61rcWkgMzE,other=abc',
+            baggage: 'userId=42,tier=free',
+        });
+
+        expect(context.tracestate).toBe('vendor=t61rcWkgMzE,other=abc');
+        expect(context.baggage).toBe('userId=42,tier=free');
+    });
+
+    it('drops tracestate and baggage past their spec caps', () => {
+        const context = contextFor({
+            tracestate: `v=${'x'.repeat(512)}`,
+            baggage: `k=${'y'.repeat(8192)}`,
+        });
+
+        expect(context.tracestate).toBe('');
+        expect(context.baggage).toBe('');
+    });
+
+    it('drops tracestate and baggage carrying control characters', () => {
+        const context = contextFor({
+            tracestate: 'vendor=ok\u0007bell',
+            baggage: 'k=v\u001b[0m',
+        });
+
+        expect(context.tracestate).toBe('');
+        expect(context.baggage).toBe('');
+    });
+
+    it('never forwards a rejected value upstream', () => {
+        // The point of the finding: these are echoed to third-party APIs, so rejecting
+        // them at parse time has to mean they cannot reappear on the way out.
+        const context = contextFor({
+            'x-request-id': '\u001b[31mred',
+            tracestate: 'vendor=ok\u0007bell',
+            baggage: `k=${'y'.repeat(8192)}`,
+        });
+        const outbound = withTraceHeaders(context);
+
+        expect(outbound.get('x-request-id')).toMatch(/^[0-9a-f-]{36}$/);
+        expect(outbound.get('tracestate')).toBeNull();
+        expect(outbound.get('baggage')).toBeNull();
+    });
+});

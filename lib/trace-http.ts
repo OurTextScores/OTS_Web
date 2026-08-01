@@ -10,6 +10,32 @@ export type TraceContext = {
 
 const TRACEPARENT_PATTERN = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/i;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+/**
+ * Correlation values arrive from the caller and end up in two places that trust them:
+ * our logs, and the outbound headers we send to third-party APIs. Neither should carry
+ * whatever the caller felt like sending (SECURITY_CORRECTNESS_FINDINGS L6).
+ *
+ * `traceparent` and the session ids were already pattern-checked. These are the three
+ * that were passed through on trim alone: an unbounded `x-request-id`, and `tracestate`
+ * and `baggage`, which are forwarded verbatim.
+ *
+ * Caps follow the W3C trace-context and baggage specs. Charset is printable ASCII: a
+ * control character, an ANSI escape or a U+2028 line separator in a log line is the
+ * log-injection this finding is about, and none of them belong in these headers anyway.
+ */
+const TRACESTATE_MAX_CHARS = 512;
+const BAGGAGE_MAX_CHARS = 8192;
+const PRINTABLE_ASCII_ONLY = /^[\x20-\x7E]*$/;
+
+const boundedPrintable = (value: string, maxChars: number) => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.length > maxChars || !PRINTABLE_ASCII_ONLY.test(trimmed)) {
+        return '';
+    }
+    return trimmed;
+};
 
 const toHeaders = (input?: Request | Headers | HeadersInit | null): Headers => {
     if (!input) {
@@ -52,11 +78,16 @@ const normalizeSessionId = (value: string) => {
 
 export const resolveTraceContext = (input?: Request | Headers | HeadersInit | null): TraceContext => {
     const headers = toHeaders(input);
-    const requestId = headers.get('x-request-id')?.trim() || crypto.randomUUID();
+    // A caller-supplied request id that cannot be logged safely is replaced, not dropped:
+    // every request still needs a correlation value.
+    const inboundRequestId = headers.get('x-request-id')?.trim() || '';
+    const requestId = REQUEST_ID_PATTERN.test(inboundRequestId)
+        ? inboundRequestId
+        : crypto.randomUUID();
     const traceparent = ensureTraceparent(headers.get('traceparent') || '');
     const traceId = parseTraceId(traceparent) || randomHex(16);
-    const tracestate = headers.get('tracestate')?.trim() || '';
-    const baggage = headers.get('baggage')?.trim() || '';
+    const tracestate = boundedPrintable(headers.get('tracestate') || '', TRACESTATE_MAX_CHARS);
+    const baggage = boundedPrintable(headers.get('baggage') || '', BAGGAGE_MAX_CHARS);
     const clientSessionId = normalizeSessionId(
         headers.get('x-client-session-id')
         || headers.get('x-session-id')
