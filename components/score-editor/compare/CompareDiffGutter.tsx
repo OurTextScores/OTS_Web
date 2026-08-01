@@ -93,19 +93,21 @@ export type CompareDiffGutterProps = {
         barsForGutter: ChangeReviewBar[];
         detail: ChangeReviewDetail | null;
         focusedAnchorId: string | null;
-        reviewId: string;
         loading: boolean;
         newThreadAnchorId: string | null;
         newThreadContent: string;
-        patchset: string;
         regionsInMeasureOrder: ChangeReviewScoreRegion[];
         threadsByAnchor: Map<string, ChangeReviewThread>;
         renderThread: (thread: ChangeReviewThread) => ReactNode;
-        runAction: (fn: () => Promise<void>) => Promise<void>;
+        /**
+         * Creates a thread on an anchor. The gutter states the intent; the owner holds
+         * the endpoint, the patchset, the busy/error cycle and the field reset, so the
+         * review API contract stays in one place.
+         */
+        createThread: (anchorId: string, content: string) => Promise<void>;
         setFocusedAnchorId: (value: string | null) => void;
         setNewThreadAnchorId: (value: string | null) => void;
         setNewThreadContent: (value: string) => void;
-        fetchJsonOrThrow: <T>(url: string, init?: RequestInit) => Promise<T>;
     };
     blocks: {
         buildMismatchBlocks: (rows: AlignmentRowLike[]) => MismatchBlockLike[];
@@ -175,19 +177,16 @@ export function CompareDiffGutter({
     const changeReviewCompareBarsForGutter = review.barsForGutter;
     const changeReviewDetail = review.detail;
     const changeReviewFocusedAnchorId = review.focusedAnchorId;
-    const changeReviewId = review.reviewId;
     const changeReviewLoading = review.loading;
     const changeReviewNewThreadAnchorId = review.newThreadAnchorId;
     const changeReviewNewThreadContent = review.newThreadContent;
-    const changeReviewPatchset = review.patchset;
     const changeReviewRegionsInMeasureOrder = review.regionsInMeasureOrder;
     const changeReviewThreadsByAnchor = review.threadsByAnchor;
     const renderChangeReviewThread = review.renderThread;
-    const runChangeReviewAction = review.runAction;
+    const createChangeReviewThread = review.createThread;
     const setChangeReviewFocusedAnchorId = review.setFocusedAnchorId;
     const setChangeReviewNewThreadAnchorId = review.setNewThreadAnchorId;
     const setChangeReviewNewThreadContent = review.setNewThreadContent;
-    const fetchJsonOrThrow = review.fetchJsonOrThrow;
 
     const buildMismatchBlocks = blocks.buildMismatchBlocks;
     const compareBlockComments = blocks.comments;
@@ -341,18 +340,10 @@ export function CompareDiffGutter({
                                                                         type="button"
                                                                         disabled={changeReviewActionBusy || !changeReviewNewThreadContent.trim()}
                                                                         className="rounded border border-gray-300 bg-white px-2 py-1 text-[10px] text-gray-700 disabled:opacity-50"
-                                                                        onClick={() => void runChangeReviewAction(async () => {
-                                                                            await fetchJsonOrThrow(`/api/proxy/change-reviews/${encodeURIComponent(changeReviewId)}/threads`, {
-                                                                                method: 'POST',
-                                                                                body: JSON.stringify({
-                                                                                    anchorId: region.anchorId,
-                                                                                    content: changeReviewNewThreadContent,
-                                                                                    patchsetNumber: changeReviewPatchset ? Number(changeReviewPatchset) : undefined,
-                                                                                }),
-                                                                            });
-                                                                            setChangeReviewNewThreadAnchorId(null);
-                                                                            setChangeReviewNewThreadContent('');
-                                                                        })}
+                                                                        onClick={() => void createChangeReviewThread(
+                                                                            region.anchorId,
+                                                                            changeReviewNewThreadContent,
+                                                                        )}
                                                                     >
                                                                         Submit
                                                                     </button>
@@ -435,18 +426,10 @@ export function CompareDiffGutter({
                                                                 type="button"
                                                                 disabled={changeReviewActionBusy || !changeReviewNewThreadContent.trim()}
                                                                 className="rounded border border-gray-300 bg-white px-2 py-1 text-[10px] text-gray-700 disabled:opacity-50"
-                                                                onClick={() => void runChangeReviewAction(async () => {
-                                                                    await fetchJsonOrThrow(`/api/proxy/change-reviews/${encodeURIComponent(changeReviewId)}/threads`, {
-                                                                        method: 'POST',
-                                                                        body: JSON.stringify({
-                                                                            anchorId: bar.anchorId,
-                                                                            content: changeReviewNewThreadContent,
-                                                                            patchsetNumber: changeReviewPatchset ? Number(changeReviewPatchset) : undefined,
-                                                                        }),
-                                                                    });
-                                                                    setChangeReviewNewThreadAnchorId(null);
-                                                                    setChangeReviewNewThreadContent('');
-                                                                })}
+                                                                onClick={() => void createChangeReviewThread(
+                                                                    bar.anchorId,
+                                                                    changeReviewNewThreadContent,
+                                                                )}
                                                             >Submit</button>
                                                         </div>
                                                     </div>

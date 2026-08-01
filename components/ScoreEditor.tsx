@@ -3053,6 +3053,29 @@ export default function ScoreEditor() {
             setChangeReviewActionBusy(false);
         }
     }, [notifyParentChangeReviewUpdated, refreshChangeReview]);
+    /**
+     * Owns the thread-creation request so the compare gutter does not. A presentation
+     * component holding the review endpoint, its URL shape and a fetch primitive means
+     * the API contract lives in two places; this keeps it here, next to the other
+     * change-review calls, and hands the gutter an action.
+     */
+    const createChangeReviewThread = useCallback(async (anchorId: string, content: string) => {
+        await runChangeReviewAction(async () => {
+            await fetchJsonOrThrow(
+                `/api/proxy/change-reviews/${encodeURIComponent(changeReviewId)}/threads`,
+                {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        anchorId,
+                        content,
+                        patchsetNumber: changeReviewPatchset ? Number(changeReviewPatchset) : undefined,
+                    }),
+                },
+            );
+            setChangeReviewNewThreadAnchorId(null);
+            setChangeReviewNewThreadContent('');
+        });
+    }, [changeReviewId, changeReviewPatchset, runChangeReviewAction]);
     useEffect(() => {
         if (!isChangeReviewMode) {
             setChangeReviewDetail(null);
@@ -18785,19 +18808,16 @@ ${partsBodyXml}
                                                     barsForGutter: changeReviewCompareBarsForGutter,
                                                     detail: changeReviewDetail,
                                                     focusedAnchorId: changeReviewFocusedAnchorId,
-                                                    reviewId: changeReviewId,
                                                     loading: changeReviewLoading,
                                                     newThreadAnchorId: changeReviewNewThreadAnchorId,
                                                     newThreadContent: changeReviewNewThreadContent,
-                                                    patchset: changeReviewPatchset,
                                                     regionsInMeasureOrder: changeReviewRegionsInMeasureOrder,
                                                     threadsByAnchor: changeReviewThreadsByAnchor,
                                                     renderThread: renderChangeReviewThread,
-                                                    runAction: runChangeReviewAction,
+                                                    createThread: createChangeReviewThread,
                                                     setFocusedAnchorId: setChangeReviewFocusedAnchorId,
                                                     setNewThreadAnchorId: setChangeReviewNewThreadAnchorId,
                                                     setNewThreadContent: setChangeReviewNewThreadContent,
-                                                    fetchJsonOrThrow,
                                                 }}
                                                 blocks={{
                                                     buildMismatchBlocks,

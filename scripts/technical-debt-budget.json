@@ -13,11 +13,23 @@
       "from": 881728,
       "to": 881893,
       "reason": "Same change as the maxLines raise above: the orientation mapping and the comment recording why it exists."
+    },
+    {
+      "key": "scoreEditor.maxLines",
+      "from": 18893,
+      "to": 18913,
+      "reason": "Ownership move, not new debt: change-review thread creation came back out of CompareDiffGutter, which should not hold the review endpoint or a fetch primitive. The gutter lost 17 lines and four props; the request lives here next to the other change-review calls."
+    },
+    {
+      "key": "scoreEditor.maxBytes",
+      "from": 881893,
+      "to": 882785,
+      "reason": "Same change as the maxLines raise above: createChangeReviewThread and the comment stating why the gutter does not own it."
     }
   ],
   "scoreEditor": {
-    "maxLines": 18893,
-    "maxBytes": 881893
+    "maxLines": 18913,
+    "maxBytes": 882785
   },
   "modules": {
     "components/score-editor/compare/CompareDiffGutter.tsx": {
