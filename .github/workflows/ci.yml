@@ -56,6 +56,35 @@ jobs:
       - run: npm ci
       - run: npm run test
 
+  build:
+    name: Application build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # Compiles the client bundle, which no other job does. A module that resolves
+      # for Node and jsdom but not for a browser -- `node:crypto` reached through a
+      # service import, say -- passes typecheck, lint and the whole unit suite and
+      # still leaves the app unable to load. Measured at ~70 s from a cold cache.
+      #
+      # `next build` directly rather than `npm run build`, so the `prebuild` hook's
+      # check:wasm does not drag Git LFS into every PR: the WASM artifacts are fetched
+      # at runtime, not bundled, so the compile does not need them. Release still
+      # checks them, with `lfs: true`.
+      #
+      # SKIP_NEXT_TYPECHECK because the typecheck job already covers types; this job
+      # exists for module resolution and bundling.
+      - name: Build application
+        run: npx next build --webpack
+        env:
+          SKIP_NEXT_TYPECHECK: '1'
+          NODE_OPTIONS: --max-old-space-size=4096
+
   bridge:
     name: webmscore bridge audit
     runs-on: ubuntu-latest
