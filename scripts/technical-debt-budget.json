@@ -28,10 +28,14 @@
     }
   ],
   "scoreEditor": {
-    "maxLines": 18228,
-    "maxBytes": 827127
+    "maxLines": 18125,
+    "maxBytes": 819171
   },
   "modules": {
+    "components/score-editor/ai-tools/NotaGenPanel.tsx": {
+      "maxLines": 900,
+      "maxBytes": 36000
+    },
     "components/score-editor/ai-tools/TranscodaPanel.tsx": {
       "maxLines": 900,
       "maxBytes": 36000
