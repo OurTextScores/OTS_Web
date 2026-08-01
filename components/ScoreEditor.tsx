@@ -116,6 +116,7 @@ import {
 } from './score-editor/compare/CompareMeasureComments';
 import { CompareDiffGutter } from './score-editor/compare/CompareDiffGutter';
 import { buildCompareReflowPlan } from './score-editor/compare/compare-reflow-plan';
+import { createCompareScrollSync } from './score-editor/compare/compare-scroll-sync';
 import { MmaPanel, type MmaStarterPreset } from './score-editor/ai-tools/MmaPanel';
 import { TranscodaPanel } from './score-editor/ai-tools/TranscodaPanel';
 import { FunctionalHarmonyPanel } from './score-editor/ai-tools/FunctionalHarmonyPanel';
@@ -9368,16 +9369,7 @@ ${partsBodyXml}
             return;
         }
 
-        const syncScroll = (source: HTMLDivElement, target: HTMLDivElement, gutterTarget: HTMLDivElement) => {
-            if (compareScrollSyncRef.current) {
-                return;
-            }
-            compareScrollSyncRef.current = true;
-            target.scrollTop = source.scrollTop;
-            target.scrollLeft = source.scrollLeft;
-            gutterTarget.scrollTop = source.scrollTop;
-            compareScrollSyncRef.current = false;
-        };
+        const syncScroll = createCompareScrollSync(compareScrollSyncRef);
 
         const handleLeftScroll = () => syncScroll(left, right, gutter);
         const handleRightScroll = () => syncScroll(right, left, gutter);

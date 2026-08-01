@@ -461,6 +461,89 @@ describe('ScoreEditor', () => {
       .toBeLessThan(auxiliaryScore.destroy.mock.invocationCallOrder[0]);
   });
 
+  // AC-16 of the editable-compare design: publishing an edited proposal must not reload
+  // or destroy the auxiliary Score it came from. The guard is one ref assignment in
+  // commitCompareProposalXml; the AC-13 walk found nothing holding it in place.
+  it('publishes an edited proposal without reloading its auxiliary score', async () => {
+    const user = userEvent.setup();
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list>
+  <part id="P1"><measure number="1"><note><rest/><duration>4</duration><type>whole</type></note></measure></part>
+</score-partwise>`;
+    // The publish only skips the reload because the ref is updated first. If the exported
+    // XML matched what was loaded, the effect would skip for the wrong reason and this
+    // test would pass with the guard removed.
+    const editedXml = xml.replace('</part>', '<measure number="2"/></part>');
+    let edited = false;
+    const makeScore = () => ({
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg width="100" height="40"></svg>'),
+      saveXml: vi.fn(async () => new TextEncoder().encode(edited ? editedXml : xml)),
+      setSoundFont: vi.fn(async () => {}),
+      setNoteEntryMode: vi.fn(async () => true),
+      metadata: vi.fn(async () => ({ parts: [{ name: 'Music' }] })),
+      measurePositions: vi.fn(async () => ({
+        elements: [{ id: 0, x: 0, y: 0, sx: 100, sy: 40, page: 0 }],
+        events: [],
+        pageSize: { width: 100, height: 40 },
+      })),
+      segmentPositions: vi.fn(async () => ({})),
+      npages: vi.fn(async () => 1),
+      relayout: vi.fn(async () => true),
+      selectElementAtPointWithMode: vi.fn(async () => true),
+      getSelectionBoundingBoxes: vi.fn(async () => []),
+    });
+    const mainScore = makeScore();
+    const auxiliaryScore = {
+      ...makeScore(),
+      insertMeasures: vi.fn(async () => {
+        edited = true;
+        return true;
+      }),
+    };
+    const webmscore = {
+      ready: Promise.resolve(),
+      load: vi.fn()
+        .mockResolvedValueOnce(mainScore)
+        .mockResolvedValueOnce(auxiliaryScore),
+    };
+
+    searchParamValues = {
+      compareLeft: '/left.musicxml',
+      compareRight: '/right.musicxml',
+    };
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+    testGlobals.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/left.musicxml') || url.endsWith('/right.musicxml')) {
+        return {
+          ok: true,
+          text: async () => xml,
+          arrayBuffer: async () => new TextEncoder().encode(xml).buffer,
+        };
+      }
+      return { ok: false, text: async () => '', arrayBuffer: async () => new ArrayBuffer(0) };
+    });
+
+    render(<ScoreEditor />);
+    await waitFor(() => expect(auxiliaryScore.saveSvg).toHaveBeenCalled());
+    expect(webmscore.load).toHaveBeenCalledTimes(2);
+
+    // The left pane holds the auxiliary score, which carries the proposal role in embed
+    // compare, so + Bar here runs the proposal publish path.
+    await user.click(await screen.findByTestId('btn-compare-add-bar-left'));
+    await waitFor(() => expect(auxiliaryScore.insertMeasures).toHaveBeenCalled());
+    await waitFor(() => expect(auxiliaryScore.saveXml).toHaveBeenCalled());
+
+    // The publish updates compareView.checkpointXml. Without the ref guard the compare
+    // lifecycle reads that as a new checkpoint, tears the auxiliary down and loads a
+    // third score -- mid-edit, against the instance the user is working in.
+    await waitFor(() => expect(auxiliaryScore.saveSvg.mock.calls.length).toBeGreaterThan(1));
+    expect(auxiliaryScore.destroy).not.toHaveBeenCalled();
+    expect(webmscore.load).toHaveBeenCalledTimes(2);
+  });
+
   it('does not start compare audio after close cancels soundfont setup', async () => {
     const user = userEvent.setup();
     const xml = `<?xml version="1.0" encoding="UTF-8"?>

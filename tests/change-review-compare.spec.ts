@@ -233,6 +233,50 @@ test.describe('Change review compare panes', () => {
         await expect(rightPane.getByText(/checkpoint score|Score not loaded/i)).toHaveCount(0);
     });
 
+    test('keeps pane edits in the browser, writing nothing back to the review', async ({ page }) => {
+        // Half of the design's AC-13: a change review's server revisions and anchors are
+        // immutable, and the two panes are browser-local working copies. Editing one must
+        // not write to the review API -- reads are expected, writes are not.
+        const requests: { method: string; url: string }[] = [];
+        await page.route('**/api/proxy/**', async (route) => {
+            const request = route.request();
+            requests.push({ method: request.method(), url: request.url() });
+            const url = request.url();
+            if (url.includes('/diff')) {
+                return route.fulfill({
+                    status: 200,
+                    contentType: 'application/json',
+                    body: JSON.stringify(diff),
+                });
+            }
+            return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify(detail),
+            });
+        });
+
+        await page.goto(
+            `/?compareLeft=${encodeURIComponent(BASE_SCORE)}`
+            + `&compareRight=${encodeURIComponent(HEAD_SCORE)}`
+            + '&leftLabel=Rev%20%231&rightLabel=Rev%20%232'
+            + `&changeReviewId=${REVIEW_ID}`,
+        );
+        await expect(page.getByTestId('compare-pane-left').locator('svg .Note').first())
+            .toBeVisible({ timeout: 60000 });
+
+        await page.getByTestId('btn-compare-activate-left').click();
+        await page.getByTestId('btn-compare-add-bar-left').click();
+        // The engine round-trip has to finish, or "no writes" would just mean "nothing
+        // happened yet". The button re-enabling is the edit having settled.
+        await expect(page.getByTestId('btn-compare-add-bar-left')).toBeDisabled({ timeout: 15000 });
+        await expect(page.getByTestId('btn-compare-add-bar-left')).toBeEnabled({ timeout: 30000 });
+
+        const writes = requests.filter((request) => request.method !== 'GET');
+        expect(writes, `unexpected review writes: ${JSON.stringify(writes)}`).toEqual([]);
+        expect(requests.some((request) => request.url.includes(REVIEW_ID))).toBe(true);
+    });
+
     test('places review bars on the pane holding their revision side', async ({ page }) => {
         await openChangeReviewCompare(page);
 
