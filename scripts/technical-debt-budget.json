@@ -4,6 +4,18 @@
   "raises": [
     {
       "key": "scoreEditor.maxLines",
+      "from": 17478,
+      "to": 17489,
+      "reason": "TD-07 L2 gates window.__webmscore to non-production builds. The guard is two lines; the rest is the comment recording why a live Score handle on window is not worth its XSS blast radius, and which suites depend on it."
+    },
+    {
+      "key": "scoreEditor.maxBytes",
+      "from": 773475,
+      "to": 774130,
+      "reason": "Same change as the maxLines raise above: the production guard on the debug score handle and the comment explaining it."
+    },
+    {
+      "key": "scoreEditor.maxLines",
       "from": 18887,
       "to": 18893,
       "reason": "Bug fix, not new debt: the compare pane viewport status now resolves through an explicit pane/score orientation mapping instead of reading auxiliary-keyed state straight into the right pane. Costs six lines at the call site and moves the rule into compare-pane-status.ts."
@@ -28,8 +40,8 @@
     }
   ],
   "scoreEditor": {
-    "maxLines": 17478,
-    "maxBytes": 773475
+    "maxLines": 17489,
+    "maxBytes": 774130
   },
   "modules": {
     "components/score-editor/ai-tools/NotaGenPanel.tsx": {
@@ -139,7 +151,7 @@
     "maxFilesWithFindings": 0
   },
   "tests": {
-    "maxUnconditionalSkips": 3
+    "maxUnconditionalSkips": 1
   },
   "suppressions": {
     "maxLocalDirectives": 3

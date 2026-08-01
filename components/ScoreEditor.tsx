@@ -4771,7 +4771,18 @@ ${partsBodyXml}
     ]);
 
     const exposeScoreToWindow = (s: Score | null) => {
-        // Handy for Playwright/debug sessions to poke at WASM bindings directly
+        // Debug handle for Playwright and console sessions to poke at WASM bindings
+        // directly. Nothing in the product reads it, so a production build should not
+        // carry it: a live Score handle on `window` widens what injected script can
+        // reach (SECURITY_CORRECTNESS_FINDINGS L2, and M3/M4's blast radius) in exchange
+        // for a convenience only developers use.
+        //
+        // The deterministic browser matrix runs against `next dev`, so the 37 specs that
+        // read it are unaffected. The embed integration suite is the one that runs against
+        // a production build, and it does not use the handle.
+        if (process.env.NODE_ENV === 'production') {
+            return;
+        }
         if (typeof window !== 'undefined') {
             (window as Window & { __webmscore?: Score | null }).__webmscore = s;
         }

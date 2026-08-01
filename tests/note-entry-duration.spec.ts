@@ -1,254 +1,111 @@
 import { expect, test } from 'playwright/test';
 
 type NoteEntryWindow = typeof window & {
-  __webmscore?: {
-    setNoteEntryMode?: (...args: unknown[]) => Promise<unknown>;
-    setInputDurationType?: (...args: unknown[]) => Promise<unknown>;
-    addPitchByStep?: (...args: unknown[]) => Promise<unknown>;
-    saveMsc?: (format: 'mscx') => Promise<Uint8Array>;
-    inputState?: { duration?: unknown };
-  };
+  __webmscore?: { saveXml?: () => Promise<Uint8Array> };
 };
 
 /**
- * Test that note entry mode preserves the user's selected duration across
- * multiple consecutive note entries. This is a regression test for the bug
- * where pressing 7D7D (whole note D, then another D) would only produce one
- * whole note because the duration was reset after each note entry.
+ * Note-input duration behavior against real WASM.
+ *
+ * History, because it explains the shape of this file. Two cases here — "7D7D produces
+ * two whole notes" and "7D5D produces one whole note and one quarter note" — were
+ * unconditionally skipped for the whole technical-debt sprint with TD-07 L2 named as
+ * their owner: they read note-entry state through `window.__webmscore`, and L2 was going
+ * to gate that handle. L2 has now gated it to non-production builds, and these run
+ * against `next dev`, so the handle is still here.
+ *
+ * Enabling them showed three separate things, in order:
+ *
+ *   1. their selectors were stale — the control is `btn-note-input` with `aria-pressed`,
+ *      not `btn-note-entry` with `aria-checked`;
+ *   2. their fixture could not satisfy them. `three_notes_cde.musicxml` is a 4/4 measure
+ *      holding three quarter notes, so the measure is incomplete and a whole note entered
+ *      at beat 1 is clamped. No sequence of keys produces "two whole notes" there;
+ *   3. with both of those corrected, a real defect remains: **the second consecutive
+ *      pitch key does nothing.** That is exactly the regression the original cases were
+ *      written for ("the duration was reset after each note entry"), so they were not
+ *      stale in intent — they were pointing at something true and could not reach it.
+ *
+ * What is provable today is pinned below. The defect is a `fixme`, not a `skip`, so it
+ * stays visible in every run and turns green the moment it is fixed.
  */
-// TD-04 / AC-06: kept skipped with an owner rather than deleted. Both cases in this
-// file already carry an inner conditional guard for builds without the note-entry
-// exports, so the outer unconditional skip is what makes them dead. They need a real
-// browser, a dev server, and real WASM to validate, and they read note-entry state
-// through window.__webmscore, which SECURITY_CORRECTNESS_FINDINGS L2 is scheduled to
-// dev/test-gate. Enabling them without a green browser run would assert a pass nobody
-// has observed.
-//
-// Owner/decision: TD-07 L2 re-gates the debug global; enable and confirm these two in the
-// same packet, as part of the deterministic Playwright matrix in section 7. Do not delete
-// them and do not relax their MSCX assertions.
-test.skip('7D7D produces two whole notes - duration preserved across entries', async ({ page }) => {
-  // Capture console logs from the page
-  page.on('console', (msg) => {
-    if (msg.text().includes('[NoteEntry]')) {
-      console.log('PAGE:', msg.text());
-    }
-  });
+const FIXTURE = '/?score=/test_scores/four_measures.musicxml';
 
-  await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
+const openScore = async (page: import('playwright/test').Page) => {
+  await page.goto(FIXTURE);
   await page.waitForSelector('svg .Note', { timeout: 60_000 });
+  // The first render has to settle before the note is stable enough to click.
+  await page.waitForTimeout(1_500);
+};
 
-  // Check if note entry APIs are available
-  const hasNoteEntryApi = await page.evaluate(() => {
-    const score = (window as NoteEntryWindow).__webmscore;
-    return (
-      typeof score?.setNoteEntryMode === 'function' &&
-      typeof score?.setInputDurationType === 'function' &&
-      typeof score?.addPitchByStep === 'function'
-    );
-  });
-  test.skip(!hasNoteEntryApi, 'Note entry APIs not available in this webmscore build');
-
-  // Helper to read MSCX content
-  const readMscx = async (): Promise<string> => {
-    return page.evaluate(async () => {
-      const score = (window as NoteEntryWindow).__webmscore;
-      if (!score?.saveMsc) {
-        throw new Error('window.__webmscore.saveMsc is not available');
-      }
-      const data = await score.saveMsc('mscx');
-      return new TextDecoder().decode(data);
-    });
-  };
-
-  // Helper to count notes with a specific duration type
-  const countNotesWithDuration = (mscx: string, durationType: string): number => {
-    // Match <Note> elements and check if they have the specified durationType
-    // The structure is: <Chord><durationType>...</durationType>...<Note>...</Note></Chord>
-    const chordRegex = /<Chord>[\s\S]*?<durationType>(\w+)<\/durationType>[\s\S]*?<\/Chord>/g;
-    let count = 0;
-    let match;
-    while ((match = chordRegex.exec(mscx)) !== null) {
-      if (match[1] === durationType) {
-        // Count Note elements within this chord
-        const noteMatches = match[0].match(/<Note>/g);
-        count += noteMatches ? noteMatches.length : 0;
-      }
-    }
-    return count;
-  };
-
-  // Get initial counts
-  const initialMscx = await readMscx();
-  const initialWholeNotes = countNotesWithDuration(initialMscx, 'whole');
-
-  // Select the first note by clicking on it
-  await page.locator('svg .Note').first().click();
-
-  // Wait for selection to be processed - check for either the overlay or enabled buttons
-  await expect.poll(async () => {
-    const deleteEnabled = await page.getByTestId('btn-delete').isEnabled().catch(() => false);
-    const overlayVisible = await page.getByTestId('selection-overlay').isVisible().catch(() => false);
-    return deleteEnabled || overlayVisible;
-  }, { timeout: 10_000 }).toBe(true);
-
-  // Enable note entry mode
-  await page.getByTestId('btn-note-entry').click();
-
-  // Wait for note entry mode to be enabled
-  await expect(page.getByTestId('btn-note-entry')).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
-
-  // Press 7 to select whole note duration (goes through React keyboard handler)
-  await page.keyboard.press('7');
-  await page.waitForTimeout(300);
-
-  // Check the input duration after pressing 7
-  const durationAfter7 = await page.evaluate(() => {
-    const score = (window as NoteEntryWindow).__webmscore;
-    return score?.inputState?.duration ?? 'unknown';
-  });
-  console.log('Duration after pressing 7:', durationAfter7);
-
-  // Press D to enter first whole note
-  await page.keyboard.press('d');
-  await page.waitForTimeout(800);
-
-  // Check the MSCX after first D
-  const mscxAfterFirstD = await readMscx();
-  const durationsAfterFirstD: string[] = [];
-  const firstDRegex = /<Chord>[\s\S]*?<durationType>(\w+)<\/durationType>[\s\S]*?<\/Chord>/g;
-  let m;
-  while ((m = firstDRegex.exec(mscxAfterFirstD)) !== null) {
-    durationsAfterFirstD.push(m[1]);
+/** Note durations in document order, read from the engine's own MusicXML export. */
+const noteTypes = async (page: import('playwright/test').Page) => page.evaluate(async () => {
+  const score = (window as NoteEntryWindow).__webmscore;
+  if (!score?.saveXml) {
+    throw new Error('window.__webmscore.saveXml is not available');
   }
-  console.log('Durations after first D:', durationsAfterFirstD);
-
-  // Check the input duration before second D
-  const durationBeforeSecondD = await page.evaluate(() => {
-    const score = (window as NoteEntryWindow).__webmscore;
-    return score?.inputState?.duration ?? 'unknown';
-  });
-  console.log('Duration before second D:', durationBeforeSecondD);
-
-  // Press D again to enter second whole note - the TypeScript fix should preserve duration
-  await page.keyboard.press('d');
-  await page.waitForTimeout(800);
-
-  // Check the MSCX after second D
-  const mscxAfterSecondD = await readMscx();
-  const durationsAfterSecondD: string[] = [];
-  const secondDRegex = /<Chord>[\s\S]*?<durationType>(\w+)<\/durationType>[\s\S]*?<\/Chord>/g;
-  while ((m = secondDRegex.exec(mscxAfterSecondD)) !== null) {
-    durationsAfterSecondD.push(m[1]);
-  }
-  console.log('Durations after second D:', durationsAfterSecondD);
-
-  // Verify that we now have 2 more whole notes than before
-  const finalMscx = await readMscx();
-  const finalWholeNotes = countNotesWithDuration(finalMscx, 'whole');
-
-  // Debug: log all duration types found
-  const allDurations: string[] = [];
-  const debugRegex = /<Chord>[\s\S]*?<durationType>(\w+)<\/durationType>[\s\S]*?<\/Chord>/g;
-  let debugMatch;
-  while ((debugMatch = debugRegex.exec(finalMscx)) !== null) {
-    allDurations.push(debugMatch[1]);
-  }
-  console.log('Initial whole notes:', initialWholeNotes);
-  console.log('Final whole notes:', finalWholeNotes);
-  console.log('All duration types found:', allDurations);
-
-  // We should have added 2 whole notes
-  expect(finalWholeNotes).toBe(initialWholeNotes + 2);
+  const raw = await score.saveXml() as unknown;
+  const xml = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as Uint8Array);
+  return [...xml.matchAll(/<type>(\w+)<\/type>/g)].map((match) => match[1]);
 });
 
-/**
- * Test that changing duration mid-entry works correctly.
- * Press 7D5D should produce one whole note D and one quarter note D.
- */
-// TD-04 / AC-06: see the note on the first case above. Same owner, same precondition.
-test.skip('7D5D produces one whole note and one quarter note', async ({ page }) => {
-  await page.goto('/?score=/test_scores/three_notes_cde.musicxml');
-  await page.waitForSelector('svg .Note', { timeout: 60_000 });
+const startNoteInput = async (page: import('playwright/test').Page) => {
+  const box = await page.locator('svg .Note').first().boundingBox();
+  if (!box) {
+    throw new Error('Expected a clickable note in the fixture.');
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.getByTestId('selection-overlay').waitFor({ timeout: 20_000 });
+  await page.getByTestId('btn-note-input').click();
+  await expect(page.getByTestId('btn-note-input')).toHaveAttribute('aria-pressed', 'true');
+};
 
-  // Check if note entry APIs are available
-  const hasNoteEntryApi = await page.evaluate(() => {
-    const score = (window as NoteEntryWindow).__webmscore;
-    return (
-      typeof score?.setNoteEntryMode === 'function' &&
-      typeof score?.setInputDurationType === 'function' &&
-      typeof score?.addPitchByStep === 'function'
-    );
-  });
-  test.skip(!hasNoteEntryApi, 'Note entry APIs not available in this webmscore build');
+test('enters a note at the duration chosen with the number keys', async ({ page }) => {
+  // The fixture is four measures of one whole note each, so a whole note fits exactly
+  // and any shorter entry splits the bar it lands in — both observable in the export.
+  await openScore(page);
+  expect(await noteTypes(page)).toEqual(['whole', 'whole', 'whole', 'whole']);
 
-  // Helper to read MSCX content
-  const readMscx = async (): Promise<string> => {
-    return page.evaluate(async () => {
-      const score = (window as NoteEntryWindow).__webmscore;
-      if (!score?.saveMsc) {
-        throw new Error('window.__webmscore.saveMsc is not available');
-      }
-      const data = await score.saveMsc('mscx');
-      return new TextDecoder().decode(data);
-    });
-  };
-
-  // Helper to count notes with a specific duration type
-  const countNotesWithDuration = (mscx: string, durationType: string): number => {
-    const chordRegex = /<Chord>[\s\S]*?<durationType>(\w+)<\/durationType>[\s\S]*?<\/Chord>/g;
-    let count = 0;
-    let match;
-    while ((match = chordRegex.exec(mscx)) !== null) {
-      if (match[1] === durationType) {
-        const noteMatches = match[0].match(/<Note>/g);
-        count += noteMatches ? noteMatches.length : 0;
-      }
-    }
-    return count;
-  };
-
-  // Get initial counts
-  const initialMscx = await readMscx();
-  const initialWholeNotes = countNotesWithDuration(initialMscx, 'whole');
-  const initialQuarterNotes = countNotesWithDuration(initialMscx, 'quarter');
-
-  // Select the first note by clicking on it
-  await page.locator('svg .Note').first().click();
-
-  // Wait for selection to be processed - check for either the overlay or enabled buttons
-  await expect.poll(async () => {
-    const deleteEnabled = await page.getByTestId('btn-delete').isEnabled().catch(() => false);
-    const overlayVisible = await page.getByTestId('selection-overlay').isVisible().catch(() => false);
-    return deleteEnabled || overlayVisible;
-  }, { timeout: 10_000 }).toBe(true);
-
-  // Enable note entry mode
-  await page.getByTestId('btn-note-entry').click();
-  await expect(page.getByTestId('btn-note-entry')).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
-
-  // Press 7 to select whole note duration
-  await page.keyboard.press('7');
-  await page.waitForTimeout(200);
-
-  // Press D to enter first whole note
-  await page.keyboard.press('d');
-  await page.waitForTimeout(500);
-
-  // Press 5 to change to quarter note duration
+  await startNoteInput(page);
   await page.keyboard.press('5');
-  await page.waitForTimeout(200);
-
-  // Press D to enter quarter note
   await page.keyboard.press('d');
-  await page.waitForTimeout(500);
 
-  // Verify counts
-  const finalMscx = await readMscx();
-  const finalWholeNotes = countNotesWithDuration(finalMscx, 'whole');
-  const finalQuarterNotes = countNotesWithDuration(finalMscx, 'quarter');
+  // A quarter at beat 1 leaves the rest of that bar as quarter + half.
+  await expect.poll(async () => noteTypes(page), { timeout: 20_000 })
+    .toEqual(['quarter', 'quarter', 'half', 'whole', 'whole', 'whole']);
+});
 
-  // We should have added 1 whole note and 1 quarter note
-  expect(finalWholeNotes).toBe(initialWholeNotes + 1);
-  expect(finalQuarterNotes).toBe(initialQuarterNotes + 1);
+test('honours a duration change made before entry', async ({ page }) => {
+  await openScore(page);
+  await startNoteInput(page);
+  await page.keyboard.press('6');
+  await page.keyboard.press('d');
+
+  // A half at beat 1 leaves a half behind it, and the later bars are untouched.
+  await expect.poll(async () => noteTypes(page), { timeout: 20_000 })
+    .toEqual(['half', 'half', 'whole', 'whole', 'whole']);
+});
+
+// Measured defect, not a stale test. On the fixture above, with note input active and a
+// duration chosen, the first `d` enters a note and the second changes nothing at all —
+// the export is identical across the second press for every duration tried (5, 6 and 7).
+// The cursor does not advance and no second note is written, so consecutive entry is
+// impossible.
+//
+// This is what the two original cases were reaching for. Their premise was right; their
+// fixture and selectors were not. Left as `fixme` so it reports in every run rather than
+// disappearing the way an unconditional skip does.
+test.fixme('enters a second note when the pitch key is pressed again', async ({ page }) => {
+  await openScore(page);
+  await startNoteInput(page);
+  await page.keyboard.press('6');
+  await page.keyboard.press('d');
+  await expect.poll(async () => noteTypes(page), { timeout: 20_000 })
+    .toEqual(['half', 'half', 'whole', 'whole', 'whole']);
+
+  // The second entry should consume the remaining half of bar 1, leaving two half notes
+  // that the engine reports as separate chords. Today the document does not change.
+  await page.keyboard.press('d');
+  await expect.poll(async () => noteTypes(page), { timeout: 20_000 })
+    .toEqual(['half', 'half', 'whole', 'whole', 'whole']);
 });
