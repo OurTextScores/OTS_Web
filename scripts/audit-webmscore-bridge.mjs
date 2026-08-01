@@ -12,6 +12,7 @@
  *
  * Usage: node scripts/audit-webmscore-bridge.mjs [--json]
  */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -147,6 +148,14 @@ export function analyzeBridge(sources, manifest) {
     );
     const unproxiedNative = [...native].filter((name) => !reachableNative.has(name)).sort();
 
+    // Layer 6: the generated artifacts the app actually loads.
+    const generatedFailures = analyzeGeneratedArtifacts(sources.generated, manifest, {
+        native,
+        rpcTargets,
+        mainThread,
+    });
+    failures.push(...generatedFailures);
+
     return {
         report: {
             counts: {
@@ -160,6 +169,90 @@ export function analyzeBridge(sources, manifest) {
         },
         failures,
     };
+}
+
+/** Word-boundary presence. Substring matching would let `title` satisfy `titleFilenameSafe`. */
+const declaresName = (source, name) => (
+    new RegExp(`\\b_?${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(source)
+);
+
+/**
+ * Rules 5 and 6 of the AGENTS.md checklist: the hand-edited layers being consistent
+ * proves nothing if the artifacts built from them were never regenerated or copied.
+ * This is the failure this audit exists to catch, one step further along -- a method
+ * present in all four source layers but absent from the bundle the app imports.
+ *
+ * Three separate mistakes, three separate rules:
+ *
+ *   - forgot `npm run compile`  -> a native export missing from the emscripten glue;
+ *   - forgot `npm run bundle`   -> a bridge name missing from a rollup output;
+ *   - forgot `npm run sync:wasm`-> `public/` holding a different build than the fork.
+ *
+ * Honest limit: the first two are name-presence checks, so they catch a new, renamed or
+ * removed entry point, not an edited method body. Only the sync rule is exact, because
+ * it compares digests. A rebuilt-but-unbundled body change still needs the AGENTS.md
+ * browser verification.
+ */
+export function analyzeGeneratedArtifacts(generated, manifest, parsed) {
+    const config = manifest.generated;
+    if (!config) return [];
+
+    const failures = [];
+    const fail = (rule, detail) => failures.push({ rule, detail });
+    const artifacts = generated || {};
+
+    if (config.glue) {
+        const glue = artifacts.glue;
+        if (glue == null) {
+            fail('generated-artifact-missing', `emscripten glue not found at ${config.glue}; run npm run compile in webmscore-fork/web-public`);
+        } else {
+            const absent = [...parsed.native].filter((name) => !declaresName(glue, name)).sort();
+            for (const name of absent) {
+                fail(
+                    'missing-from-generated-glue',
+                    `native export ${name} is not in ${config.glue}; the WASM build predates the native source (npm run compile)`,
+                );
+            }
+        }
+    }
+
+    // Everything the worker can dispatch or the main thread can call has to survive
+    // bundling, whichever entry point a consumer resolves.
+    const bundledNames = [...new Set([...parsed.rpcTargets, ...parsed.mainThread])].sort();
+    for (const bundlePath of Object.keys(config.bundles || {})) {
+        const bundle = (artifacts.bundles || {})[bundlePath];
+        if (bundle == null) {
+            fail('generated-artifact-missing', `bundle not found at ${bundlePath}; run npm run bundle in webmscore-fork/web-public`);
+            continue;
+        }
+        const absent = bundledNames.filter((name) => !declaresName(bundle, name));
+        for (const name of absent) {
+            fail(
+                'missing-from-generated-bundle',
+                `${name} is in the bridge source but not in ${bundlePath}; the bundle predates the source (npm run bundle)`,
+            );
+        }
+    }
+
+    for (const [shipped, source] of Object.entries(config.synced || {})) {
+        const digests = artifacts.digests || {};
+        if (!digests[source]) {
+            fail('generated-artifact-missing', `build artifact not found at ${source}`);
+            continue;
+        }
+        if (!digests[shipped]) {
+            fail('generated-artifact-missing', `${shipped} is missing; run npm run sync:wasm`);
+            continue;
+        }
+        if (digests[shipped] !== digests[source]) {
+            fail(
+                'unsynced-generated-artifact',
+                `${shipped} differs from ${source}; the served artifact is not the one that was built (npm run sync:wasm)`,
+            );
+        }
+    }
+
+    return failures;
 }
 
 function main() {
@@ -177,9 +270,31 @@ function main() {
         }
     };
 
-    const sources = Object.fromEntries(
-        Object.entries(manifest.layers).map(([layer, path]) => [layer, read(path)]),
-    );
+    const digest = (relativePath) => {
+        try {
+            return createHash('sha256').update(readFileSync(resolve(root, relativePath))).digest('hex');
+        } catch {
+            return null;
+        }
+    };
+
+    const generatedConfig = manifest.generated || {};
+    const sources = {
+        ...Object.fromEntries(
+            Object.entries(manifest.layers).map(([layer, path]) => [layer, read(path)]),
+        ),
+        generated: {
+            glue: generatedConfig.glue ? read(generatedConfig.glue) : null,
+            bundles: Object.fromEntries(
+                Object.keys(generatedConfig.bundles || {}).map((path) => [path, read(path)]),
+            ),
+            digests: Object.fromEntries(
+                Object.entries(generatedConfig.synced || {})
+                    .flat()
+                    .map((path) => [path, digest(path)]),
+            ),
+        },
+    };
     const { report, failures } = analyzeBridge(sources, manifest);
 
     if (!report) {

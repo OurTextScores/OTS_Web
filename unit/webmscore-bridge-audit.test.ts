@@ -172,3 +172,93 @@ describe('webmscore bridge audit', () => {
         expect(rules(result)).toContain('layer-unparseable');
     });
 });
+
+/**
+ * Layer 5/6. The four source layers agreeing proves nothing if the artifacts built from
+ * them are stale: the method exists everywhere a reviewer looks and is absent from what
+ * the browser loads.
+ */
+describe('webmscore generated artifacts', () => {
+    const generatedManifest = {
+        ...manifest,
+        generated: {
+            glue: 'webmscore.lib.js',
+            bundles: { 'webmscore.mjs': 'the module entry point' },
+            synced: { 'public/webmscore.lib.wasm': 'fork/webmscore.lib.wasm' },
+        },
+    };
+
+    // Both parsed entry points (`pitchUp`, `_synthAudio` -> `synthAudio`) present.
+    const freshGlue = 'var _pitchUp = Module["_pitchUp"]; var _synthAudio = Module["_synthAudio"];';
+    const freshBundle = 'class W{pitchUp(){return this.rpc("pitchUp")}synthAudio(){return this.rpc("_synthAudio")}ready(){}}';
+
+    const generated = (overrides = {}) => ({
+        glue: freshGlue,
+        bundles: { 'webmscore.mjs': freshBundle },
+        digests: { 'public/webmscore.lib.wasm': 'abc123', 'fork/webmscore.lib.wasm': 'abc123' },
+        ...overrides,
+    });
+
+    const withGenerated = (overrides = {}) => ({
+        ...baseSources(),
+        generated: generated(overrides),
+    });
+
+    it('accepts artifacts that carry every bridge entry point', () => {
+        expect(analyze(withGenerated(), generatedManifest).failures).toEqual([]);
+    });
+
+    it('stays silent when the manifest declares no generated artifacts', () => {
+        // The source-only contract must keep working on its own.
+        expect(analyze(baseSources(), manifest).failures).toEqual([]);
+    });
+
+    it('fails when the WASM glue predates a new native export', () => {
+        const result = analyze(
+            withGenerated({ glue: 'var _pitchUp = Module["_pitchUp"];' }),
+            generatedManifest,
+        );
+
+        expect(rules(result)).toContain('missing-from-generated-glue');
+        expect(result.failures[0].detail).toContain('synthAudio');
+    });
+
+    it('fails when a rollup bundle predates a bridge source change', () => {
+        const result = analyze(
+            withGenerated({ bundles: { 'webmscore.mjs': 'class W{ready(){}}' } }),
+            generatedManifest,
+        );
+
+        expect(rules(result)).toContain('missing-from-generated-bundle');
+    });
+
+    it('is not satisfied by a prefix of the method name', () => {
+        // `title` must not stand in for `titleFilenameSafe`.
+        const result = analyze(
+            withGenerated({ bundles: { 'webmscore.mjs': 'class W{pitchUpTwice(){}synthAudioBatch(){}}' } }),
+            generatedManifest,
+        );
+
+        expect(rules(result)).toContain('missing-from-generated-bundle');
+    });
+
+    it('fails when the served copy is a different build from the one that was made', () => {
+        const result = analyze(
+            withGenerated({
+                digests: { 'public/webmscore.lib.wasm': 'stale999', 'fork/webmscore.lib.wasm': 'abc123' },
+            }),
+            generatedManifest,
+        );
+
+        expect(rules(result)).toContain('unsynced-generated-artifact');
+    });
+
+    it('fails when a declared artifact is absent rather than assuming it is fine', () => {
+        expect(rules(analyze(withGenerated({ glue: null }), generatedManifest)))
+            .toContain('generated-artifact-missing');
+        expect(rules(analyze(withGenerated({ bundles: { 'webmscore.mjs': null } }), generatedManifest)))
+            .toContain('generated-artifact-missing');
+        expect(rules(analyze(withGenerated({ digests: { 'fork/webmscore.lib.wasm': 'abc123' } }), generatedManifest)))
+            .toContain('generated-artifact-missing');
+    });
+});
