@@ -17,6 +17,7 @@ import {
     type SynthAudioBatchIterator,
     type WebMscoreInstance,
 } from '../lib/webmscore-loader';
+import { EMPTY_STAFF_BANDS, loadStaffBands, resolvePartBand, type StaffBands } from '../lib/compare-staff-bands';
 import {
     deleteCheckpoint,
     renameCheckpoint,
@@ -252,12 +253,108 @@ export function sortChangeReviewRegionsByMeasure(regions: ChangeReviewScoreRegio
     });
 }
 
+/**
+ * Locate one part's measure within a system.
+ *
+ * `staffBands` carries the engine's real per-part vertical bands for this score.
+ * The even split is the fallback for older engine builds only: it assumes every staff in
+ * a system is the same height, which stops being true as soon as dynamics or text stretch
+ * one of them, and the two compare panes stretch differently from each other.
+ */
+function localizeMeasureToPart(
+    element: { x: number; y: number; sx?: number; sy?: number; width?: number; height?: number; page: number },
+    partIndex: number,
+    partCount: number,
+    pageHeight: number,
+    zoomValue: number,
+    staffBands: StaffBands,
+) {
+    const rawWidth = typeof element.sx === 'number'
+        ? element.sx
+        : typeof element.width === 'number'
+            ? element.width
+            : 0;
+    const rawHeight = typeof element.sy === 'number'
+        ? element.sy
+        : typeof element.height === 'number'
+            ? element.height
+            : 0;
+    const withPageOffset = (y: number, height: number, page: number) => {
+        const needsPageOffset = pageHeight > 0 && page > 0 && (y + height) <= (pageHeight * 1.2);
+        return y + (needsPageOffset ? page * pageHeight : 0);
+    };
+
+    // Horizontal extent always comes from the measure box: it was already correct per
+    // pane. Only the vertical placement needed the engine's staff geometry.
+    const band = resolvePartBand(staffBands, element.page, element.y, rawHeight, partIndex);
+    if (band) {
+        return {
+            left: element.x * zoomValue,
+            top: withPageOffset(band.y, band.height, element.page) * zoomValue,
+            width: rawWidth * zoomValue,
+            height: band.height * zoomValue,
+            geometry: 'staff' as const,
+        };
+    }
+
+    const partHeight = rawHeight / partCount;
+    return {
+        left: element.x * zoomValue,
+        top: (withPageOffset(element.y, rawHeight, element.page) + (partHeight * partIndex)) * zoomValue,
+        width: rawWidth * zoomValue,
+        height: partHeight * zoomValue,
+        geometry: 'even' as const,
+    };
+}
+
+/**
+ * Highlights for the alignment-driven compare modes (checkpoint and AI review).
+ *
+ * These used to draw the whole system for any change, because the part axis was collapsed
+ * before geometry saw it. They now localize to the changed part exactly as change review
+ * does, through the same `localizeMeasureToPart`.
+ */
+export function buildPartLocalizedAlignmentHighlights(
+    positions: Positions | null,
+    entries: Array<{ partIndex: number; measureIndex: number }>,
+    status: 'old-diff' | 'new-diff' | 'commented',
+    zoomValue: number,
+    partCount: number,
+    staffBands: StaffBands = EMPTY_STAFF_BANDS,
+) {
+    if (!positions?.elements.length || partCount <= 0) {
+        return [];
+    }
+    const pageHeight = positions.pageSize?.height ?? 0;
+    const seen = new Set<string>();
+    return entries.flatMap((entry) => {
+        if (entry.partIndex < 0 || entry.partIndex >= partCount) {
+            return [];
+        }
+        const key = `${entry.partIndex}:${entry.measureIndex}`;
+        if (seen.has(key)) {
+            return [];
+        }
+        seen.add(key);
+        const element = positions.elements[entry.measureIndex];
+        if (!element) {
+            return [];
+        }
+        return [{
+            id: `align-${key}`,
+            status,
+            ...localizeMeasureToPart(element, entry.partIndex, partCount, pageHeight, zoomValue, staffBands),
+        }];
+    });
+}
+
 export function buildPartLocalizedChangeReviewHighlights(
     positions: Positions | null,
     regions: ChangeReviewScoreRegion[],
     side: 'base' | 'head',
     zoomValue: number,
     partCount: number,
+    staffBands: StaffBands = EMPTY_STAFF_BANDS,
 ) {
     if (!positions?.elements.length || partCount <= 0) {
         return [];
@@ -272,28 +369,18 @@ export function buildPartLocalizedChangeReviewHighlights(
         if (!element) {
             return [];
         }
-        const rawWidth = typeof element.sx === 'number'
-            ? element.sx
-            : typeof element.width === 'number'
-                ? element.width
-                : 0;
-        const rawHeight = typeof element.sy === 'number'
-            ? element.sy
-            : typeof element.height === 'number'
-                ? element.height
-                : 0;
-        const partHeight = rawHeight / partCount;
-        const needsPageOffset = pageHeight > 0
-            && element.page > 0
-            && (element.y + rawHeight) <= (pageHeight * 1.2);
-        const pageOffset = needsPageOffset ? element.page * pageHeight : 0;
+        const rect = localizeMeasureToPart(
+            element,
+            region.partIndex,
+            partCount,
+            pageHeight,
+            zoomValue,
+            staffBands,
+        );
         return [{
             id: `${region.anchorId}-${side}`,
             status: side === 'base' ? 'old-diff' as const : 'new-diff' as const,
-            left: element.x * zoomValue,
-            top: (element.y + pageOffset + (partHeight * region.partIndex)) * zoomValue,
-            width: rawWidth * zoomValue,
-            height: partHeight * zoomValue,
+            ...rect,
         }];
     });
 }
@@ -304,6 +391,7 @@ export function buildPartLocalizedChangeReviewBarHighlights(
     side: 'base' | 'head',
     zoomValue: number,
     partCount: number,
+    staffBands: StaffBands = EMPTY_STAFF_BANDS,
 ) {
     if (!positions?.elements.length || partCount <= 0) {
         return [];
@@ -317,27 +405,16 @@ export function buildPartLocalizedChangeReviewBarHighlights(
         if (!element) {
             return [];
         }
-        const rawWidth = typeof element.sx === 'number'
-            ? element.sx
-            : typeof element.width === 'number'
-                ? element.width
-                : 0;
-        const rawHeight = typeof element.sy === 'number'
-            ? element.sy
-            : typeof element.height === 'number'
-                ? element.height
-                : 0;
-        const partHeight = rawHeight / partCount;
-        const needsPageOffset = pageHeight > 0
-            && element.page > 0
-            && (element.y + rawHeight) <= (pageHeight * 1.2);
-        const pageOffset = needsPageOffset ? element.page * pageHeight : 0;
         return [{
             id: `${bar.anchorId}-${side}`,
-            left: element.x * zoomValue,
-            top: (element.y + pageOffset + (partHeight * bar.partIndex)) * zoomValue,
-            width: rawWidth * zoomValue,
-            height: partHeight * zoomValue,
+            ...localizeMeasureToPart(
+                element,
+                bar.partIndex,
+                partCount,
+                pageHeight,
+                zoomValue,
+                staffBands,
+            ),
         }];
     });
 }
@@ -1416,6 +1493,11 @@ export default function ScoreEditor() {
     const [compareRightSvgSize, setCompareRightSvgSize] = useState<{ width: number; height: number } | null>(null);
     const [compareLeftMeasurePositions, setCompareLeftMeasurePositions] = useState<Positions | null>(null);
     const [compareRightMeasurePositions, setCompareRightMeasurePositions] = useState<Positions | null>(null);
+    // Real per-staff boxes, probed from the engine once per layout. Undefined until the
+    // probe lands (or forever on an engine build without the exports), in which case the
+    // highlight builders fall back to slicing the system box evenly.
+    const [compareLeftStaffBands, setCompareLeftStaffBands] = useState<StaffBands>(EMPTY_STAFF_BANDS);
+    const [compareRightStaffBands, setCompareRightStaffBands] = useState<StaffBands>(EMPTY_STAFF_BANDS);
     const [compareAlignments, setCompareAlignments] = useState<PartAlignment[]>([]);
     const [compareAlignmentLoading, setCompareAlignmentLoading] = useState(false);
     const [compareAlignmentRevision, setCompareAlignmentRevision] = useState(0);
@@ -3653,14 +3735,22 @@ export default function ScoreEditor() {
         const leftMismatch = Array.from({ length: leftCount }, () => false);
         const rightMismatch = Array.from({ length: rightCount }, () => false);
 
+        // Keep the part axis. Collapsing every part into one flag per measure is why
+        // checkpoint and AI compare highlighted a whole system when a single staff changed.
+        const leftParts: Array<{ partIndex: number; measureIndex: number }> = [];
+        const rightParts: Array<{ partIndex: number; measureIndex: number }> = [];
+
         compareAlignments.forEach((alignment) => {
+            const partIndex = alignment.partIndex;
             alignment.rows.forEach((row) => {
                 if (!row.match) {
                     if (row.leftIndex !== null && row.leftIndex >= 0 && row.leftIndex < leftMismatch.length) {
                         leftMismatch[row.leftIndex] = true;
+                        leftParts.push({ partIndex, measureIndex: row.leftIndex });
                     }
                     if (row.rightIndex !== null && row.rightIndex >= 0 && row.rightIndex < rightMismatch.length) {
                         rightMismatch[row.rightIndex] = true;
+                        rightParts.push({ partIndex, measureIndex: row.rightIndex });
                     }
                 }
             });
@@ -3669,47 +3759,10 @@ export default function ScoreEditor() {
         return {
             left: leftMismatch.map((value) => (value ? 'old-diff' : null)),
             right: rightMismatch.map((value) => (value ? 'new-diff' : null)),
+            leftParts,
+            rightParts,
         };
     }, [compareAlignments, compareLeftMeasurePositions, compareRightMeasurePositions]);
-    const buildMeasureHighlights = useCallback((
-        positions: Positions | null,
-        statuses: Array<'old-diff' | 'new-diff' | 'commented' | null>,
-        zoomValue: number,
-    ) => {
-        if (!positions || !positions.elements.length) {
-            return [];
-        }
-        const pageHeight = positions.pageSize?.height ?? 0;
-        return positions.elements.flatMap((element, index) => {
-            const measureIndex = index;
-            const status = statuses[measureIndex];
-            if (!status) {
-                return [];
-            }
-            const rawWidth = typeof element.sx === 'number'
-                ? element.sx
-                : typeof element.width === 'number'
-                    ? element.width
-                    : 0;
-            const rawHeight = typeof element.sy === 'number'
-                ? element.sy
-                : typeof element.height === 'number'
-                    ? element.height
-                    : 0;
-            const needsPageOffset = pageHeight > 0
-                && element.page > 0
-                && (element.y + rawHeight) <= (pageHeight * 1.2);
-            const pageOffset = needsPageOffset ? element.page * pageHeight : 0;
-            return [{
-                id: element.id ?? index,
-                status,
-                left: (element.x) * zoomValue,
-                top: (element.y + pageOffset) * zoomValue,
-                width: rawWidth * zoomValue,
-                height: rawHeight * zoomValue,
-            }];
-        });
-    }, []);
     const compareLeftHighlights = useMemo(
         () => isChangeReviewCompareMode
             ? buildPartLocalizedChangeReviewHighlights(
@@ -3718,13 +3771,21 @@ export default function ScoreEditor() {
                 'base',
                 compareEffectiveZoom,
                 comparePartCount,
+                compareLeftStaffBands,
             )
-            : buildMeasureHighlights(compareLeftMeasurePositions, compareMeasureStatuses.left, compareEffectiveZoom),
+            : buildPartLocalizedAlignmentHighlights(
+                compareLeftMeasurePositions,
+                compareMeasureStatuses.leftParts,
+                'old-diff',
+                compareEffectiveZoom,
+                comparePartCount,
+                compareLeftStaffBands,
+            ),
         [
-            buildMeasureHighlights,
             changeReviewDiff,
             compareLeftMeasurePositions,
-            compareMeasureStatuses.left,
+            compareLeftStaffBands,
+            compareMeasureStatuses.leftParts,
             compareEffectiveZoom,
             comparePartCount,
             isChangeReviewCompareMode,
@@ -3738,13 +3799,21 @@ export default function ScoreEditor() {
                 'head',
                 compareEffectiveZoom,
                 comparePartCount,
+                compareRightStaffBands,
             )
-            : buildMeasureHighlights(compareRightMeasurePositions, compareMeasureStatuses.right, compareEffectiveZoom),
+            : buildPartLocalizedAlignmentHighlights(
+                compareRightMeasurePositions,
+                compareMeasureStatuses.rightParts,
+                'new-diff',
+                compareEffectiveZoom,
+                comparePartCount,
+                compareRightStaffBands,
+            ),
         [
-            buildMeasureHighlights,
             changeReviewDiff,
             compareRightMeasurePositions,
-            compareMeasureStatuses.right,
+            compareRightStaffBands,
+            compareMeasureStatuses.rightParts,
             compareEffectiveZoom,
             comparePartCount,
             isChangeReviewCompareMode,
@@ -3752,30 +3821,46 @@ export default function ScoreEditor() {
     );
     const compareCommentedLeftHighlights = useMemo(() => {
         if (isChangeReviewCompareMode || isAiCompareMode) return [];
-        const indices = new Set<number>();
-        Object.values(compareBlockComments).forEach(({ comment, leftIndices }) => {
-            if (comment.trim()) leftIndices.forEach((i) => indices.add(i));
+        // The block key is `${partIndex}:${measureRange}`, so a note's part is recoverable
+        // and its highlight can sit on that staff rather than across the whole system.
+        const entries: Array<{ partIndex: number; measureIndex: number }> = [];
+        Object.entries(compareBlockComments).forEach(([blockKey, block]) => {
+            if (!block.comment.trim()) return;
+            const partIndex = Number.parseInt(blockKey.split(':')[0] ?? '', 10);
+            if (!Number.isFinite(partIndex)) return;
+            block.leftIndices.forEach((measureIndex) => entries.push({ partIndex, measureIndex }));
         });
-        if (indices.size === 0) return [];
-        const statuses = Array.from(
-            { length: compareLeftMeasurePositions?.elements.length ?? 0 },
-            (_, i) => (indices.has(i) ? 'commented' as const : null),
+        if (!entries.length) return [];
+        return buildPartLocalizedAlignmentHighlights(
+            compareLeftMeasurePositions,
+            entries,
+            'commented',
+            compareEffectiveZoom,
+            comparePartCount,
+            compareLeftStaffBands,
         );
-        return buildMeasureHighlights(compareLeftMeasurePositions, statuses, compareEffectiveZoom);
-    }, [compareBlockComments, compareLeftMeasurePositions, compareEffectiveZoom, buildMeasureHighlights, isChangeReviewCompareMode, isAiCompareMode]);
+    }, [compareBlockComments, compareLeftMeasurePositions, compareLeftStaffBands, compareEffectiveZoom, comparePartCount, isChangeReviewCompareMode, isAiCompareMode]);
     const compareCommentedRightHighlights = useMemo(() => {
         if (isChangeReviewCompareMode || isAiCompareMode) return [];
-        const indices = new Set<number>();
-        Object.values(compareBlockComments).forEach(({ comment, rightIndices }) => {
-            if (comment.trim()) rightIndices.forEach((i) => indices.add(i));
+        // The block key is `${partIndex}:${measureRange}`, so a note's part is recoverable
+        // and its highlight can sit on that staff rather than across the whole system.
+        const entries: Array<{ partIndex: number; measureIndex: number }> = [];
+        Object.entries(compareBlockComments).forEach(([blockKey, block]) => {
+            if (!block.comment.trim()) return;
+            const partIndex = Number.parseInt(blockKey.split(':')[0] ?? '', 10);
+            if (!Number.isFinite(partIndex)) return;
+            block.rightIndices.forEach((measureIndex) => entries.push({ partIndex, measureIndex }));
         });
-        if (indices.size === 0) return [];
-        const statuses = Array.from(
-            { length: compareRightMeasurePositions?.elements.length ?? 0 },
-            (_, i) => (indices.has(i) ? 'commented' as const : null),
+        if (!entries.length) return [];
+        return buildPartLocalizedAlignmentHighlights(
+            compareRightMeasurePositions,
+            entries,
+            'commented',
+            compareEffectiveZoom,
+            comparePartCount,
+            compareRightStaffBands,
         );
-        return buildMeasureHighlights(compareRightMeasurePositions, statuses, compareEffectiveZoom);
-    }, [compareBlockComments, compareRightMeasurePositions, compareEffectiveZoom, buildMeasureHighlights, isChangeReviewCompareMode, isAiCompareMode]);
+    }, [compareBlockComments, compareRightMeasurePositions, compareRightStaffBands, compareEffectiveZoom, comparePartCount, isChangeReviewCompareMode, isAiCompareMode]);
     const compareThreadedLeftHighlights = useMemo(() => {
         if (!isChangeReviewCompareMode) return [];
         return buildPartLocalizedChangeReviewBarHighlights(
@@ -3784,8 +3869,9 @@ export default function ScoreEditor() {
             compareSwapped ? 'head' : 'base',
             compareEffectiveZoom,
             comparePartCount,
+            compareLeftStaffBands,
         );
-    }, [changeReviewDiff, changeReviewThreadsByAnchor, compareEffectiveZoom, compareLeftMeasurePositions, comparePartCount, compareSwapped, isChangeReviewCompareMode]);
+    }, [changeReviewDiff, changeReviewThreadsByAnchor, compareEffectiveZoom, compareLeftMeasurePositions, compareLeftStaffBands, comparePartCount, compareSwapped, isChangeReviewCompareMode]);
     const compareThreadedRightHighlights = useMemo(() => {
         if (!isChangeReviewCompareMode) return [];
         return buildPartLocalizedChangeReviewBarHighlights(
@@ -3794,8 +3880,80 @@ export default function ScoreEditor() {
             compareSwapped ? 'base' : 'head',
             compareEffectiveZoom,
             comparePartCount,
+            compareRightStaffBands,
         );
-    }, [changeReviewDiff, changeReviewThreadsByAnchor, compareEffectiveZoom, comparePartCount, compareRightMeasurePositions, compareSwapped, isChangeReviewCompareMode]);
+    }, [changeReviewDiff, changeReviewThreadsByAnchor, compareEffectiveZoom, comparePartCount, compareRightMeasurePositions, compareRightStaffBands, compareSwapped, isChangeReviewCompareMode]);
+    /**
+     * Load each pane's staff bands from its own score.
+     *
+     * Keyed on layout inputs, not zoom: bands are page-space, so zoom is applied at render
+     * time and reloading per zoom step would be wasted engine work. Sequential rather than
+     * Promise.all because both scores live in one WASM instance.
+     */
+    useEffect(() => {
+        if (!compareView) {
+            setCompareLeftStaffBands(EMPTY_STAFF_BANDS);
+            setCompareRightStaffBands(EMPTY_STAFF_BANDS);
+            return;
+        }
+        let cancelled = false;
+        void (async () => {
+            const left = await loadStaffBands(compareLeftScore);
+            if (cancelled) {
+                return;
+            }
+            const right = await loadStaffBands(compareRightScoreDisplay);
+            if (cancelled) {
+                return;
+            }
+            setCompareLeftStaffBands(left);
+            setCompareRightStaffBands(right);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        compareLeftScore,
+        compareLeftMeasurePositions,
+        compareRightScoreDisplay,
+        compareRightMeasurePositions,
+        compareView,
+    ]);
+
+    /**
+     * Vertical extent of one part's bar in a pane, in the same zoomed space as the gutter's
+     * measure bounds. Single geometry rule for panes and gutter alike; null when the engine
+     * gave no bands, which leaves the caller on the even-split fallback.
+     */
+    const compareResolvePartBounds = useCallback((
+        side: 'left' | 'right',
+        measureIndex: number,
+        partIndex: number,
+    ): { top: number; height: number } | null => {
+        const positions = side === 'left' ? compareLeftMeasurePositions : compareRightMeasurePositions;
+        const staffBands = side === 'left' ? compareLeftStaffBands : compareRightStaffBands;
+        const element = positions?.elements[measureIndex];
+        if (!element || !staffBands.bands.length || comparePartCount <= 0) {
+            return null;
+        }
+        const rect = localizeMeasureToPart(
+            element,
+            partIndex,
+            comparePartCount,
+            positions?.pageSize?.height ?? 0,
+            compareEffectiveZoom,
+            staffBands,
+        );
+        return rect.geometry === 'staff' ? { top: rect.top, height: rect.height } : null;
+    }, [
+        compareEffectiveZoom,
+        compareLeftMeasurePositions,
+        compareLeftStaffBands,
+        comparePartCount,
+        compareRightMeasurePositions,
+        compareRightStaffBands,
+    ]);
+
     const compareFocusedHighlights = useMemo((): { left: { left: number; top: number; width: number; height: number } | null; right: { left: number; top: number; width: number; height: number } | null } => {
         const nullResult = { left: null, right: null };
         const focus = isChangeReviewCompareMode && changeReviewFocusedAnchorId && compareClickedMeasures
@@ -17363,6 +17521,7 @@ ${partsBodyXml}
                                                     alignmentByPart: compareAlignmentByPart,
                                                     alignmentLoading: compareAlignmentLoading,
                                                     signatures: compareSignatures,
+                                                    resolvePartBounds: compareResolvePartBounds,
                                                 }}
                                                 diff={{
                                                     blockContentSignature: aiDiffBlockContentSignature,

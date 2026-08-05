@@ -14,6 +14,15 @@ export type InputFileFormat =
     | 'gp'
     | 'ptb';
 
+/** One part's vertical extent within one laid-out system, in page coordinates. */
+export interface StaffSystemBand {
+    page: number;
+    system: number;
+    partIndex: number;
+    y: number;
+    height: number;
+}
+
 export interface Positions {
     elements: Array<{
         id: number;
@@ -168,6 +177,13 @@ export interface Score {
     extendSelectionStaffBelow?: () => Promise<unknown> | unknown;
     getSelectionBoundingBox?: () => Promise<{page: number, x: number, y: number, width: number, height: number} | null> | {page: number, x: number, y: number, width: number, height: number} | null;
     getSelectionBoundingBoxes?: () => Promise<Array<{page: number, x: number, y: number, width: number, height: number}>> | Array<{page: number, x: number, y: number, width: number, height: number}>;
+    /**
+     * Vertical band of each part within each laid-out system, in page coordinates —
+     * the staff dimension `measurePositions()` does not carry. Only laid-out systems
+     * appear; the engine lays out lazily, so call `layoutUntilPage` first if a later
+     * page is needed.
+     */
+    staffSystemBands?: () => Promise<StaffSystemBand[]> | StaffSystemBand[];
     clearSelection?: () => Promise<unknown> | unknown;
     selectionMimeType?: () => Promise<string> | string;
     selectionMimeData?: () => Promise<Uint8Array> | Uint8Array;

@@ -765,6 +765,14 @@ class WebMscoreW {
     }
 
     /**
+     * Vertical band of each part within each laid-out system, in page coordinates.
+     * @returns {Promise<Array<{page: number, system: number, partIndex: number, y: number, height: number}>>}
+     */
+    staffSystemBands() {
+        return this.rpc('staffSystemBands')
+    }
+
+    /**
      * Get the selection MIME type for copy/paste.
      * @returns {Promise<string>}
      */

@@ -4512,6 +4512,134 @@ static engraving::staff_idx_t rangeLastVisibleStaffIdx(const engraving::System* 
     return mu::nidx;
 }
 
+// Per-part vertical bands, one per (system, part), in page coordinates.
+//
+// `savePositions` reports a measure box spanning the whole system with no staff
+// dimension, so callers wanting to highlight one part's bar had to slice that box into
+// equal bands. Staves are not evenly spaced -- dynamics and text stretch one staff and
+// not its neighbour -- so the slice lands off the staff, and two compare panes holding
+// different scores stretch differently from each other.
+//
+// This is deliberately geometry-only and selection-free: deriving it by selecting each
+// part-measure and reading the selection bounding box would be one engine round trip per
+// highlighted bar, and would clobber the user's selection in an editable pane.
+//
+// Vertical maths mirrors _getSelectionBoundingBoxes: a staff's page y is the system's
+// page y plus the SysStaff offset, and short staves (single-line percussion) are centred
+// in the height a standard 5-line staff would occupy so bands stay a consistent size.
+//
+// Only laid-out systems can be reported. The fork lays out lazily (see _layoutUntilPage),
+// so a measure whose system has not been laid out yet contributes nothing; callers that
+// need a later page must lay out to it first.
+WasmRes _staffSystemBands(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+
+    String json = u"[";
+    bool first = true;
+
+    const auto& pages = score->pages();
+    for (size_t pageIdx = 0; pageIdx < pages.size(); ++pageIdx) {
+        const engraving::Page* page = pages[pageIdx];
+        if (!page) {
+            continue;
+        }
+        const auto& systems = page->systems();
+        for (size_t systemIdx = 0; systemIdx < systems.size(); ++systemIdx) {
+            const engraving::System* system = systems[systemIdx];
+            if (!system) {
+                continue;
+            }
+
+            const auto& parts = score->parts();
+            for (size_t partIdx = 0; partIdx < parts.size(); ++partIdx) {
+                engraving::staff_idx_t staffStart = mu::nidx;
+                engraving::staff_idx_t staffEnd = mu::nidx;
+                if (!partStaffRange(parts.at(partIdx), staffStart, staffEnd)) {
+                    continue;
+                }
+
+                // Search only within this part's own staves. The range* helpers clamp a
+                // selection to visible staves and will happily walk into a neighbouring
+                // part, so with "hide empty staves" they hand back another part's staff
+                // and every band below the hidden one shifts by a staff.
+                auto firstStaff = mu::nidx;
+                auto lastStaff = mu::nidx;
+                for (auto idx = staffStart; idx < staffEnd && idx < score->nstaves(); ++idx) {
+                    const engraving::SysStaff* candidate = system->staff(idx);
+                    if (!candidate || !candidate->show()) {
+                        continue;
+                    }
+                    if (firstStaff == mu::nidx) {
+                        firstStaff = idx;
+                    }
+                    lastStaff = idx;
+                }
+                if (firstStaff == mu::nidx || lastStaff == mu::nidx) {
+                    // This part is not shown in this system; emitting a band anyway would
+                    // put a highlight on whatever staff happens to occupy that space.
+                    continue;
+                }
+
+                const engraving::SysStaff* sysFirst = system->staff(firstStaff);
+                const engraving::SysStaff* sysLast = system->staff(lastStaff);
+                const engraving::Staff* scoreFirst = score->staff(firstStaff);
+                const engraving::Staff* scoreLast = score->staff(lastStaff);
+                if (!sysFirst || !sysLast || !scoreFirst || !scoreLast) {
+                    continue;
+                }
+
+                // Take the geometry from the StaffLines the renderer actually draws.
+                // SysStaff::y() reads _bbox, which is not the post-System::layout2 position
+                // (_yPos is, and has no accessor), so it reports evenly spaced staves even
+                // where layout stretched one of them -- which is exactly the case this
+                // export exists to handle.
+                engraving::Measure* systemMeasure = system->firstMeasure();
+                if (!systemMeasure) {
+                    continue;
+                }
+                const engraving::StaffLines* firstLines = systemMeasure->staffLines(firstStaff);
+                const engraving::StaffLines* lastLines = systemMeasure->staffLines(lastStaff);
+                if (!firstLines || !lastLines) {
+                    continue;
+                }
+
+                const mu::RectF firstRect = firstLines->pageBoundingRect();
+                const mu::RectF lastRect = lastLines->pageBoundingRect();
+
+                const engraving::Fraction zeroTick = engraving::Fraction(0, 1);
+                const double standardStaffHeight = 4 * scoreFirst->spatium(zeroTick);
+
+                // Short staves (single-line percussion) are centred in the height a
+                // standard 5-line staff would occupy, so bands stay a consistent size.
+                double y1 = firstRect.top();
+                if (firstRect.height() < standardStaffHeight) {
+                    y1 -= 0.5 * (standardStaffHeight - firstRect.height());
+                }
+                double y2 = lastRect.bottom();
+                if (lastRect.height() < standardStaffHeight) {
+                    y2 += 0.5 * (standardStaffHeight - lastRect.height());
+                }
+
+                if (!first) {
+                    json += u",";
+                }
+                first = false;
+
+                json += String(u"{\"page\":%1,\"system\":%2,\"partIndex\":%3,\"y\":%4,\"height\":%5}")
+                    .arg(static_cast<int>(pageIdx))
+                    .arg(static_cast<int>(systemIdx))
+                    .arg(static_cast<int>(partIdx))
+                    .arg(y1)
+                    .arg(y2 - y1);
+            }
+        }
+    }
+
+    json += u"]";
+    return WasmRes(json);
+}
+
 WasmRes _getSelectionBoundingBoxes(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
@@ -7692,6 +7820,11 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     WasmResBytes getSelectionBoundingBoxes(uintptr_t score_ptr, int excerptId = -1) {
         return _getSelectionBoundingBoxes(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    WasmResBytes staffSystemBands(uintptr_t score_ptr, int excerptId = -1) {
+        return _staffSystemBands(score_ptr, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

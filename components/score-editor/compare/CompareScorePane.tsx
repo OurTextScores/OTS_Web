@@ -13,6 +13,12 @@ type PositionedRect = {
 type HighlightRect = PositionedRect & {
     id: string | number;
     status?: string;
+    /**
+     * How the rect was located vertically: 'staff' means the engine reported the real
+     * staff box, 'even' means it fell back to slicing the system box into equal bands.
+     * Surfaced as a data attribute so the fallback is observable rather than silent.
+     */
+    geometry?: 'staff' | 'even';
 };
 
 type SelectionRect = {
@@ -225,6 +231,8 @@ export function CompareScorePane({
                                     <div
                                         key={`compare-${side}-highlight-${highlight.id}`}
                                         data-testid={`compare-${side}-highlight`}
+                                        data-geometry={highlight.geometry ?? 'even'}
+                                        data-highlight-id={String(highlight.id)}
                                         className="absolute rounded-sm border-2"
                                         style={{
                                             ...rectStyle(highlight),

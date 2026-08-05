@@ -63,6 +63,10 @@ When adding a new C++ function to the WASM bridge, update **all** relevant layer
 | 8 | Tests | Add/update tests for any consumer layer you changed |
 
 Notes:
+- **When a native change appears not to take effect, run `npm run check:bridge` first.** It names
+  the broken layer in one line (e.g. `missing-from-generated-bundle: <method> is in the bridge
+  source but not in webmscore.webpack.mjs; the bundle predates the source`) and costs seconds,
+  versus bisecting rebuilds at ~8 minutes each.
 - `worker-helper.js` and `lib/webmscore-loader.ts` are the most common omissions.
 - If the change is a deep engraving fix with no new JS method, only native source + generated artifacts may change.
 - If the change is app-only, you may not need ScoreOps.
@@ -73,6 +77,15 @@ Notes:
    — the reliable C++ → WASM build path; the npm script sets up the emsdk PATH itself.
 2. If JS bridge files changed (`src/index.js`, `src/worker-helper.js`, or related bundling inputs): `npm run bundle`
 3. `cd ../.. && npm run sync:wasm` — copies generated artifacts into `public/`
+
+**Step 2 is not optional, and skipping it fails silently.** `webmscore.webpack.mjs` embeds the
+JS glue, so a stale bundle pairs old glue with a new `.wasm`. When no export changed the two are
+interchangeable and everything works; **add or remove an export and the module stops
+instantiating** — no console error, no stack trace, nothing renders anywhere, in the plain editor
+as well as the compare panes. It is indistinguishable by eye from a corrupt engine build, and it
+is almost certainly what `c33e7a7b` hit (reverted in `7eec1985` on the theory that this machine's
+build environment was at fault; a null rebuild has since been shown byte-deterministic and
+behaviourally identical to the committed artifacts across the full Playwright matrix).
 
 **IMPORTANT — PATH pitfall:** Do NOT run `make release` directly from the shell, even after `source ~/workspace/emsdk/emsdk_env.sh`. The Makefile spawns `/bin/sh` subprocesses that do not inherit the emsdk PATH, causing `emcmake: not found`. Always use `npm run compile`.
 

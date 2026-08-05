@@ -65,6 +65,17 @@ export type CompareDiffGutterProps = {
         alignmentByPart: Map<number, AlignmentLike>;
         alignmentLoading: boolean;
         signatures: { left: string[][]; right: string[][] } | null;
+        /**
+         * Real vertical extent of one part's bar in a pane, in the same space as
+         * `panes.*.bounds`. Null when the engine could not supply staff geometry, in which
+         * case the caller falls back to slicing the system box evenly. The owner computes
+         * this so the gutter stays presentational and one geometry rule serves both panes.
+         */
+        resolvePartBounds?: (
+            side: 'left' | 'right',
+            measureIndex: number,
+            partIndex: number,
+        ) => { top: number; height: number } | null;
     };
     diff: {
         blockContentSignature: (
@@ -159,6 +170,7 @@ export function CompareDiffGutter({
     const compareAlignmentByPart = layout.alignmentByPart;
     const compareAlignmentLoading = layout.alignmentLoading;
     const compareSignatures = layout.signatures;
+    const resolvePartBounds = layout.resolvePartBounds;
 
     const aiDiffBlockContentSignature = diff.blockContentSignature;
     const aiDiffBlockErrors = diff.blockErrors;
@@ -265,12 +277,14 @@ export function CompareDiffGutter({
                                         if (leftIndex !== null && compareLeftBounds[leftIndex]) {
                                             const b = compareLeftBounds[leftIndex];
                                             const partH = b.height / comparePartCount;
-                                            regionBounds.push({ top: b.top + partH * region.partIndex, height: partH });
+                                            regionBounds.push(resolvePartBounds?.('left', leftIndex, region.partIndex)
+                                                ?? { top: b.top + partH * region.partIndex, height: partH });
                                         }
                                         if (rightIndex !== null && compareRightBounds[rightIndex]) {
                                             const b = compareRightBounds[rightIndex];
                                             const partH = b.height / comparePartCount;
-                                            regionBounds.push({ top: b.top + partH * region.partIndex, height: partH });
+                                            regionBounds.push(resolvePartBounds?.('right', rightIndex, region.partIndex)
+                                                ?? { top: b.top + partH * region.partIndex, height: partH });
                                         }
                                         const blockTop = regionBounds.length
                                             ? Math.min(...regionBounds.map((b) => b.top))
@@ -376,10 +390,12 @@ export function CompareDiffGutter({
                                         const bounds = bar.side === 'base'
                                             ? compareLeftBounds[bar.measureIndex]
                                             : compareRightBounds[bar.measureIndex];
-                                        const partHeight = bounds ? bounds.height / comparePartCount : compareGutterRowHeight;
-                                        const blockTop = bounds
-                                            ? bounds.top + partHeight * bar.partIndex
-                                            : compareHeaderSpacerHeight;
+                                        const side = bar.side === 'base' ? 'left' as const : 'right' as const;
+                                        const resolved = bounds ? resolvePartBounds?.(side, bar.measureIndex, bar.partIndex) ?? null : null;
+                                        const partHeight = resolved?.height
+                                            ?? (bounds ? bounds.height / comparePartCount : compareGutterRowHeight);
+                                        const blockTop = resolved?.top
+                                            ?? (bounds ? bounds.top + (bounds.height / comparePartCount) * bar.partIndex : compareHeaderSpacerHeight);
                                         return (
                                             <div
                                                 key={`compare-review-bar-${bar.anchorId}`}

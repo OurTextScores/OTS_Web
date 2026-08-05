@@ -1180,6 +1180,25 @@ class WebMscore {
     }
 
     /**
+     * Vertical band of each part within each laid-out system, in page coordinates.
+     *
+     * Measure positions carry no staff dimension, so this is what a caller needs to place
+     * a highlight over one part's bar instead of over the whole system. Selection-free, so
+     * it neither costs a round trip per bar nor disturbs the user's selection.
+     * @returns {Promise<Array<{page: number, system: number, partIndex: number, y: number, height: number}>>}
+     */
+    async staffSystemBands() {
+        const dataptr = Module.ccall('staffSystemBands', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
+        const json = WasmRes.readText(dataptr)
+        if (!json) return []
+        try {
+            return JSON.parse(json)
+        } catch (e) {
+            return []
+        }
+    }
+
+    /**
      * Get the selection MIME type for copy/paste.
      * @returns {Promise<string>}
      */
