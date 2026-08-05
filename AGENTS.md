@@ -82,10 +82,15 @@ Notes:
 JS glue, so a stale bundle pairs old glue with a new `.wasm`. When no export changed the two are
 interchangeable and everything works; **add or remove an export and the module stops
 instantiating** — no console error, no stack trace, nothing renders anywhere, in the plain editor
-as well as the compare panes. It is indistinguishable by eye from a corrupt engine build, and it
-is almost certainly what `c33e7a7b` hit (reverted in `7eec1985` on the theory that this machine's
-build environment was at fault; a null rebuild has since been shown byte-deterministic and
-behaviourally identical to the committed artifacts across the full Playwright matrix).
+as well as the compare panes. It is indistinguishable by eye from a corrupt engine build.
+
+Note this is *not* what `c33e7a7b` hit — that change touched no JS bridge and no export, and a
+stale bundle is harmless when the export table is unchanged. Its cause is still unidentified. What
+is settled is that the build environment was not to blame: a null rebuild on this machine is
+byte-deterministic (identical source, identical bytes) and behaviourally identical to the committed
+artifacts across the full 200-test Playwright matrix, so `7eec1985`'s "needs a reproducible build
+environment before it is attempted again" does not hold. `c33e7a7b` used a 1m32s ccache build,
+which is the most obvious remaining suspect and worth ruling out with a cache-cold rebuild.
 
 **IMPORTANT — PATH pitfall:** Do NOT run `make release` directly from the shell, even after `source ~/workspace/emsdk/emsdk_env.sh`. The Makefile spawns `/bin/sh` subprocesses that do not inherit the emsdk PATH, causing `emcmake: not found`. Always use `npm run compile`.
 
