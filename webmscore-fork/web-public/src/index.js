@@ -1180,6 +1180,24 @@ class WebMscore {
     }
 
     /**
+     * Add vertical padding below one staff of one measure, or remove it with a gap <= 0.
+     *
+     * Compare uses this to re-synchronise the panes: a line break can move a bar to another
+     * system, but only a spacer can leave a hole where the other pane has an extra bar.
+     * @param {number} measureIndex
+     * @param {number} staffIdx
+     * @param {number} gapSpatium gap in spatium; <= 0 removes the spacer
+     * @returns {Promise<boolean>}
+     */
+    async setMeasureSpacer(measureIndex, staffIdx, gapSpatium) {
+        return Module.ccall('setMeasureSpacer',
+            'boolean',
+            ['number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, measureIndex, staffIdx, gapSpatium, this.excerptId]
+        )
+    }
+
+    /**
      * Vertical band of each part within each laid-out system, in page coordinates.
      *
      * Measure positions carry no staff dimension, so this is what a caller needs to place

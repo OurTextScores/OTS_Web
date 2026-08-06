@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
     buildCompareReflowPlan,
+    buildResyncBreaks,
     type ComparePane,
     type MeasureAlignmentRow,
     type ReflowAlignment,
@@ -148,3 +149,48 @@ describe('buildCompareReflowPlan', () => {
         expect(plan.auxiliaryReflow).toEqual([]);
     });
 });
+
+describe('buildResyncBreaks', () => {
+    const rows = [0, 1, 2, 3, 4, 5].map((n) => ({ leftIndex: n, rightIndex: n, match: true }));
+
+    it('breaks both panes wherever either one wrapped', () => {
+        // Left wraps after bar 2, right after bar 1 — the wider score ran out of room
+        // sooner. Both must break at the earlier point or the rows come apart.
+        const leftSystemOf = (m: number) => (m <= 2 ? 0 : 1);
+        const rightSystemOf = (m: number) => (m <= 1 ? 0 : 1);
+
+        expect(buildResyncBreaks(rows, leftSystemOf, rightSystemOf)).toEqual({
+            left: [1, 2],
+            right: [1, 2],
+        });
+    });
+
+    it('adds nothing when both panes already wrap together', () => {
+        const same = (m: number) => (m <= 2 ? 0 : 1);
+        expect(buildResyncBreaks(rows, same, same)).toEqual({ left: [2], right: [2] });
+    });
+
+    it('skips rows a pane does not have, rather than guessing an index', () => {
+        // An inserted bar has no counterpart. A break cannot leave a gap for it, so the
+        // row contributes nothing on the side that is missing it — that case needs a
+        // spacer, not a line break.
+        const withGap = [
+            { leftIndex: 0, rightIndex: 0, match: true },
+            { leftIndex: null, rightIndex: 1, match: false },
+            { leftIndex: 1, rightIndex: 2, match: true },
+        ];
+        const leftSystemOf = (m: number) => (m <= 0 ? 0 : 1);
+        const rightSystemOf = () => 0;
+
+        expect(buildResyncBreaks(withGap, leftSystemOf, rightSystemOf)).toEqual({
+            left: [],
+            right: [],
+        });
+    });
+
+    it('ignores measures with no laid-out system', () => {
+        const unlaid = () => undefined;
+        expect(buildResyncBreaks(rows, unlaid, unlaid)).toEqual({ left: [], right: [] });
+    });
+});
+

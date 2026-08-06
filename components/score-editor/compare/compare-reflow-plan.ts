@@ -54,6 +54,67 @@ export type CompareReflowPlan = {
     auxiliaryReflow: boolean[];
 };
 
+
+/** Which system a measure landed in, by measure index. Undefined when not laid out. */
+export type SystemOfMeasure = (measureIndex: number) => number | undefined;
+
+/**
+ * Measure indices to break at so both panes wrap at the same alignment rows.
+ *
+ * `LayoutMode::SYSTEM` honours explicit breaks but still wraps a system when it runs out of
+ * width, and the two scores have different content widths — an overfull bar in one wraps
+ * where the other does not — so the panes drift apart between block boundaries.
+ *
+ * Taking the union of both panes' natural wrap points converges in a single pass: every
+ * resulting segment ends at the earlier of the two wraps, so it is no longer than a segment
+ * that already fitted on either side, and a shorter system cannot overflow. That also makes
+ * the result viewport-independent in the way a fixed bars-per-system rule is not — it is
+ * derived from where the panes actually wrapped at the current width.
+ */
+export function buildResyncBreaks(
+    rows: MeasureAlignmentRow[],
+    leftSystemOf: SystemOfMeasure,
+    rightSystemOf: SystemOfMeasure,
+): { left: number[]; right: number[] } {
+    const left: number[] = [];
+    const right: number[] = [];
+
+    const wrapsBetween = (
+        systemOf: SystemOfMeasure,
+        current: number | null,
+        next: number | null,
+    ) => {
+        if (current === null || next === null) {
+            return false;
+        }
+        const currentSystem = systemOf(current);
+        const nextSystem = systemOf(next);
+        if (currentSystem === undefined || nextSystem === undefined) {
+            return false;
+        }
+        return currentSystem !== nextSystem;
+    };
+
+    for (let index = 0; index < rows.length - 1; index += 1) {
+        const row = rows[index];
+        const nextRow = rows[index + 1];
+        const wraps = wrapsBetween(leftSystemOf, row.leftIndex, nextRow.leftIndex)
+            || wrapsBetween(rightSystemOf, row.rightIndex, nextRow.rightIndex);
+        if (!wraps) {
+            continue;
+        }
+        // Break on both panes at this row, so the next row starts a system in each.
+        if (row.leftIndex !== null) {
+            left.push(row.leftIndex);
+        }
+        if (row.rightIndex !== null) {
+            right.push(row.rightIndex);
+        }
+    }
+
+    return { left, right };
+}
+
 export function buildCompareReflowPlan({
     liveBreaks,
     auxiliaryBreaks,

@@ -117,7 +117,7 @@ import {
     type AiThreadComment,
 } from './score-editor/compare/CompareMeasureComments';
 import { CompareDiffGutter } from './score-editor/compare/CompareDiffGutter';
-import { buildCompareReflowPlan } from './score-editor/compare/compare-reflow-plan';
+import { buildCompareReflowPlan, buildResyncBreaks } from './score-editor/compare/compare-reflow-plan';
 import { createCompareScrollSync } from './score-editor/compare/compare-scroll-sync';
 import { MmaPanel, type MmaStarterPreset } from './score-editor/ai-tools/MmaPanel';
 import { TranscodaPanel } from './score-editor/ai-tools/TranscodaPanel';
@@ -1542,6 +1542,13 @@ export default function ScoreEditor() {
     // Keyed by score identity (live vs auxiliary), NOT by pane. The close path restores
     // the live score's original breaks and has no pane mapping available at that point.
     const compareLineBreakRestoreRef = useRef<{ live: boolean[]; auxiliary: boolean[] } | null>(null);
+    /**
+     * Resync breaks survive here because the reflow effect re-runs (alignments arrive
+     * after the first render) and each run re-applies the base plan. Held in a local they
+     * were wiped by the next run before the layout could settle.
+     */
+    const compareResyncBreaksRef = useRef<{ live: number[]; auxiliary: number[] } | null>(null);
+    const [compareResyncVersion, setCompareResyncVersion] = useState(0);
     const compareLeftContainerRef = useRef<HTMLDivElement>(null);
     const compareRightContainerRef = useRef<HTMLDivElement>(null);
     const compareLeftWrapperRef = useRef<HTMLDivElement>(null);
@@ -3952,6 +3959,81 @@ export default function ScoreEditor() {
         comparePartCount,
         compareRightMeasurePositions,
         compareRightStaffBands,
+    ]);
+
+    /**
+     * Work out where the panes wrapped differently, once, from the natural layout.
+     *
+     * Deliberately separate from the reflow effect. That effect mutates engine line-break
+     * state and renders, and it re-runs whenever alignments or scores change; computing
+     * inside it meant a later run measured an already-resynced layout, found fewer
+     * divergences, and applying that smaller set undid the alignment. Reading the positions
+     * that the previous render already put in state keeps the measurement pinned to the
+     * layout it describes, and the reflow effect stays the single place that applies breaks.
+     */
+    useEffect(() => {
+        if (!compareView || !compareReflowMode || !compareSupportsReflow) {
+            compareResyncBreaksRef.current = null;
+            return;
+        }
+        if (compareResyncBreaksRef.current) {
+            return;
+        }
+        if (!compareAlignments.length || !compareLeftMeasurePositions || !compareRightMeasurePositions) {
+            return;
+        }
+
+        const systemOfMeasure = (positions: Positions) => {
+            // Every measure in a system reports that system's y, so the distinct (page, y)
+            // pairs in document order are the systems.
+            const systemByMeasure = new Map<number, number>();
+            const seen = new Map<string, number>();
+            positions.elements.forEach((element, index) => {
+                const key = `${element.page}:${Math.round(element.y)}`;
+                let system = seen.get(key);
+                if (system === undefined) {
+                    system = seen.size;
+                    seen.set(key, system);
+                }
+                systemByMeasure.set(index, system);
+            });
+            return systemByMeasure;
+        };
+
+        const leftSystems = systemOfMeasure(compareLeftMeasurePositions);
+        const rightSystems = systemOfMeasure(compareRightMeasurePositions);
+        const left = new Set<number>();
+        const right = new Set<number>();
+        compareAlignments.forEach((alignment) => {
+            const breaks = buildResyncBreaks(
+                alignment.rows,
+                (measureIndex) => leftSystems.get(measureIndex),
+                (measureIndex) => rightSystems.get(measureIndex),
+            );
+            breaks.left.forEach((measureIndex) => left.add(measureIndex));
+            breaks.right.forEach((measureIndex) => right.add(measureIndex));
+        });
+
+        if (!left.size && !right.size) {
+            return;
+        }
+
+        // Back to score orientation: which pane holds the live score depends on the mode.
+        const liveIsLeft = compareLeftScore === score;
+        compareResyncBreaksRef.current = {
+            live: [...(liveIsLeft ? left : right)].sort((a, b) => a - b),
+            auxiliary: [...(liveIsLeft ? right : left)].sort((a, b) => a - b),
+        };
+        setCompareResyncVersion((version) => version + 1);
+    }, [
+        compareAlignments,
+        compareLeftMeasurePositions,
+        compareLeftScore,
+        compareReflowMode,
+        compareRightMeasurePositions,
+        compareSupportsReflow,
+        compareView,
+        score,
     ]);
 
     const compareFocusedHighlights = useMemo((): { left: { left: number; top: number; width: number; height: number } | null; right: { left: number; top: number; width: number; height: number } | null } => {
@@ -9229,6 +9311,7 @@ ${partsBodyXml}
         if (!compareView) {
             const restore = compareLineBreakRestoreRef.current;
             compareLineBreakRestoreRef.current = null;
+            compareResyncBreaksRef.current = null;
             if (restore && score) {
                 void applyMeasureLineBreaks(score, restore.live);
             }
@@ -9315,8 +9398,21 @@ ${partsBodyXml}
                 alignments: compareAlignments,
                 buildMismatchBreaks,
             });
-            await applyMeasureLineBreaks(score, liveReflow);
-            await applyMeasureLineBreaks(compareRightScore, auxiliaryReflow);
+            const withStoredResync = (breaks: boolean[], indices: number[] | undefined) => {
+                if (!indices?.length) {
+                    return breaks;
+                }
+                const next = [...breaks];
+                indices.forEach((measureIndex) => {
+                    if (measureIndex >= 0 && measureIndex < next.length) {
+                        next[measureIndex] = true;
+                    }
+                });
+                return next;
+            };
+            const storedResync = compareResyncBreaksRef.current;
+            await applyMeasureLineBreaks(score, withStoredResync(liveReflow, storedResync?.live));
+            await applyMeasureLineBreaks(compareRightScore, withStoredResync(auxiliaryReflow, storedResync?.auxiliary));
             if (canceled) {
                 return;
             }
@@ -9360,6 +9456,7 @@ ${partsBodyXml}
         fetchMeasureLineBreaks,
         compareAlignments,
         buildMismatchBreaks,
+        compareResyncVersion,
         refreshMeasurePositions,
         renderScoreToContainer,
         syncCompareSvgSize,

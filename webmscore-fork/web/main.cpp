@@ -47,6 +47,7 @@
 #include "engraving/libmscore/timesig.h"
 #include "engraving/libmscore/clef.h"
 #include "engraving/libmscore/factory.h"
+#include "engraving/libmscore/spacer.h"
 #include "engraving/libmscore/note.h"
 #include "engraving/libmscore/rest.h"
 #include "converter/internal/compat/notationmeta.h"
@@ -4547,6 +4548,62 @@ static engraving::staff_idx_t rangeLastVisibleStaffIdx(const engraving::System* 
 // Only laid-out systems can be reported. The fork lays out lazily (see _layoutUntilPage),
 // so a measure whose system has not been laid out yet contributes nothing; callers that
 // need a later page must lay out to it first.
+
+// Vertical padding below one staff of one measure, used to re-synchronise the two compare
+// panes. `savePositions` and `staffSystemBands` describe where things are; this is the only
+// way to change it without re-engraving, because a line break can move a bar to another
+// system but cannot leave a hole where the other pane has an extra one.
+//
+// `gapSpatium <= 0` removes the spacer. Gaps are expressed in spatium rather than mm so the
+// caller can work in the same units the layout does, independent of page scaling.
+bool _setMeasureSpacer(uintptr_t score_ptr, int measureIndex, int staffIdx, double gapSpatium, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+
+    auto* measure = measureAtIndex(score, measureIndex);
+    if (!measure) {
+        LOGW() << "setMeasureSpacer: invalid measure index " << measureIndex;
+        return false;
+    }
+    if (staffIdx < 0 || static_cast<size_t>(staffIdx) >= score->nstaves()) {
+        LOGW() << "setMeasureSpacer: invalid staff index " << staffIdx;
+        return false;
+    }
+
+    const engraving::staff_idx_t staff = static_cast<engraving::staff_idx_t>(staffIdx);
+    engraving::Spacer* existing = measure->vspacerDown(staff);
+
+    // setLayoutAll() only marks the score dirty; callers read geometry through
+    // savePositions, which does not lay out. Without a synchronous doLayout() the spacer
+    // is attached but every reported position is the pre-change one.
+    if (gapSpatium <= 0.0) {
+        if (existing) {
+            score->removeElement(existing);
+            score->setLayoutAll();
+            score->doLayout();
+            score->update();
+        }
+        return true;
+    }
+
+    const double gap = gapSpatium * score->spatium();
+    if (existing) {
+        existing->setGap(engraving::Millimetre(gap));
+    } else {
+        engraving::Spacer* spacer = engraving::Factory::createSpacer(measure);
+        spacer->setSpacerType(engraving::SpacerType::DOWN);
+        spacer->setTrack(staff * mu::engraving::VOICES);
+        spacer->setParent(measure);
+        spacer->setGap(engraving::Millimetre(gap));
+        score->addElement(spacer);
+    }
+
+    score->setLayoutAll();
+    score->doLayout();
+    score->update();
+    return true;
+}
+
 WasmRes _staffSystemBands(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
@@ -7841,6 +7898,11 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     WasmResBytes staffSystemBands(uintptr_t score_ptr, int excerptId = -1) {
         return _staffSystemBands(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setMeasureSpacer(uintptr_t score_ptr, int measureIndex, int staffIdx, double gapSpatium, int excerptId = -1) {
+        return _setMeasureSpacer(score_ptr, measureIndex, staffIdx, gapSpatium, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

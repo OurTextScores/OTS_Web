@@ -184,6 +184,16 @@ export interface Score {
      * page is needed.
      */
     staffSystemBands?: () => Promise<StaffSystemBand[]> | StaffSystemBand[];
+    /**
+     * Vertical padding below one staff of one measure, in spatium; `gapSpatium <= 0`
+     * removes it. The only way to leave a hole where the other compare pane has an extra
+     * bar — a line break can move a bar to another system but cannot create empty space.
+     */
+    setMeasureSpacer?: (
+        measureIndex: number,
+        staffIdx: number,
+        gapSpatium: number,
+    ) => Promise<boolean> | boolean;
     clearSelection?: () => Promise<unknown> | unknown;
     selectionMimeType?: () => Promise<string> | string;
     selectionMimeData?: () => Promise<Uint8Array> | Uint8Array;

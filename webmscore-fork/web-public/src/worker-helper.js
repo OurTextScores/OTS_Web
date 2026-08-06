@@ -765,6 +765,17 @@ class WebMscoreW {
     }
 
     /**
+     * Add vertical padding below one staff of one measure; gap <= 0 removes it.
+     * @param {number} measureIndex
+     * @param {number} staffIdx
+     * @param {number} gapSpatium
+     * @returns {Promise<boolean>}
+     */
+    setMeasureSpacer(measureIndex, staffIdx, gapSpatium) {
+        return this.rpc('setMeasureSpacer', [measureIndex, staffIdx, gapSpatium])
+    }
+
+    /**
      * Vertical band of each part within each laid-out system, in page coordinates.
      * @returns {Promise<Array<{page: number, system: number, partIndex: number, y: number, height: number}>>}
      */
