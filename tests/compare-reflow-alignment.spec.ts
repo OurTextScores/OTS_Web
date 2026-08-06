@@ -82,11 +82,14 @@ test('reflow gives both compare panes the same system count', async ({ page }) =
     expect(left, 'reflow should not degenerate to one bar per system').toBeLessThan(60);
 });
 
-// Known gap, pending the spacer-based gap rule. Measured: the base fixture lays out as 2
-// systems and the head as 3, and they never converge. The inserted bar's alignment row
-// carries a null on the base side, so the head's wrap after it has no counterpart row to
-// mirror the break onto -- no arrangement of line breaks can close this. Aligning it needs
-// vertical space on the base side, which is what `setMeasureSpacer` was added to provide.
+// Known gap. Line breaks cannot close it: the inserted bar's alignment row carries a null
+// on the base side, so the head's wrap after it has no counterpart row to mirror a break
+// onto. Measured on this fixture -- base 1-2 systems against the head's 3, never levelling.
+//
+// `setMeasureSpacer` and `buildAlignmentGaps` (unit tested) are the pieces for closing it;
+// what is missing is the integration. A first attempt is recorded in the handoff notes:
+// it must not fire when there is no insertion, must handle a deficit of more than one
+// system, and must not race the resync phase it depends on.
 test.fixme('panes stay aligned when one side has an inserted bar', async ({ page }) => {
     // The head fixture repeats bar 2, so it has 5 bars per part against the base's 4.
     // Alignment rows carry a null on the base side for the inserted bar, and
@@ -103,6 +106,29 @@ test.fixme('panes stay aligned when one side has an inserted bar', async ({ page
             .toBeVisible({ timeout: 120000 });
     }
 
-    const { left, right } = await convergedSystemCounts(page, TWO_STAVES_PART_COUNT);
-    expect(left, 'panes should agree despite the inserted bar').toBe(right);
+    // A spacer adds vertical space without changing the system count, so counts are the
+    // wrong metric here. What matters is that the last row of music ends up at the same
+    // height in both panes -- that is what "the panes line up" means to a reader.
+    const lastRowTop = (side: 'left' | 'right') =>
+        page.getByTestId(`compare-pane-${side}`).locator('svg').first()
+            .evaluate((svg) => {
+                const tops = Array.from(svg.querySelectorAll('.StaffLines'))
+                    .map((el) => (el as SVGGraphicsElement).getBoundingClientRect().y)
+                    .filter((y) => y !== 0);
+                return tops.length ? Math.max(...tops) : null;
+            });
+
+    let lefts: number | null = null;
+    let rights: number | null = null;
+    await expect.poll(
+        async () => {
+            lefts = await lastRowTop('left');
+            rights = await lastRowTop('right');
+            return lefts !== null && rights !== null && Math.abs(lefts - rights) < 12;
+        },
+        { timeout: 60000, intervals: [500], message: 'panes never levelled across the insertion' },
+    ).toBe(true);
+
+    expect(Math.abs((lefts as unknown as number) - (rights as unknown as number)))
+        .toBeLessThan(12);
 });

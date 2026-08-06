@@ -115,6 +115,81 @@ export function buildResyncBreaks(
     return { left, right };
 }
 
+
+/** Vertical padding to add below a measure, in spatium. */
+export type MeasureGap = { measureIndex: number; gap: number };
+
+/** Height of a system, in the same units the caller measured positions in. */
+export type SystemHeight = (system: number) => number | undefined;
+
+/**
+ * Vertical gaps that let the panes stay level across an insertion or deletion.
+ *
+ * `buildResyncBreaks` can only mirror a wrap onto a row both panes have. Where one side
+ * has a bar the other does not, the row carries a null, the extra bar can push that side
+ * onto another system, and no arrangement of line breaks brings them back level — a break
+ * moves a bar to another system but cannot leave a hole. Measured on the two-staff fixture:
+ * 4 bars laid out as 2 systems against 5 bars as 3, never converging.
+ *
+ * So wherever one side consumes a system the other does not, the side left behind is padded
+ * by that system's height. Gaps are attached to the last measure that side actually has, as
+ * that is the only anchor available — the missing bar has no measure to hang anything on.
+ */
+export function buildAlignmentGaps(
+    rows: MeasureAlignmentRow[],
+    leftSystemOf: SystemOfMeasure,
+    rightSystemOf: SystemOfMeasure,
+    leftSystemHeight: SystemHeight,
+    rightSystemHeight: SystemHeight,
+): { left: MeasureGap[]; right: MeasureGap[] } {
+    const left: MeasureGap[] = [];
+    const right: MeasureGap[] = [];
+
+    const seenLeft = new Set<number>();
+    const seenRight = new Set<number>();
+    let lastLeftMeasure: number | null = null;
+    let lastRightMeasure: number | null = null;
+
+    for (const row of rows) {
+        const leftSystem = row.leftIndex !== null ? leftSystemOf(row.leftIndex) : undefined;
+        const rightSystem = row.rightIndex !== null ? rightSystemOf(row.rightIndex) : undefined;
+
+        const leftGained = leftSystem !== undefined && !seenLeft.has(leftSystem);
+        const rightGained = rightSystem !== undefined && !seenRight.has(rightSystem);
+
+        if (leftGained) {
+            seenLeft.add(leftSystem!);
+        }
+        if (rightGained) {
+            seenRight.add(rightSystem!);
+        }
+
+        // One side started a new system and the other stayed put: the one that stayed is
+        // now a system short and has to be pushed down to match.
+        if (rightGained && !leftGained && lastLeftMeasure !== null && seenRight.size > seenLeft.size) {
+            const height = rightSystemHeight(rightSystem!);
+            if (height && height > 0) {
+                left.push({ measureIndex: lastLeftMeasure, gap: height });
+            }
+        }
+        if (leftGained && !rightGained && lastRightMeasure !== null && seenLeft.size > seenRight.size) {
+            const height = leftSystemHeight(leftSystem!);
+            if (height && height > 0) {
+                right.push({ measureIndex: lastRightMeasure, gap: height });
+            }
+        }
+
+        if (row.leftIndex !== null) {
+            lastLeftMeasure = row.leftIndex;
+        }
+        if (row.rightIndex !== null) {
+            lastRightMeasure = row.rightIndex;
+        }
+    }
+
+    return { left, right };
+}
+
 export function buildCompareReflowPlan({
     liveBreaks,
     auxiliaryBreaks,

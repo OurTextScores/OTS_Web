@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
     buildCompareReflowPlan,
+    buildAlignmentGaps,
     buildResyncBreaks,
     type ComparePane,
     type MeasureAlignmentRow,
@@ -194,3 +195,61 @@ describe('buildResyncBreaks', () => {
     });
 });
 
+describe('buildAlignmentGaps', () => {
+    it('pads the side that is missing a bar the other wrapped onto', () => {
+        // Mirrors the measured fixture: base has 4 bars in 2 systems, head has 5 in 3,
+        // and the extra bar is the one that starts the head's third system.
+        const rows = [
+            { leftIndex: 0, rightIndex: 0, match: true },
+            { leftIndex: 1, rightIndex: 1, match: true },
+            { leftIndex: null, rightIndex: 2, match: false },
+            { leftIndex: 2, rightIndex: 3, match: true },
+            { leftIndex: 3, rightIndex: 4, match: true },
+        ];
+        const leftSystemOf = (m: number) => (m <= 1 ? 0 : 1);
+        const rightSystemOf = (m: number) => (m <= 1 ? 0 : m === 2 ? 1 : 2);
+
+        const gaps = buildAlignmentGaps(rows, leftSystemOf, rightSystemOf, () => 40, () => 40);
+
+        // The head starts system 1 on the inserted bar, which the base does not have, so
+        // the base is padded after its last real bar at that point.
+        expect(gaps.left).toEqual([{ measureIndex: 1, gap: 40 }]);
+        expect(gaps.right).toEqual([]);
+    });
+
+    it('adds nothing when both sides advance together', () => {
+        const rows = [0, 1, 2, 3].map((n) => ({ leftIndex: n, rightIndex: n, match: true }));
+        const same = (m: number) => (m <= 1 ? 0 : 1);
+
+        expect(buildAlignmentGaps(rows, same, same, () => 40, () => 40)).toEqual({
+            left: [],
+            right: [],
+        });
+    });
+
+    it('pads the head when the base is the longer side', () => {
+        const rows = [
+            { leftIndex: 0, rightIndex: 0, match: true },
+            { leftIndex: 1, rightIndex: null, match: false },
+            { leftIndex: 2, rightIndex: 1, match: true },
+        ];
+        const leftSystemOf = (m: number) => (m === 0 ? 0 : 1);
+        const rightSystemOf = () => 0;
+
+        const gaps = buildAlignmentGaps(rows, leftSystemOf, rightSystemOf, () => 30, () => 30);
+
+        expect(gaps.left).toEqual([]);
+        expect(gaps.right).toEqual([{ measureIndex: 0, gap: 30 }]);
+    });
+
+    it('ignores systems with no measurable height', () => {
+        const rows = [
+            { leftIndex: 0, rightIndex: 0, match: true },
+            { leftIndex: null, rightIndex: 1, match: false },
+        ];
+        expect(buildAlignmentGaps(rows, () => 0, (m) => m, () => undefined, () => undefined)).toEqual({
+            left: [],
+            right: [],
+        });
+    });
+});
