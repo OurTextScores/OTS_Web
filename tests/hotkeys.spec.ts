@@ -81,12 +81,27 @@ test('multi-selection copy/paste with shift-click', async ({ page }) => {
     });
   };
 
+  // Native highlighting re-renders the SVG and can change DOM order, so `.nth()` is
+  // not a stable musical identity. Resolve C, D, and E by their current x positions
+  // before each click (also avoiding coordinates captured mid zoom transition).
+  const notes = page.locator('svg .Note');
+  const currentNoteIndices = async () => notes.evaluateAll((nodes) => nodes
+    .map((node, index) => {
+      const rect = node.getBoundingClientRect();
+      return { index, x: rect.left + rect.width / 2 };
+    })
+    .sort((a, b) => a.x - b.x)
+    .map(({ index }) => index));
+
   // Select first note
-  await page.locator('svg .Note').first().click();
+  let noteIndices = await currentNoteIndices();
+  expect(noteIndices).toHaveLength(3);
+  await notes.nth(noteIndices[0]).click();
   await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
 
   // Shift-click second note to create range selection
-  await page.locator('svg .Note').nth(1).click({ modifiers: ['Shift'] });
+  noteIndices = await currentNoteIndices();
+  await notes.nth(noteIndices[1]).click({ modifiers: ['Shift'] });
   await page.waitForTimeout(500);
 
   // Copy the range selection
@@ -94,7 +109,8 @@ test('multi-selection copy/paste with shift-click', async ({ page }) => {
   await page.waitForTimeout(300);
 
   // Click on third note to set paste destination
-  await page.locator('svg .Note').nth(2).click();
+  noteIndices = await currentNoteIndices();
+  await notes.nth(noteIndices[2]).click();
   await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
 
   const xmlBeforePaste = await readXml();

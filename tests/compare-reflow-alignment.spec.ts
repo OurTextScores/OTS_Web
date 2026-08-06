@@ -13,7 +13,6 @@ import { expect, test } from '@playwright/test';
 const BASE_SCORE = '/test_scores/men-base.musicxml';
 const HEAD_SCORE = '/test_scores/men-head.musicxml';
 const PART_COUNT = 4;
-const TWO_STAVES_PART_COUNT = 2;
 
 /** Systems in a pane, counted from the rendered staff lines. */
 const readSystemCount = (page: import('@playwright/test').Page, side: 'left' | 'right', partCount: number) =>

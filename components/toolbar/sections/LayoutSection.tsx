@@ -16,31 +16,39 @@ export const LayoutSection: React.FC<ToolbarSectionProps> = ({
     onResequenceRehearsalMarks,
 }) => {
     const mutationDisabled = !mutationsEnabled;
+    const breakDisabled = mutationDisabled || !selectionActive;
+    const breakDisabledTitle = breakDisabled
+        ? 'Select a note or rest to split the bar.'
+        : undefined;
 
     return (
         <>
-            <Button
-                data-testid="btn-new-line"
-                onClick={onToggleLineBreak}
-                disabled={mutationDisabled || !selectionActive || !onToggleLineBreak}
-                variant="outline"
-                size="sm"
-                className="shadow-sm"
-            >
-                <WrapText size={14} className="mr-2" />
-                New Line
-            </Button>
-            <Button
-                data-testid="btn-new-page"
-                onClick={onTogglePageBreak}
-                disabled={mutationDisabled || !selectionActive || !onTogglePageBreak}
-                variant="outline"
-                size="sm"
-                className="shadow-sm"
-            >
-                <FileText size={14} className="mr-2" />
-                New Page
-            </Button>
+            <span className="inline-flex" title={breakDisabledTitle}>
+                <Button
+                    data-testid="btn-new-line"
+                    onClick={onToggleLineBreak}
+                    disabled={breakDisabled || !onToggleLineBreak}
+                    variant="outline"
+                    size="sm"
+                    className="shadow-sm"
+                >
+                    <WrapText size={14} className="mr-2" />
+                    New Line
+                </Button>
+            </span>
+            <span className="inline-flex" title={breakDisabledTitle}>
+                <Button
+                    data-testid="btn-new-page"
+                    onClick={onTogglePageBreak}
+                    disabled={breakDisabled || !onTogglePageBreak}
+                    variant="outline"
+                    size="sm"
+                    className="shadow-sm"
+                >
+                    <FileText size={14} className="mr-2" />
+                    New Page
+                </Button>
+            </span>
             <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
                     <Button data-testid="dropdown-bulk-tools" variant="outline" size="sm" disabled={mutationDisabled} className="shadow-sm">

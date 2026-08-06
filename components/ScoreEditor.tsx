@@ -31,7 +31,7 @@ import {
 } from '../lib/checkpoints';
 import { type CodeEditorThemeMode } from './CodeMirrorEditor';
 import { asRecord } from '../lib/as-record';
-import { copySelectionToClipboard } from '../lib/selection-clipboard';
+import { copySelectionToClipboard, pasteClipboardPayload } from '../lib/selection-clipboard';
 import { Toolbar, type MeasureInsertTarget, type HeaderTextTarget } from './Toolbar';
 import { InspectorPanel } from './InspectorPanel';
 import { FloatingPalettes } from './FloatingPalettes';
@@ -1831,6 +1831,7 @@ export default function ScoreEditor() {
 
     /** In-flight Ctrl+C, so a Ctrl+V arriving behind it does not read an empty clipboard. */
     const copyInFlightRef = useRef<Promise<boolean> | null>(null);
+    const selectionInFlightRef = useRef<Promise<unknown> | null>(null);
 
     const runSerializedScoreOperation = useCallback(async <T,>(operation: () => Promise<T>, label: string): Promise<T> => {
         const waitForPriorOperation = scoreOperationQueueRef.current;
@@ -11340,9 +11341,18 @@ ${partsBodyXml}
 
         try {
             const { page, x, y } = selectedPoint;
+            const containerRect = containerRef.current?.getBoundingClientRect();
+            const engravingPoint = containerRect
+                ? clientToEngravingPoint(
+                    containerRect.left + x * zoom,
+                    containerRect.top + y * zoom,
+                )
+                : null;
+            const selectionX = engravingPoint?.x ?? x;
+            const selectionY = engravingPoint?.y ?? y;
             const preferTextSelection = hasTextElementClass(selectedElementClasses) || Boolean(textEditorPosition);
             if (preferTextSelection && score.selectTextElementAtPoint) {
-                const selected = await score.selectTextElementAtPoint(page, x, y);
+                const selected = await score.selectTextElementAtPoint(page, selectionX, selectionY);
                 if (selected !== false) {
                     selectionProjectionNeededRef.current = false;
                 }
@@ -11351,7 +11361,7 @@ ${partsBodyXml}
             if (!score.selectElementAtPoint) {
                 return;
             }
-            const selected = await score.selectElementAtPoint(page, x, y);
+            const selected = await score.selectElementAtPoint(page, selectionX, selectionY);
             if (selected !== false) {
                 selectionProjectionNeededRef.current = false;
             }
@@ -12356,6 +12366,10 @@ ${partsBodyXml}
         noteInputDesiredRef.current = enabled;
         try {
             if (enabled && targetScore.setInputStateFromSelection) {
+                // A click paints its optimistic overlay before the engine selection RPC
+                // settles. If N follows immediately, seed note input from the completed
+                // click rather than the selection that preceded it.
+                await selectionInFlightRef.current?.catch(() => false);
                 // Seed the input duration/track from the selection when there is one;
                 // fails harmlessly with no selection (putNote derives position per click).
                 await Promise.resolve(targetScore.setInputStateFromSelection()).catch(() => {});
@@ -13094,20 +13108,19 @@ ${partsBodyXml}
         return run;
     };
 
-    const handlePasteSelection = () => performMutation('paste selection', async () => {
-        // Ctrl+C starts an async read and Ctrl+V is a separate event, so the paste can
-        // arrive first, reading a null clipboard for a range just copied. Wait it out.
-        await copyInFlightRef.current?.catch(() => false);
-        const clip = clipboardRef.current;
-        if (!clip) {
-            alert('Nothing copied yet.');
-            return false;
-        }
-        await ensureSelectionInWasm();
+    const handlePasteSelection = () => {
         const fn = requireMutation('pasteSelection');
-        if (!fn) return;
-        return fn(clip.mimeType, clip.data);
-    }, { skipWasmReselect: true });
+        const pastePromise = pasteClipboardPayload({
+            readPayload: () => clipboardRef.current,
+            copyInFlight: copyInFlightRef.current,
+            selectionInFlight: selectionInFlightRef.current,
+            selectionProjectionNeeded: selectionProjectionNeededRef.current,
+            ensureSelection: ensureSelectionInWasm,
+            paste: fn as ((mimeType: string, data: Uint8Array) => Promise<unknown> | unknown) | null,
+            onEmpty: () => alert('Nothing copied yet.'),
+        });
+        return performMutation('paste selection', () => pastePromise, { skipWasmReselect: true });
+    };
 
     const handleCompareKeyboardShortcut = useCallback((event: KeyboardEvent) => {
         const mutate = (
@@ -14373,7 +14386,18 @@ ${partsBodyXml}
         const previewPoint = selectionPoint ?? selectedPointRef.current;
         if (shouldReselectForPreview && previewPoint && activeScore.selectElementAtPoint) {
             try {
-                await activeScore.selectElementAtPoint(previewPoint.page, previewPoint.x, previewPoint.y);
+                const containerRect = containerRef.current?.getBoundingClientRect();
+                const engravingPoint = containerRect
+                    ? clientToEngravingPoint(
+                        containerRect.left + previewPoint.x * zoom,
+                        containerRect.top + previewPoint.y * zoom,
+                    )
+                    : null;
+                await activeScore.selectElementAtPoint(
+                    previewPoint.page,
+                    engravingPoint?.x ?? previewPoint.x,
+                    engravingPoint?.y ?? previewPoint.y,
+                );
             } catch (err) {
                 console.warn('[AUDITION] preview reselection failed', { trigger, err });
             }
@@ -14893,7 +14917,14 @@ ${partsBodyXml}
                 const pageIndex = resolvePageIndex(el);
                 const centerX = box.x + box.w / 2;
                 const centerY = box.y + box.h / 2;
-                return { el, index, pageIndex, box, centerX, centerY };
+                const engravingPoint = clientToEngravingPoint(
+                    elRect.left + elRect.width / 2,
+                    elRect.top + elRect.height / 2,
+                    el,
+                );
+                const selectionX = engravingPoint?.x ?? centerX;
+                const selectionY = engravingPoint?.y ?? centerY;
+                return { el, index, pageIndex, box, centerX, centerY, selectionX, selectionY };
             })
             .filter((hit): hit is NonNullable<typeof hit> => Boolean(hit))
             .sort((a, b) => (
@@ -14991,14 +15022,14 @@ ${partsBodyXml}
                     }
                 }
                 // Select leftmost first, then extend range to rightmost
-                await score.selectElementAtPointWithMode(leftmost.pageIndex, leftmost.centerX, leftmost.centerY, firstMode);
-                await score.selectElementAtPointWithMode(rightmost.pageIndex, rightmost.centerX, rightmost.centerY, 3);
+                await score.selectElementAtPointWithMode(leftmost.pageIndex, leftmost.selectionX, leftmost.selectionY, firstMode);
+                await score.selectElementAtPointWithMode(rightmost.pageIndex, rightmost.selectionX, rightmost.selectionY, 3);
             } else {
                 // For non-note elements (slurs, dynamics, etc.), use ADD mode (original behavior)
-                await score.selectElementAtPointWithMode(first.pageIndex, first.centerX, first.centerY, firstMode);
+                await score.selectElementAtPointWithMode(first.pageIndex, first.selectionX, first.selectionY, firstMode);
                 for (let i = 1; i < hits.length; i++) {
                     const hit = hits[i];
-                    await score.selectElementAtPointWithMode(hit.pageIndex, hit.centerX, hit.centerY, 1);
+                    await score.selectElementAtPointWithMode(hit.pageIndex, hit.selectionX, hit.selectionY, 1);
                 }
             }
             return fallback;
@@ -15015,7 +15046,7 @@ ${partsBodyXml}
             });
         }
 
-        await score.selectElementAtPoint(first.pageIndex, first.centerX, first.centerY);
+        await score.selectElementAtPoint(first.pageIndex, first.selectionX, first.selectionY);
         return fallback;
     };
 
@@ -16007,7 +16038,9 @@ ${partsBodyXml}
                 : score.selectElementAtPoint?.(pageIndex, selectionX, selectionY);
 
             if (selectionPromise !== undefined) {
-                Promise.resolve(selectionPromise)
+                const selectionRun = Promise.resolve(selectionPromise);
+                selectionInFlightRef.current = selectionRun;
+                void selectionRun
                     .then((selected) => {
                         if (selected === false) {
                             throw new Error('selectElementAtPoint returned false');
@@ -16018,7 +16051,10 @@ ${partsBodyXml}
                         void playSelectionPreview(
                             'selection-click:element',
                             fallback.point,
-                            { reselect: !additiveSelection && !isShiftClick },
+                            // The click RPC above already established the engine
+                            // selection. Replaying it races immediate copy/paste and can
+                            // replace the destination after the command was dispatched.
+                            { reselect: false },
                         );
                     })
                     .catch(err => {
@@ -16029,6 +16065,11 @@ ${partsBodyXml}
                         setSelectedIndex(null);
                         setSelectedElementClasses('');
                         setSelectedLayoutBreakSubtype(null);
+                    })
+                    .finally(() => {
+                        if (selectionInFlightRef.current === selectionRun) {
+                            selectionInFlightRef.current = null;
+                        }
                     });
             }
 

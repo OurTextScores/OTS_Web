@@ -81,9 +81,8 @@ test('uses MuseScore playback targets for D.C. al Fine', async ({ page }) => {
   await openNavigation(page);
   await page.getByTestId('btn-jump-1').click();
 
-  const xml = await readMscx(page);
-  expect(xml).toMatch(/<Marker>[\s\S]*?<label>fine<\/label>/);
-  expect(xml).toMatch(/<Jump>[\s\S]*?<jumpTo>start<\/jumpTo>[\s\S]*?<playUntil>fine<\/playUntil>[\s\S]*?<continueAt(?:\/>|><\/continueAt>)/);
+  await expect.poll(async () => /<Marker>[\s\S]*?<label>fine<\/label>/.test(await readMscx(page)), { timeout: 20_000 }).toBe(true);
+  await expect.poll(async () => /<Jump>[\s\S]*?<jumpTo>start<\/jumpTo>[\s\S]*?<playUntil>fine<\/playUntil>[\s\S]*?<continueAt(?:\/>|><\/continueAt>)/.test(await readMscx(page)), { timeout: 20_000 }).toBe(true);
   await expect.poll(() => playbackMeasureIds(page), { timeout: 20_000 }).toEqual([0, 1, 2, 3, 0, 1, 2]);
 });
 

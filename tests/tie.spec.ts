@@ -22,6 +22,7 @@ test('tie button adds a tie to the next same-pitch note', async ({ page }) => {
   await notes.nth(0).click();
   await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
 
+  await page.getByTestId('dropdown-slur-tie').click();
   await page.getByTestId('btn-tie').click();
 
   await expect

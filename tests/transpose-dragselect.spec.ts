@@ -39,13 +39,21 @@ test('drag selection marquee selects multiple notes for transpose', async ({ pag
   const endX = Math.min(wrapper.x + wrapper.width - 1, last.x + last.width / 2 + padding);
   const endY = Math.min(wrapper.y + wrapper.height - 1, last.y + last.height / 2 + padding);
 
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.mouse.move(endX, endY, { steps: 10 });
-  await page.getByTestId('drag-selection-rect').waitFor({ timeout: 10_000 });
-  await page.mouse.up();
+  // Ctrl explicitly selects the lasso gesture even if the start point overlaps a
+  // draggable note/stem after an engraving or viewport change.
+  await page.keyboard.down('Control');
+  try {
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(endX, endY, { steps: 10 });
+    await page.getByTestId('drag-selection-rect').waitFor({ timeout: 10_000 });
+    await page.mouse.up();
+  } finally {
+    await page.keyboard.up('Control');
+  }
 
-  await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
+  // A lasso is represented by one overlay per selected element.
+  await page.getByTestId('selection-overlay-0').waitFor({ timeout: 10_000 });
   await page.getByTestId('btn-transpose-12').click();
 
   await expect.poll(async () => await readPitches(), { timeout: 20_000 }).toEqual(['C5', 'D5', 'E5']);

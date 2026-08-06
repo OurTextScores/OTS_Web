@@ -18,9 +18,11 @@ test('key signature can change and revert', async ({ page }) => {
   const initial = await readKeySignature();
   const alternate = initial === 0 ? 1 : 0;
 
+  await page.getByTestId('dropdown-key').click();
   await page.getByTestId(`btn-keysig-${alternate}`).click();
   await expect.poll(async () => await readKeySignature(), { timeout: 20_000 }).toBe(alternate);
 
+  await page.getByTestId('dropdown-key').click();
   await page.getByTestId(`btn-keysig-${initial}`).click();
   await expect.poll(async () => await readKeySignature(), { timeout: 20_000 }).toBe(initial);
 });
@@ -59,6 +61,7 @@ test('key signature change starts at selected note', async ({ page }) => {
   await notes.nth(noteCount - 1).click();
   await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
 
+  await page.getByTestId('dropdown-key').click();
   await page.getByTestId(`btn-keysig-${target}`).click();
 
   // Start key signature should remain unchanged (change is inserted later in the score).

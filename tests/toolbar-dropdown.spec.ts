@@ -5,9 +5,9 @@ test('toolbar dropdown renders above the score', async ({ page }) => {
   await page.waitForSelector('svg .Clef', { timeout: 60_000 });
 
   const dropdown = page.getByTestId('dropdown-export');
-  await dropdown.locator('summary').click();
+  await dropdown.click();
 
-  const menu = dropdown.locator('div').first();
+  const menu = page.getByRole('menu');
   await expect(menu).toBeVisible();
 
   const box = await menu.boundingBox();
@@ -19,7 +19,7 @@ test('toolbar dropdown renders above the score', async ({ page }) => {
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   const menuOnTop = await page.evaluate(({ x, y }) => {
     const el = document.elementFromPoint(x, y);
-    const menuEl = document.querySelector('[data-testid="dropdown-export"] > div');
+    const menuEl = document.querySelector('[role="menu"]');
     return !!(el && menuEl && menuEl.contains(el));
   }, center);
 
@@ -45,11 +45,11 @@ test('dropdowns open/close and break buttons show disabled tooltips', async ({ p
   await expect(newLineButton.locator('..')).not.toHaveAttribute('title', tooltipText);
 
   const dropdown = page.getByTestId('dropdown-accidental');
-  await dropdown.locator('summary').click();
-  await expect(dropdown).toHaveAttribute('open', '');
+  await dropdown.click();
+  await expect(dropdown).toHaveAttribute('aria-expanded', 'true');
 
-  await dropdown.getByTestId('btn-acc-3').click();
-  await expect(dropdown).not.toHaveAttribute('open', '');
+  await page.getByTestId('btn-acc-3').click();
+  await expect(dropdown).toHaveAttribute('aria-expanded', 'false');
 });
 
 test('shortcuts dropdown lists hotkeys', async ({ page }) => {
@@ -57,11 +57,12 @@ test('shortcuts dropdown lists hotkeys', async ({ page }) => {
   await page.waitForSelector('svg .Note', { timeout: 60_000 });
 
   const dropdown = page.getByTestId('dropdown-shortcuts');
-  await dropdown.locator('summary').click();
+  await dropdown.click();
 
-  await expect(dropdown).toContainText('Delete / Backspace');
-  await expect(dropdown).toContainText('Ctrl/Cmd + Z');
-  await expect(dropdown).toContainText('Cmd + Shift + Z');
-  await expect(dropdown).toContainText('Arrow Up/Down');
-  await expect(dropdown).toContainText('Ctrl/Cmd + V');
+  const menu = page.getByRole('menu');
+  await expect(menu).toContainText('Delete / Backspace');
+  await expect(menu).toContainText('Ctrl/Cmd + Z');
+  await expect(menu).toContainText('Cmd + Shift + Z');
+  await expect(menu).toContainText('Arrow Up/Down');
+  await expect(menu).toContainText('Ctrl/Cmd + V');
 });

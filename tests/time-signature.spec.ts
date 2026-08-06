@@ -22,7 +22,9 @@ test('time signature change starts at selected note', async ({ page }) => {
   expect(initial.length).toBeGreaterThan(0);
 
   const startSig = initial[0];
-  const targetSig = startSig === '3/4' ? '4/4' : '3/4';
+  // The compact toolbar intentionally exposes common and cut time; use whichever
+  // preset differs from the score's initial signature.
+  const targetSig = startSig === '2/2' ? '4/4' : '2/2';
 
   const notes = page.locator('svg .Note');
   const noteCount = await notes.count();
@@ -31,11 +33,7 @@ test('time signature change starts at selected note', async ({ page }) => {
   await page.getByTestId('selection-overlay').waitFor({ timeout: 10_000 });
 
   const [num, den] = targetSig.split('/').map(Number);
-  const dropdown = page.getByTestId('dropdown-signature');
-  await dropdown.evaluate(el => {
-    (el as HTMLDetailsElement).open = true;
-  });
-  await dropdown.locator('div').first().waitFor();
+  await page.getByTestId('dropdown-signature').click();
   await page.getByTestId(`btn-timesig-${num}-${den}`).click();
 
   // Start time signature should remain unchanged (change is inserted later in the score).

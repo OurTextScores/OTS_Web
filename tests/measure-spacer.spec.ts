@@ -18,7 +18,12 @@ test('a spacer pushes later systems down, and removing it restores the layout', 
         .toBeVisible({ timeout: 120000 });
 
     const result = await page.evaluate(async () => {
-        const score = (window as unknown as Record<string, any>).__webmscore;
+        type MeasurePosition = { y: number; page: number };
+        type MeasureSpacerScore = {
+            measurePositions: () => Promise<{ elements?: MeasurePosition[] }>;
+            setMeasureSpacer: (measureIndex: number, staffIndex: number, amount: number) => Promise<boolean>;
+        };
+        const score = (window as typeof window & { __webmscore?: MeasureSpacerScore }).__webmscore;
         if (!score) {
             return { error: 'no __webmscore handle' };
         }
@@ -36,9 +41,10 @@ test('a spacer pushes later systems down, and removing it restores the layout', 
         // so a measure on a later page would not move even if the spacer worked.
         const first = await readAt(0);
         const all = await score.measurePositions();
+        const elements = all.elements ?? [];
         let PROBE = -1;
-        for (let i = 1; i < (all?.elements?.length ?? 0); i += 1) {
-            const el = all.elements[i];
+        for (let i = 1; i < elements.length; i += 1) {
+            const el = elements[i];
             if (el.page === first?.page && el.y > (first?.y ?? 0)) { PROBE = i; break; }
         }
         const beforeR = PROBE >= 0 ? await readAt(PROBE) : null;
@@ -51,7 +57,7 @@ test('a spacer pushes later systems down, and removing it restores the layout', 
             applied, removed, PROBE,
             firstPage: first?.page, firstY: first?.y,
             before: beforeR?.y, withSpacer: withR?.y, after: afterR?.y,
-            pageCount: all?.elements?.length,
+            pageCount: elements.length,
         };
     });
 

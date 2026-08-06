@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { copySelectionToClipboard, readSelectionPayload } from '../lib/selection-clipboard';
+import {
+    copySelectionToClipboard,
+    pasteClipboardPayload,
+    readSelectionPayload,
+} from '../lib/selection-clipboard';
 
 describe('readSelectionPayload', () => {
     it('issues both reads before awaiting either', async () => {
@@ -7,18 +11,20 @@ describe('readSelectionPayload', () => {
         // data lets the user's next click reach the engine in between, and the copy then
         // describes one selection with the bytes of another.
         const order: string[] = [];
-        const getType = vi.fn(() => {
+        let resolveType!: (value: string) => void;
+        const getType = vi.fn(() => new Promise<string>((resolve) => {
             order.push('type:issued');
-            return Promise.resolve('application/musescore/stafflist');
-        });
+            resolveType = resolve;
+        }));
         const getData = vi.fn(() => {
             order.push('data:issued');
             return Promise.resolve(new Uint8Array([1, 2, 3]));
         });
 
-        await readSelectionPayload(getType, getData);
-
+        const result = readSelectionPayload(getType, getData);
         expect(order).toEqual(['type:issued', 'data:issued']);
+        resolveType('application/musescore/stafflist');
+        await result;
     });
 
     it('detaches the bytes from the engine buffer', async () => {
@@ -38,6 +44,68 @@ describe('readSelectionPayload', () => {
     it('reports nothing for an empty selection', async () => {
         expect(await readSelectionPayload(() => '', () => new Uint8Array([1]))).toBeNull();
         expect(await readSelectionPayload(() => 'x', () => new Uint8Array())).toBeNull();
+    });
+});
+
+describe('pasteClipboardPayload', () => {
+    const payload = {
+        mimeType: 'application/musescore/stafflist',
+        data: new Uint8Array([1, 2, 3]),
+    };
+
+    it('dispatches paste synchronously when no copy or projection is pending', async () => {
+        const paste = vi.fn(() => Promise.resolve(true));
+        const result = pasteClipboardPayload({
+            readPayload: () => payload,
+            copyInFlight: null,
+            selectionProjectionNeeded: false,
+            ensureSelection: vi.fn(async () => {}),
+            paste,
+        });
+
+        expect(paste).toHaveBeenCalledWith(payload.mimeType, payload.data);
+        await expect(result).resolves.toBe(true);
+    });
+
+    it('waits for required projection before pasting', async () => {
+        const order: string[] = [];
+        const paste = vi.fn(() => { order.push('paste'); return true; });
+
+        await pasteClipboardPayload({
+            readPayload: () => payload,
+            copyInFlight: null,
+            selectionProjectionNeeded: true,
+            ensureSelection: async () => { order.push('project'); },
+            paste,
+        });
+
+        expect(order).toEqual(['project', 'paste']);
+    });
+
+    it('waits for a destination click still in flight before pasting', async () => {
+        const order: string[] = [];
+        let finishSelection!: () => void;
+        const selectionInFlight = new Promise<void>((resolve) => {
+            finishSelection = () => {
+                order.push('selection');
+                resolve();
+            };
+        });
+        const paste = vi.fn(() => { order.push('paste'); return true; });
+
+        const result = pasteClipboardPayload({
+            readPayload: () => payload,
+            copyInFlight: null,
+            selectionInFlight,
+            selectionProjectionNeeded: false,
+            ensureSelection: vi.fn(async () => {}),
+            paste,
+        });
+
+        expect(paste).not.toHaveBeenCalled();
+        finishSelection();
+        await result;
+        expect(order).toEqual(['selection', 'paste']);
     });
 });
 

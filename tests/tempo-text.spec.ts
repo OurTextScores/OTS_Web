@@ -19,7 +19,8 @@ test('tempo button inserts visible tempo at start', async ({ page }) => {
 
   expect(await hasTempo120()).toBe(false);
 
-  await page.getByTestId('btn-tempo-120').click();
+  await page.getByTestId('input-tempo-bpm').fill('120');
+  await page.getByTestId('btn-tempo-apply').click();
 
   await expect.poll(async () => await hasTempo120(), { timeout: 20_000 }).toBe(true);
 });

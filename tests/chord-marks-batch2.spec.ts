@@ -22,11 +22,15 @@ test('adds non-default fermata and caesura variants with undo and redo', async (
   await page.locator('svg .Note').first().click();
 
   await page.getByTestId('dropdown-articulations').click();
-  await page.getByTestId('btn-fermata-4').click();
+  await page.getByTestId('btn-open-fermata-palette').click();
+  await page.getByTestId('palette-item-fermata-4').click();
+  await page.keyboard.press('Escape');
   await expect.poll(async () => /<Fermata>[\s\S]*?<subtype>fermataVeryLongAbove<\/subtype>/.test(await readMscx(page)), { timeout: 20_000 }).toBe(true);
 
   await page.getByTestId('dropdown-articulations').click();
-  await page.getByTestId('btn-breath-7').click();
+  await page.getByTestId('btn-open-breath-palette').click();
+  await page.getByTestId('palette-item-breath-7').click();
+  await page.keyboard.press('Escape');
   await expect.poll(async () => /<Breath>[\s\S]*?<symbol>caesuraThick<\/symbol>/.test(await readMscx(page)), { timeout: 20_000 }).toBe(true);
 
   await page.keyboard.press('Control+z');
@@ -57,7 +61,9 @@ test('adds single-note and compatible two-note tremolos', async ({ page }) => {
   await page.keyboard.press('Control+z');
   await page.keyboard.press('Control+a');
   await page.getByTestId('dropdown-chord').click();
-  await page.getByTestId('btn-tremolo-7').click();
+  await page.getByTestId('btn-open-tremolo-palette').click();
+  await page.getByTestId('palette-item-tremolo-7').click();
+  await page.keyboard.press('Escape');
   await expect.poll(async () => /<Tremolo>[\s\S]*?<subtype>c32<\/subtype>/.test(await readMscx(page)), { timeout: 20_000 }).toBe(true);
 });
 

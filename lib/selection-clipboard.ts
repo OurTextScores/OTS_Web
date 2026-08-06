@@ -18,13 +18,20 @@ export type SelectionClipboardPayload = {
 
 export type SelectionReader = () => Promise<string> | string;
 export type SelectionDataReader = () => Promise<Uint8Array> | Uint8Array;
+export type SelectionPaster = (
+    mimeType: string,
+    data: Uint8Array,
+) => Promise<unknown> | unknown;
 
 export async function readSelectionPayload(
     getType: SelectionReader,
     getData: SelectionDataReader,
 ): Promise<SelectionClipboardPayload | null> {
-    const mimeType = await getType();
-    const data = await getData();
+    // Invoke both RPC wrappers before yielding so a later click cannot split the
+    // MIME type and bytes across two different engine selections.
+    const typePromise = Promise.resolve(getType());
+    const dataPromise = Promise.resolve(getData());
+    const [mimeType, data] = await Promise.all([typePromise, dataPromise]);
     if (!mimeType || !data || data.length === 0) {
         return null;
     }
@@ -34,6 +41,51 @@ export async function readSelectionPayload(
         mimeType,
         data: data instanceof Uint8Array ? data.slice() : new Uint8Array(data),
     };
+}
+
+/**
+ * Dispatches paste before yielding when the engine selection and clipboard are already
+ * ready. This matters for range payloads: selection-preview work from the destination
+ * click is asynchronous, and an unrelated selection RPC landing before `cmdPaste` can
+ * leave MuseScore without a valid single-note destination.
+ */
+export async function pasteClipboardPayload(options: {
+    readPayload: () => SelectionClipboardPayload | null;
+    copyInFlight: Promise<boolean> | null;
+    selectionInFlight?: Promise<unknown> | null;
+    selectionProjectionNeeded: boolean;
+    ensureSelection: () => Promise<void>;
+    paste: SelectionPaster | null;
+    onEmpty?: () => void;
+}): Promise<unknown> {
+    const {
+        readPayload,
+        copyInFlight,
+        selectionInFlight,
+        selectionProjectionNeeded,
+        ensureSelection,
+        paste,
+        onEmpty,
+    } = options;
+
+    if (copyInFlight || selectionInFlight) {
+        await Promise.all([
+            copyInFlight?.catch(() => false),
+            selectionInFlight?.catch(() => false),
+        ]);
+    }
+    const payload = readPayload();
+    if (!payload) {
+        onEmpty?.();
+        return false;
+    }
+    if (!paste) {
+        return false;
+    }
+    if (selectionProjectionNeeded) {
+        await ensureSelection();
+    }
+    return paste(payload.mimeType, payload.data);
 }
 
 /**

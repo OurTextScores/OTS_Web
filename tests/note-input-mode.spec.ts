@@ -165,6 +165,9 @@ test('burst note entry follows the engine cursor on the selected staff', async (
   const firstCelloNote = page.locator('svg .Note').nth(4);
   await firstCelloNote.waitFor({ state: 'visible', timeout: 60_000 });
 
+  // The score wrapper animates its initial fit-to-view transform for 200 ms. Capture
+  // the notehead only after that transform settles so the client point stays valid.
+  await page.waitForTimeout(250);
   const noteBox = await firstCelloNote.boundingBox();
   if (!noteBox) {
     throw new Error('Could not measure the first note on the second staff.');
