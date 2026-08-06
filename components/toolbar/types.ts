@@ -19,6 +19,7 @@ export type ToolbarSectionId =
 export interface ToolbarSectionProps {
     onNewScore?: () => void;
     onFileUpload: (file: File) => void;
+    onLoadScoresToCompare?: () => void;
     onZoomIn: () => void;
     onZoomOut: () => void;
     onFitWidth?: () => void;

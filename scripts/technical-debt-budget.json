@@ -4,6 +4,18 @@
   "raises": [
     {
       "key": "scoreEditor.maxLines",
+      "from": 17900,
+      "to": 18100,
+      "reason": "The compare gap integration needs an explicit queued three-phase engine workflow: establish mismatch breaks, measure and apply wrap resync, then measure and calibrate structural spacers. The pure geometry moved into compare-reflow-plan.ts; the remaining ScoreEditor growth is orchestration and cleanup across the two live WASM score instances."
+    },
+    {
+      "key": "scoreEditor.maxBytes",
+      "from": 790000,
+      "to": 805000,
+      "reason": "Same compare gap integration as the line raise above. The added bytes document phase boundaries, pane/score orientation, cancellation, spacer restoration, and the absolute-versus-additive spacer correction that keeps insertions aligned without oscillation."
+    },
+    {
+      "key": "scoreEditor.maxLines",
       "from": 17600,
       "to": 17900,
       "reason": "Selection synchronization and coordinate conversion for the Playwright reliability fixes add explicit state tracking and avoid click, preview, note-input, and paste races. The existing line headroom was insufficient; this restores roughly the same sub-1% working margin without raising the still-unbreached byte cap."
@@ -63,10 +75,10 @@
       "reason": "Same change as the maxLines raise above: createChangeReviewThread and the comment stating why the gutter does not own it."
     }
   ],
-  "_scoreEditorComment": "Headroom is intentional. These were pinned to the exact current size, and the result was that a 41-line bug fix breached the cap and pressure went into deleting explanatory comments to get back under -- the ratchet making the code worse. Lines are a poor proxy: a comment costs the same as debt. The caps now sit ~0.6% and ~2% above actual, so routine work passes and a whole slice of drift still trips them. The goal worth chasing is bytes, not lines: Babel deoptimises code generation above 500000 bytes, which this file still exceeds, and that is an observable cost rather than a chosen number.",
+  "_scoreEditorComment": "Headroom is intentional. These were pinned to the exact current size, and the result was that a 41-line bug fix breached the cap and pressure went into deleting explanatory comments to get back under -- the ratchet making the code worse. Lines are a poor proxy: a comment costs the same as debt. The caps now sit roughly 1% and 1.5% above actual, so routine work passes and a whole slice of drift still trips them. The goal worth chasing is bytes, not lines: Babel deoptimises code generation above 500000 bytes, which this file still exceeds, and that is an observable cost rather than a chosen number.",
   "scoreEditor": {
-    "maxLines": 17900,
-    "maxBytes": 790000
+    "maxLines": 18100,
+    "maxBytes": 805000
   },
   "modules": {
     "components/score-editor/ai-tools/NotaGenPanel.tsx": {

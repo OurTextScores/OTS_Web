@@ -18,6 +18,23 @@ describe('Toolbar', () => {
     expect(screen.getByText('Load Score')).toBeInTheDocument();
   });
 
+  it('opens the score comparison loader', async () => {
+    const user = userEvent.setup();
+    const onLoadScoresToCompare = vi.fn();
+    render(
+      <Toolbar
+        onFileUpload={() => {}}
+        onLoadScoresToCompare={onLoadScoresToCompare}
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        zoomLevel={1}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Load scores to compare' }));
+    expect(onLoadScoresToCompare).toHaveBeenCalledOnce();
+  });
+
   it('uploads score files', async () => {
     const user = userEvent.setup();
     const onFileUpload = vi.fn();

@@ -1,3 +1,5 @@
+import type { Positions } from '@/lib/webmscore-loader';
+
 /**
  * Reconciles the two coordinate systems that meet in compare reflow.
  *
@@ -122,6 +124,110 @@ export type MeasureGap = { measureIndex: number; gap: number };
 /** Height of a system, in the same units the caller measured positions in. */
 export type SystemHeight = (system: number) => number | undefined;
 
+export type CompareSystemGeometry = {
+    systemOf: SystemOfMeasure;
+    systemHeight: SystemHeight;
+};
+
+/** Layout geometry from one settled `measurePositions()` snapshot. */
+export function buildCompareSystemGeometry(positions: Positions): CompareSystemGeometry {
+    const systemByMeasure = new Map<number, number>();
+    const systemByPosition = new Map<string, number>();
+    const heightBySystem = new Map<number, number>();
+    const topBySystem = new Map<number, { page: number; y: number }>();
+
+    positions.elements.forEach((element, measureIndex) => {
+        const key = `${element.page}:${Math.round(element.y)}`;
+        let system = systemByPosition.get(key);
+        if (system === undefined) {
+            system = systemByPosition.size;
+            systemByPosition.set(key, system);
+            topBySystem.set(system, { page: element.page, y: element.y });
+        }
+        systemByMeasure.set(measureIndex, system);
+        const height = typeof element.sy === 'number' ? element.sy : element.height ?? 0;
+        if (height > 0) {
+            heightBySystem.set(system, Math.max(heightBySystem.get(system) ?? 0, height));
+        }
+    });
+
+    // A measure box describes the system's ink, not the vertical slot the next system
+    // occupies. Prefer the distance between consecutive system tops so the spacer also
+    // accounts for normal inter-system leading; retain ink height for the last system on
+    // a page, where no following top can provide that measurement.
+    for (let system = 0; system < systemByPosition.size - 1; system += 1) {
+        const current = topBySystem.get(system);
+        const next = topBySystem.get(system + 1);
+        if (current && next && current.page === next.page && next.y > current.y) {
+            heightBySystem.set(system, next.y - current.y);
+        }
+    }
+
+    return {
+        systemOf: (measureIndex) => systemByMeasure.get(measureIndex),
+        systemHeight: (system) => heightBySystem.get(system),
+    };
+}
+
+/** Remaining vertical offset between paired rows downstream of a structural gap. */
+export function measureStructuralGapResidual(
+    alignments: Array<{ rows: MeasureAlignmentRow[] }>,
+    leftPositions: Positions,
+    rightPositions: Positions,
+): { left: number; right: number } {
+    let left = 0;
+    let right = 0;
+    const documentY = (positions: Positions, measureIndex: number) => {
+        const element = positions.elements[measureIndex];
+        if (!element) {
+            return undefined;
+        }
+        return element.y + element.page * (positions.pageSize?.height ?? 0);
+    };
+
+    alignments.forEach((alignment) => {
+        let structuralGapSeen = false;
+        alignment.rows.forEach((row) => {
+            if (row.leftIndex === null || row.rightIndex === null) {
+                structuralGapSeen = true;
+                return;
+            }
+            if (!structuralGapSeen) {
+                return;
+            }
+            const leftY = documentY(leftPositions, row.leftIndex);
+            const rightY = documentY(rightPositions, row.rightIndex);
+            if (leftY === undefined || rightY === undefined) {
+                return;
+            }
+            const delta = rightY - leftY;
+            left = Math.max(left, delta);
+            right = Math.max(right, -delta);
+        });
+    });
+
+    return { left, right };
+}
+
+/**
+ * Combine identical gap anchors reported by multiple parts.
+ *
+ * Every part carries the same temporal insertion/deletion rows, so adding their plans
+ * would multiply a vertical deficit by the part count. A score needs one spacer at an
+ * anchor: retain the largest requirement any part measured there.
+ */
+export function mergeAlignmentGaps(plans: MeasureGap[][]): MeasureGap[] {
+    const byMeasure = new Map<number, number>();
+    plans.flat().forEach(({ measureIndex, gap }) => {
+        if (gap > 0) {
+            byMeasure.set(measureIndex, Math.max(byMeasure.get(measureIndex) ?? 0, gap));
+        }
+    });
+    return [...byMeasure.entries()]
+        .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex)
+        .map(([measureIndex, gap]) => ({ measureIndex, gap }));
+}
+
 /**
  * Vertical gaps that let the panes stay level across an insertion or deletion.
  *
@@ -142,8 +248,8 @@ export function buildAlignmentGaps(
     leftSystemHeight: SystemHeight,
     rightSystemHeight: SystemHeight,
 ): { left: MeasureGap[]; right: MeasureGap[] } {
-    const left: MeasureGap[] = [];
-    const right: MeasureGap[] = [];
+    const left = new Map<number, number>();
+    const right = new Map<number, number>();
 
     const seenLeft = new Set<number>();
     const seenRight = new Set<number>();
@@ -164,18 +270,19 @@ export function buildAlignmentGaps(
             seenRight.add(rightSystem!);
         }
 
-        // One side started a new system and the other stayed put: the one that stayed is
-        // now a system short and has to be pushed down to match.
-        if (rightGained && !leftGained && lastLeftMeasure !== null && seenRight.size > seenLeft.size) {
+        // Only a structural gap can require padding. Different wrap points with measures
+        // on both sides are transient until buildResyncBreaks settles and must never add a
+        // spacer of their own.
+        if (row.leftIndex === null && rightGained && lastLeftMeasure !== null) {
             const height = rightSystemHeight(rightSystem!);
             if (height && height > 0) {
-                left.push({ measureIndex: lastLeftMeasure, gap: height });
+                left.set(lastLeftMeasure, (left.get(lastLeftMeasure) ?? 0) + height);
             }
         }
-        if (leftGained && !rightGained && lastRightMeasure !== null && seenLeft.size > seenRight.size) {
+        if (row.rightIndex === null && leftGained && lastRightMeasure !== null) {
             const height = leftSystemHeight(leftSystem!);
             if (height && height > 0) {
-                right.push({ measureIndex: lastRightMeasure, gap: height });
+                right.set(lastRightMeasure, (right.get(lastRightMeasure) ?? 0) + height);
             }
         }
 
@@ -187,7 +294,9 @@ export function buildAlignmentGaps(
         }
     }
 
-    return { left, right };
+    const toGaps = (gaps: Map<number, number>) => [...gaps.entries()]
+        .map(([measureIndex, gap]) => ({ measureIndex, gap }));
+    return { left: toGaps(left), right: toGaps(right) };
 }
 
 export function buildCompareReflowPlan({

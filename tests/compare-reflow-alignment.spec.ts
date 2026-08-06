@@ -81,15 +81,12 @@ test('reflow gives both compare panes the same system count', async ({ page }) =
     expect(left, 'reflow should not degenerate to one bar per system').toBeLessThan(60);
 });
 
-// Known gap. Line breaks cannot close it: the inserted bar's alignment row carries a null
+// Line breaks alone cannot close this: the inserted bar's alignment row carries a null
 // on the base side, so the head's wrap after it has no counterpart row to mirror a break
 // onto. Measured on this fixture -- base 1-2 systems against the head's 3, never levelling.
-//
-// `setMeasureSpacer` and `buildAlignmentGaps` (unit tested) are the pieces for closing it;
-// what is missing is the integration. A first attempt is recorded in the handoff notes:
-// it must not fire when there is no insertion, must handle a deficit of more than one
-// system, and must not race the resync phase it depends on.
-test.fixme('panes stay aligned when one side has an inserted bar', async ({ page }) => {
+// The structural-gap phase measures after wrap resync settles and adds the missing vertical
+// extent to the shorter side.
+test('panes stay aligned when one side has an inserted bar', async ({ page }) => {
     // The head fixture repeats bar 2, so it has 5 bars per part against the base's 4.
     // Alignment rows carry a null on the base side for the inserted bar, and
     // buildResyncBreaks skips those -- a line break cannot leave a gap. What it can do is
@@ -119,14 +116,18 @@ test.fixme('panes stay aligned when one side has an inserted bar', async ({ page
 
     let lefts: number | null = null;
     let rights: number | null = null;
-    await expect.poll(
-        async () => {
-            lefts = await lastRowTop('left');
-            rights = await lastRowTop('right');
-            return lefts !== null && rights !== null && Math.abs(lefts - rights) < 12;
-        },
-        { timeout: 60000, intervals: [500], message: 'panes never levelled across the insertion' },
-    ).toBe(true);
+    try {
+        await expect.poll(
+            async () => {
+                lefts = await lastRowTop('left');
+                rights = await lastRowTop('right');
+                return lefts !== null && rights !== null ? Math.abs(lefts - rights) : Number.POSITIVE_INFINITY;
+            },
+            { timeout: 60000, intervals: [500], message: 'panes never levelled across the insertion' },
+        ).toBeLessThan(12);
+    } catch {
+        throw new Error(`panes never levelled across the insertion (left ${lefts}, right ${rights})`);
+    }
 
     expect(Math.abs((lefts as unknown as number) - (rights as unknown as number)))
         .toBeLessThan(12);

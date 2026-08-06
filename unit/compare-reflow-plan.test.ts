@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
     buildCompareReflowPlan,
+    buildCompareSystemGeometry,
     buildAlignmentGaps,
     buildResyncBreaks,
+    measureStructuralGapResidual,
+    mergeAlignmentGaps,
     type ComparePane,
     type MeasureAlignmentRow,
     type ReflowAlignment,
 } from '../components/score-editor/compare/compare-reflow-plan';
+import type { Positions } from '../lib/webmscore-loader';
 
 const rows = (count: number): MeasureAlignmentRow[] => (
     Array.from({ length: count }, (_, index) => ({
@@ -227,6 +231,40 @@ describe('buildAlignmentGaps', () => {
         });
     });
 
+    it('does not turn an ordinary wrap difference into a structural gap', () => {
+        const rows = [0, 1, 2, 3].map((n) => ({ leftIndex: n, rightIndex: n, match: true }));
+        const leftSystemOf = (m: number) => (m <= 1 ? 0 : 1);
+        const rightSystemOf = (m: number) => (m === 0 ? 0 : 1);
+
+        expect(buildAlignmentGaps(rows, leftSystemOf, rightSystemOf, () => 40, () => 40)).toEqual({
+            left: [],
+            right: [],
+        });
+    });
+
+    it('accumulates every system consumed by one structural insertion at its anchor', () => {
+        const rows = [
+            { leftIndex: 0, rightIndex: 0, match: true },
+            { leftIndex: null, rightIndex: 1, match: false },
+            { leftIndex: null, rightIndex: 2, match: false },
+            { leftIndex: null, rightIndex: 3, match: false },
+            { leftIndex: 1, rightIndex: 4, match: true },
+        ];
+        const leftSystemOf = () => 0;
+        const rightSystemOf = (m: number) => m;
+
+        expect(buildAlignmentGaps(
+            rows,
+            leftSystemOf,
+            rightSystemOf,
+            () => 30,
+            (system) => [20, 30, 40, 50][system],
+        )).toEqual({
+            left: [{ measureIndex: 0, gap: 120 }],
+            right: [],
+        });
+    });
+
     it('pads the head when the base is the longer side', () => {
         const rows = [
             { leftIndex: 0, rightIndex: 0, match: true },
@@ -251,5 +289,59 @@ describe('buildAlignmentGaps', () => {
             left: [],
             right: [],
         });
+    });
+});
+
+describe('mergeAlignmentGaps', () => {
+    it('takes the maximum requirement across parts instead of summing duplicates', () => {
+        expect(mergeAlignmentGaps([
+            [{ measureIndex: 1, gap: 40 }, { measureIndex: 4, gap: 25 }],
+            [{ measureIndex: 1, gap: 45 }],
+            [{ measureIndex: 4, gap: 20 }],
+        ])).toEqual([
+            { measureIndex: 1, gap: 45 },
+            { measureIndex: 4, gap: 25 },
+        ]);
+    });
+});
+
+describe('settled compare geometry', () => {
+    const positions = (ys: number[], heights: number[], pageHeight = 500): Positions => ({
+        elements: ys.map((y, index) => ({
+            id: index,
+            x: 0,
+            y,
+            sx: 100,
+            sy: heights[index],
+            page: 0,
+        })),
+        events: [],
+        pageSize: { width: 100, height: pageHeight },
+    });
+
+    it('measures a system slot from one top to the next, with ink height as the fallback', () => {
+        const geometry = buildCompareSystemGeometry(positions(
+            [10, 10, 130, 310],
+            [40, 40, 60, 50],
+        ));
+
+        expect([0, 1, 2, 3].map(geometry.systemOf)).toEqual([0, 0, 1, 2]);
+        expect([0, 1, 2].map(geometry.systemHeight)).toEqual([120, 180, 50]);
+    });
+
+    it('measures only paired rows downstream of a structural gap', () => {
+        const alignments = [{
+            rows: [
+                { leftIndex: 0, rightIndex: 0, match: true },
+                { leftIndex: null, rightIndex: 1, match: false },
+                { leftIndex: 1, rightIndex: 2, match: true },
+            ],
+        }];
+
+        expect(measureStructuralGapResidual(
+            alignments,
+            positions([20, 200], [40, 40]),
+            positions([5, 100, 260], [40, 40, 40]),
+        )).toEqual({ left: 60, right: 0 });
     });
 });

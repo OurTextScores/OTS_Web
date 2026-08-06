@@ -66,4 +66,51 @@ describe('ScoreEditor: dialogs rendered by the editor', () => {
       expect(screen.getByTestId('new-score-pickup-denominator')).toBeInTheDocument();
     });
   });
+
+  it('loads local left and right scores into the compare workspace', async () => {
+    const user = userEvent.setup();
+    const leftXml = '<score-partwise version="4.0"><part-list/></score-partwise>';
+    const rightXml = '<score-partwise version="4.0"><part-list/><credit/></score-partwise>';
+    const makeScore = (xml: string) => ({
+      destroy: vi.fn(),
+      saveSvg: vi.fn(async () => '<svg width="100" height="40"></svg>'),
+      saveXml: vi.fn(async () => new TextEncoder().encode(xml)),
+      savePdf: vi.fn(async () => new Uint8Array([1])),
+      setSoundFont: vi.fn(async () => {}),
+      metadata: vi.fn(async () => ({ parts: [] })),
+      measurePositions: vi.fn(async () => ({
+        elements: [],
+        events: [],
+        pageSize: { width: 100, height: 40 },
+      })),
+      segmentPositions: vi.fn(async () => ({})),
+      npages: vi.fn(async () => 1),
+    });
+    const mainScore = makeScore(rightXml);
+    const leftCompareScore = makeScore(leftXml);
+    const webmscore = {
+      load: vi.fn()
+        .mockResolvedValueOnce(mainScore)
+        .mockResolvedValueOnce(leftCompareScore),
+      ready: Promise.resolve(),
+    };
+    mocked.loadWebMscore.mockResolvedValue(webmscore);
+
+    render(<ScoreEditor />);
+    await user.click(screen.getByRole('button', { name: 'Load scores to compare' }));
+    expect(screen.getByTestId('compare-score-loader-modal')).toBeInTheDocument();
+
+    const leftFile = new File([leftXml], 'reference.musicxml', { type: 'application/xml' });
+    const rightFile = new File([rightXml], 'revision.musicxml', { type: 'application/xml' });
+    await user.upload(screen.getByTestId('compare-left-score-input'), leftFile);
+    await user.upload(screen.getByTestId('compare-right-score-input'), rightFile);
+    await user.click(screen.getByRole('button', { name: 'Compare' }));
+
+    await waitFor(() => expect(screen.getByTestId('checkpoint-compare-modal')).toBeInTheDocument());
+    expect(screen.getByText('reference.musicxml vs revision.musicxml')).toBeInTheDocument();
+    expect(webmscore.load.mock.calls.map((call) => call[0])).toEqual([
+      'musicxml',
+      'musicxml',
+    ]);
+  });
 });

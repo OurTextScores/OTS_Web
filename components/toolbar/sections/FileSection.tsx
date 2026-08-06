@@ -2,11 +2,12 @@ import React from 'react';
 import { Button } from '../../ui/Button';
 import { DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenu } from '../../ui/DropdownMenu';
 import { ToolbarSectionProps } from '../types';
-import { CloudUpload, FilePlus, FolderOpen, Download, Music, Share2 } from 'lucide-react';
+import { CloudUpload, Columns2, FilePlus, FolderOpen, Download, Music, Share2 } from 'lucide-react';
 
 export const FileSection: React.FC<ToolbarSectionProps> = ({
     onNewScore,
     onFileUpload,
+    onLoadScoresToCompare,
     onExportSvg,
     onExportPdf,
     onExportPng,
@@ -61,6 +62,18 @@ export const FileSection: React.FC<ToolbarSectionProps> = ({
                         className="hidden"
                     />
                 </label>
+            </Button>
+
+            <Button
+                data-testid="btn-load-scores-to-compare"
+                onClick={onLoadScoresToCompare}
+                variant="outline"
+                size="sm"
+                disabled={!onLoadScoresToCompare}
+                className="shadow-sm"
+            >
+                <Columns2 size={14} className="mr-2" />
+                Load scores to compare
             </Button>
 
             <DropdownMenu modal={false}>
