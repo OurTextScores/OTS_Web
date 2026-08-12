@@ -2,7 +2,7 @@
 
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { PanelRightOpen, PanelRightClose, Pause, Play, Square } from 'lucide-react';
 import {
     loadWebMscore,
     loadWebMscoreInProcess,
@@ -16819,6 +16819,38 @@ ${partsBodyXml}
                             </div>
                         )}
                         <div className="mb-3 flex items-center justify-end gap-2 text-sm text-gray-600">
+                            {/*
+                                A preview embed hides the toolbar, and with it
+                                the only way to hear the score. These are the
+                                same three controls the compare panes carry, in
+                                the same vocabulary: one button that plays,
+                                pauses and resumes, and a stop that is only
+                                enabled while something is running.
+                            */}
+                            {isSingleScoreEmbedMode && (
+                                <div className="mr-auto flex items-center gap-1">
+                                    <button
+                                        type="button"
+                                        data-testid="btn-embed-play"
+                                        onClick={() => void handleTogglePlayPause()}
+                                        disabled={!score || (audioBusy && !(isPlaying || isPaused))}
+                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                        title={isPlaying && !isPaused ? 'Pause' : isPaused ? 'Resume' : 'Play'}
+                                    >
+                                        {isPlaying && !isPaused ? <Pause size={14} /> : <Play size={14} />}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        data-testid="btn-embed-stop"
+                                        onClick={() => void stopAudio()}
+                                        disabled={!isPlaying && !isPaused}
+                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                        title="Stop"
+                                    >
+                                        <Square size={14} />
+                                    </button>
+                                </div>
+                            )}
                             <button
                                 type="button"
                                 onClick={() => setProgressiveLoadEnabled((prev) => !prev)}

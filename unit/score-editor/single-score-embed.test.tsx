@@ -95,4 +95,25 @@ describe('ScoreEditor: single-score embed mode', () => {
         );
         unmount();
     });
+
+    it('carries a transport, because hiding the toolbar hid playback', async () => {
+        // The chrome this mode removes includes the only way to hear the score.
+        // Same three controls as a compare pane: one button that plays, pauses
+        // and resumes, and a stop enabled only while something is running.
+        const { unmount } = await renderWith({ embed: '1' });
+
+        const play = screen.getByTestId('btn-embed-play');
+        const stop = screen.getByTestId('btn-embed-stop');
+        expect(play).toHaveAttribute('title', 'Play');
+        expect(stop).toBeDisabled();
+
+        unmount();
+    });
+
+    it('leaves the transport out of a full-editor launch, which has its own', async () => {
+        const { unmount } = await renderWith({});
+        expect(screen.queryByTestId('btn-embed-play')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('btn-embed-stop')).not.toBeInTheDocument();
+        unmount();
+    });
 });
