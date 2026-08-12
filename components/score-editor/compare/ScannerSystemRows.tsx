@@ -28,6 +28,12 @@ export type ScannerRowRegion = {
     rightMeasureIndexes: number[];
     differenceClasses?: string[];
     grounded?: boolean;
+    /**
+     * Required to decide this block, and withheld by the scanner for any block
+     * whose place on the scan could not be proven — so an ungrounded decision
+     * cannot be expressed rather than merely being discouraged.
+     */
+    contentSignature?: string;
 };
 
 const DIFFERENCE_LABELS: Record<string, string> = {
@@ -320,6 +326,68 @@ function SystemPane({
                           : '▶'}
                 </button>
             )}
+        </div>
+    );
+}
+
+/**
+ * The decision surface: one control per difference in this row, on the side it
+ * would come from.
+ *
+ * The arrow points at the merged score, because that is where the bar goes —
+ * "take from above" reading downward is the whole reason the merged pane sits
+ * in the middle rather than beside the two readings.
+ *
+ * A difference whose place on the scan could not be proven arrives with no
+ * signature, and there is no control for it at all. That is the scanner's rule
+ * made visible: a decision without evidence is not offered, rather than offered
+ * and refused (design §7).
+ */
+function Gutter({
+    direction,
+    label,
+    regions,
+    engineId,
+    onTake,
+    busy,
+}: {
+    direction: 'down' | 'up';
+    label: string;
+    regions: ScannerRowRegion[];
+    engineId?: string;
+    onTake: (region: ScannerRowRegion, engineId: string) => void;
+    busy: boolean;
+}) {
+    if (regions.length === 0 || !engineId) return null;
+    return (
+        <div className="flex flex-wrap items-center gap-1 py-0.5 text-[11px] text-gray-600">
+            <span className="mr-1 uppercase tracking-wide text-gray-400">
+                take from {label}
+            </span>
+            {regions.map((region) => {
+                const decidable = Boolean(region.contentSignature);
+                const bars =
+                    (direction === 'down' ? region.leftMeasureIndexes : region.rightMeasureIndexes)
+                        .length;
+                return (
+                    <button
+                        key={region.blockIndex}
+                        type="button"
+                        data-testid={`btn-take-${direction}-${region.blockIndex}`}
+                        disabled={!decidable || busy}
+                        title={
+                            decidable
+                                ? `Take difference ${region.blockIndex + 1} from ${label}`
+                                : 'This difference has no verified place on the scan, so it cannot be decided'
+                        }
+                        onClick={() => onTake(region, engineId)}
+                        className="rounded border border-gray-300 bg-white px-1.5 py-0.5 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                        {direction === 'down' ? '↓' : '↑'} {region.blockIndex + 1}
+                        {bars === 0 ? ' (remove)' : bars > 1 ? ` (${bars} bars)` : ''}
+                    </button>
+                );
+            })}
         </div>
     );
 }
@@ -631,6 +699,38 @@ export function ScannerSystemRows({
         return () => window.removeEventListener('keydown', onKeyDown);
     }, [hasSelection, mergedScore, mutateMerged, noteInput, toggleNoteInput]);
 
+    const takeBlock = useCallback(
+        (region: ScannerRowRegion, engineId: string) => {
+            if (!region.contentSignature || !leftEngineId || !rightEngineId) return;
+            void merged
+                .take({
+                    blockIndex: region.blockIndex,
+                    contentSignature: region.contentSignature,
+                    engineId,
+                    baseEngineId: leftEngineId,
+                    candidateEngineId: rightEngineId,
+                })
+                .then((outcome) => {
+                    if (!outcome.ok) {
+                        setNotice(outcome.error);
+                        return;
+                    }
+                    const repaired = outcome.repairs.length
+                        ? ` ${outcome.repairs.map((repair) => repair.detail).join(' ')}`
+                        : '';
+                    setNotice(
+                        `Took difference ${region.blockIndex + 1} from ${
+                            engineId === leftEngineId ? leftLabel : rightLabel
+                        }.${repaired}`,
+                    );
+                    // The merge may have changed length, so it is reloaded
+                    // rather than patched.
+                    void loadMerged();
+                });
+        },
+        [leftEngineId, leftLabel, loadMerged, merged, rightEngineId, rightLabel],
+    );
+
     const save = useCallback(
         async (acceptStale = false) => {
             const outcome = await merged.save({ acceptStale });
@@ -829,10 +929,10 @@ export function ScannerSystemRows({
                         )}
 
                         {/*
-                            Reading, merge, reading — the merged score in the
-                            middle so "take from above" and "take from below"
-                            read the way a three-way merge does, once S3 adds
-                            the controls.
+                            Reading, merge, reading, with a gutter between each
+                            pane and the merged score — so "take from above" and
+                            "take from below" read the way a three-way merge
+                            does, and the arrow points where the bar will go.
                         */}
                         <div className="space-y-2">
                             <div>
@@ -847,6 +947,14 @@ export function ScannerSystemRows({
                                     {...paneTransport('left', system.leftMeasureIndexes)}
                                 />
                             </div>
+                            <Gutter
+                                direction="down"
+                                label={leftLabel}
+                                regions={differences}
+                                engineId={leftEngineId}
+                                onTake={takeBlock}
+                                busy={merged.saving}
+                            />
                             <div>
                                 <div className="mb-1 flex items-baseline gap-2 text-[11px] uppercase tracking-wide text-cyan-800">
                                     <span className="font-semibold">Merged</span>
@@ -866,6 +974,14 @@ export function ScannerSystemRows({
                                     {...paneTransport('middle', mergedIndexes(system))}
                                 />
                             </div>
+                            <Gutter
+                                direction="up"
+                                label={rightLabel}
+                                regions={differences}
+                                engineId={rightEngineId}
+                                onTake={takeBlock}
+                                busy={merged.saving}
+                            />
                             <div>
                                 <div className="mb-1 text-[11px] uppercase tracking-wide text-gray-500">
                                     {rightLabel}

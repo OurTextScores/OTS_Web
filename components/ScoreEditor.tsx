@@ -405,6 +405,12 @@ export type SuppliedCompareRegion = {
     rightMeasureIndexes: number[];
     differenceClasses?: string[];
     grounded?: boolean;
+    /**
+     * Required to decide this difference. The scanner withholds it for any
+     * block whose place on the scan could not be proven, so an ungrounded
+     * decision cannot be expressed rather than merely being discouraged.
+     */
+    contentSignature?: string;
 };
 
 /**

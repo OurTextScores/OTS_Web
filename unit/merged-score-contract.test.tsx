@@ -270,4 +270,86 @@ describe('the merged score contract', () => {
         expect(result.current.error).toMatch(/could not be read \(404\)/);
         expect(result.current.score).toBeNull();
     });
+
+    it('asks the scanner to splice, rather than splicing here', async () => {
+        // The scanner holds both readings, the alignment and the safety rules.
+        // A decision made in the browser would be a second implementation of
+        // all three, and the one that disagreed would be this one.
+        stubFetch((url, init) =>
+            init?.method === 'POST'
+                ? new Response(JSON.stringify({ present: true, revision: 5, repairs: [] }), {
+                      status: 200,
+                  })
+                : new Response(XML, { status: 200 }),
+        );
+        const { result } = render(state({ present: true, revision: 4 }));
+        await act(async () => {
+            await result.current.load();
+        });
+        await act(async () => {
+            const outcome = await result.current.take({
+                blockIndex: 2,
+                contentSignature: 'scanner-block-content-v2:abc',
+                engineId: 'transcoda',
+                baseEngineId: 'homr',
+                candidateEngineId: 'transcoda',
+            });
+            expect(outcome.ok).toBe(true);
+        });
+
+        const post = calls.find((call) => call.method === 'POST')!;
+        expect(new URL(post.url).pathname).toBe(
+            '/api/proxy/scanner/jobs/job-1/pages/1/merged/decisions',
+        );
+        const body = JSON.parse(String(post.body));
+        expect(body).toMatchObject({
+            blockIndex: 2,
+            contentSignature: 'scanner-block-content-v2:abc',
+            engineId: 'transcoda',
+            baseEngine: 'homr',
+            candidateEngine: 'transcoda',
+            // The revision it was decided against, so a second tab cannot
+            // overwrite the first.
+            revision: 4,
+        });
+        expect(result.current.state?.revision).toBe(5);
+    });
+
+    it('surfaces a refusal with its reasons instead of a bare failure', async () => {
+        // Refusals are the point of that route: the reviewer is told what about
+        // this passage could not be moved.
+        stubFetch((url, init) =>
+            init?.method === 'POST'
+                ? new Response(
+                      JSON.stringify({
+                          message: 'This passage cannot be taken from that reading',
+                          refusals: [
+                              { code: 'tie-crosses-boundary', detail: 'A tie runs out of it.' },
+                          ],
+                      }),
+                      { status: 409 },
+                  )
+                : new Response(XML, { status: 200 }),
+        );
+        const { result } = render(state({ present: true, revision: 1 }));
+        await act(async () => {
+            await result.current.load();
+        });
+        await act(async () => {
+            const outcome = await result.current.take({
+                blockIndex: 0,
+                contentSignature: 'sig',
+                engineId: 'transcoda',
+                baseEngineId: 'homr',
+                candidateEngineId: 'transcoda',
+            });
+            expect(outcome).toMatchObject({ ok: false });
+            if (!outcome.ok) {
+                expect(outcome.refusals?.[0].code).toBe('tie-crosses-boundary');
+            }
+        });
+        expect(result.current.error).toMatch(/cannot be taken/);
+        // The merged score is untouched, so nothing has to be undone.
+        expect(result.current.state?.revision).toBe(1);
+    });
 });

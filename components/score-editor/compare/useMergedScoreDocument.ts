@@ -27,6 +27,11 @@ export type MergedScoreState = {
 /** What the scanner's merged-score route parses; see its controller. */
 const MUSICXML_CONTENT_TYPE = 'application/vnd.recordare.musicxml+xml';
 
+/** A bar-level take, as the scanner's decision route describes the result. */
+export type MergedTakeOutcome =
+    | { ok: true; state: MergedScoreState; repairs: Array<{ code: string; detail: string }> }
+    | { ok: false; error: string; refusals?: Array<{ code: string; detail: string }> };
+
 export type MergedSaveOutcome =
     | { ok: true; state: MergedScoreState }
     | { ok: false; error: string; stale?: boolean };
@@ -284,6 +289,66 @@ export function useMergedScoreDocument({
         [current, dirty, exportXml, resolveUrl, sourceEngineId],
     );
 
+    /**
+     * Take one comparison block from one engine into the merged score.
+     *
+     * The scanner does the splicing: it holds both readings, the alignment and
+     * the safety rules, and a decision made anywhere else would be a second
+     * implementation of all three. What arrives back is a new revision, so the
+     * document is reloaded rather than patched — the merge may have changed
+     * length, and guessing how would be the same mistake in a smaller place.
+     */
+    const take = useCallback(
+        async (input: {
+            blockIndex: number;
+            contentSignature: string;
+            engineId: string;
+            baseEngineId: string;
+            candidateEngineId: string;
+        }): Promise<MergedTakeOutcome> => {
+            if (!current) return { ok: false, error: 'This page cannot carry a merged score.' };
+            setSaving(true);
+            setError(null);
+            try {
+                const response = await fetch(resolveUrl(`${current.url}/decisions`), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        blockIndex: input.blockIndex,
+                        contentSignature: input.contentSignature,
+                        engineId: input.engineId,
+                        baseEngine: input.baseEngineId,
+                        candidateEngine: input.candidateEngineId,
+                        revision: current.revision,
+                    }),
+                });
+                const body = await response.json().catch(() => null);
+                if (!response.ok) {
+                    // Refusals are the point of that route, not an error to
+                    // flatten: the reviewer is told what about this passage
+                    // could not be moved.
+                    const message =
+                        typeof body?.message === 'string'
+                            ? body.message
+                            : `That passage could not be taken (${response.status})`;
+                    setError(message);
+                    return { ok: false, error: message, refusals: body?.refusals };
+                }
+                const next = { ...current, ...body } as MergedScoreState;
+                setSaved(next);
+                setDirty(false);
+                return { ok: true, state: next, repairs: body?.repairs || [] };
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                setError(message);
+                return { ok: false, error: message };
+            } finally {
+                setSaving(false);
+            }
+        },
+        [current, resolveUrl],
+    );
+
     const discard = useCallback(async (): Promise<MergedSaveOutcome> => {
         if (!current?.present) return { ok: false, error: 'There is no saved merged score.' };
         setSaving(true);
@@ -325,6 +390,7 @@ export function useMergedScoreDocument({
         mutate,
         exportXml,
         save,
+        take,
         discard,
         setError,
     };
