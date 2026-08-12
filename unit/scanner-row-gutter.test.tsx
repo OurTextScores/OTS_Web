@@ -157,4 +157,60 @@ describe('the row gutter', () => {
         const up = await screen.findByTestId('btn-take-up-0');
         expect(up.textContent).toContain('remove');
     });
+
+    it('offers dynamics and lyrics separately, and only where they exist', async () => {
+        // Separate because they are separate judgements: a reviewer may trust
+        // one engine's dynamics and the other's words. Gated on availability
+        // because a control that would take nothing is worse than none — and a
+        // difference class says the readings *disagree* about dynamics, not
+        // which of them has any.
+        const calls: any[] = [];
+        renderRows(
+            [
+                {
+                    ...grounded,
+                    leftMarkings: { dynamics: true, lyrics: false },
+                    rightMarkings: { dynamics: false, lyrics: true },
+                },
+            ],
+            calls,
+        );
+
+        await screen.findByTestId('btn-take-down-0');
+        // HOMR above has dynamics but no lyrics.
+        expect(screen.getByTestId('btn-take-down-dynamics-0')).toBeInTheDocument();
+        expect(screen.queryByTestId('btn-take-down-lyrics-0')).not.toBeInTheDocument();
+        // Transcoda below has lyrics but no dynamics.
+        expect(screen.queryByTestId('btn-take-up-dynamics-0')).not.toBeInTheDocument();
+        expect(screen.getByTestId('btn-take-up-lyrics-0')).toBeInTheDocument();
+    });
+
+    it('offers no marking control when neither reading has any', async () => {
+        const calls: any[] = [];
+        renderRows([grounded], calls);
+
+        await screen.findByTestId('btn-take-down-0');
+        expect(screen.queryByTestId('btn-take-down-dynamics-0')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('btn-take-up-lyrics-0')).not.toBeInTheDocument();
+    });
+
+    it('sends a marking take to its own route, naming the kind', async () => {
+        const calls: any[] = [];
+        renderRows(
+            [{ ...grounded, rightMarkings: { dynamics: true, lyrics: false } }],
+            calls,
+        );
+        const user = userEvent.setup();
+
+        await user.click(await screen.findByTestId('btn-take-up-dynamics-0'));
+
+        await waitFor(() => expect(calls.some((call) => call.method === 'POST')).toBe(true));
+        const post = calls.find((call) => call.method === 'POST');
+        expect(new URL(post.url).pathname).toContain('/merged/decisions/markings');
+        expect(JSON.parse(String(post.body))).toMatchObject({
+            blockIndex: 0,
+            engineId: 'transcoda',
+            kind: 'dynamics',
+        });
+    });
 });

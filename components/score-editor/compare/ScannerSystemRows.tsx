@@ -34,6 +34,14 @@ export type ScannerRowRegion = {
      * cannot be expressed rather than merely being discouraged.
      */
     contentSignature?: string;
+    /**
+     * What each side actually has to give. A difference class says the two
+     * readings disagree about dynamics; it does not say which one has any, and
+     * a control offering to take dynamics from a bar with none is worse than no
+     * control at all.
+     */
+    leftMarkings?: { dynamics: boolean; lyrics: boolean };
+    rightMarkings?: { dynamics: boolean; lyrics: boolean };
 };
 
 const DIFFERENCE_LABELS: Record<string, string> = {
@@ -355,7 +363,11 @@ function Gutter({
     label: string;
     regions: ScannerRowRegion[];
     engineId?: string;
-    onTake: (region: ScannerRowRegion, engineId: string) => void;
+    onTake: (
+        region: ScannerRowRegion,
+        engineId: string,
+        kind?: 'dynamics' | 'lyrics',
+    ) => void;
     busy: boolean;
 }) {
     if (regions.length === 0 || !engineId) return null;
@@ -366,26 +378,59 @@ function Gutter({
             </span>
             {regions.map((region) => {
                 const decidable = Boolean(region.contentSignature);
+                const from = direction === 'down' ? region.leftMarkings : region.rightMarkings;
                 const bars =
                     (direction === 'down' ? region.leftMeasureIndexes : region.rightMeasureIndexes)
                         .length;
+                const arrow = direction === 'down' ? '↓' : '↑';
                 return (
-                    <button
-                        key={region.blockIndex}
-                        type="button"
-                        data-testid={`btn-take-${direction}-${region.blockIndex}`}
-                        disabled={!decidable || busy}
-                        title={
-                            decidable
-                                ? `Take difference ${region.blockIndex + 1} from ${label}`
-                                : 'This difference has no verified place on the scan, so it cannot be decided'
-                        }
-                        onClick={() => onTake(region, engineId)}
-                        className="rounded border border-gray-300 bg-white px-1.5 py-0.5 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                        {direction === 'down' ? '↓' : '↑'} {region.blockIndex + 1}
-                        {bars === 0 ? ' (remove)' : bars > 1 ? ` (${bars} bars)` : ''}
-                    </button>
+                    <span key={region.blockIndex} className="flex items-center gap-0.5">
+                        <button
+                            type="button"
+                            data-testid={`btn-take-${direction}-${region.blockIndex}`}
+                            disabled={!decidable || busy}
+                            title={
+                                decidable
+                                    ? `Take difference ${region.blockIndex + 1} from ${label}`
+                                    : 'This difference has no verified place on the scan, so it cannot be decided'
+                            }
+                            onClick={() => onTake(region, engineId)}
+                            className="rounded border border-gray-300 bg-white px-1.5 py-0.5 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            {arrow} {region.blockIndex + 1}
+                            {bars === 0 ? ' (remove)' : bars > 1 ? ` (${bars} bars)` : ''}
+                        </button>
+                        {/*
+                            Only when this side has any. Dynamics and lyrics are
+                            separate judgements — a reviewer may trust one
+                            engine's dynamics and the other's words — and an
+                            engine that read neither offers neither.
+                        */}
+                        {decidable && from?.dynamics && (
+                            <button
+                                type="button"
+                                data-testid={`btn-take-${direction}-dynamics-${region.blockIndex}`}
+                                disabled={busy}
+                                title={`Take only the dynamics of difference ${region.blockIndex + 1} from ${label}, leaving the notes`}
+                                onClick={() => onTake(region, engineId, 'dynamics')}
+                                className="rounded border border-gray-200 bg-white px-1 py-0.5 text-gray-500 hover:bg-gray-50 disabled:opacity-40"
+                            >
+                                {arrow} dynamics
+                            </button>
+                        )}
+                        {decidable && from?.lyrics && (
+                            <button
+                                type="button"
+                                data-testid={`btn-take-${direction}-lyrics-${region.blockIndex}`}
+                                disabled={busy}
+                                title={`Take only the lyrics of difference ${region.blockIndex + 1} from ${label}, leaving the notes`}
+                                onClick={() => onTake(region, engineId, 'lyrics')}
+                                className="rounded border border-gray-200 bg-white px-1 py-0.5 text-gray-500 hover:bg-gray-50 disabled:opacity-40"
+                            >
+                                {arrow} lyrics
+                            </button>
+                        )}
+                    </span>
                 );
             })}
         </div>
@@ -700,7 +745,7 @@ export function ScannerSystemRows({
     }, [hasSelection, mergedScore, mutateMerged, noteInput, toggleNoteInput]);
 
     const takeBlock = useCallback(
-        (region: ScannerRowRegion, engineId: string) => {
+        (region: ScannerRowRegion, engineId: string, kind?: 'dynamics' | 'lyrics') => {
             if (!region.contentSignature || !leftEngineId || !rightEngineId) return;
             void merged
                 .take({
@@ -709,6 +754,7 @@ export function ScannerSystemRows({
                     engineId,
                     baseEngineId: leftEngineId,
                     candidateEngineId: rightEngineId,
+                    kind,
                 })
                 .then((outcome) => {
                     if (!outcome.ok) {
@@ -719,9 +765,9 @@ export function ScannerSystemRows({
                         ? ` ${outcome.repairs.map((repair) => repair.detail).join(' ')}`
                         : '';
                     setNotice(
-                        `Took difference ${region.blockIndex + 1} from ${
-                            engineId === leftEngineId ? leftLabel : rightLabel
-                        }.${repaired}`,
+                        `Took ${kind ? `the ${kind} of ` : ''}difference ${
+                            region.blockIndex + 1
+                        } from ${engineId === leftEngineId ? leftLabel : rightLabel}.${repaired}`,
                     );
                     // The merge may have changed length, so it is reloaded
                     // rather than patched.

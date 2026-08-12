@@ -411,6 +411,9 @@ export type SuppliedCompareRegion = {
      * decision cannot be expressed rather than merely being discouraged.
      */
     contentSignature?: string;
+    /** What each side has to give, per marking kind; gates the take controls. */
+    leftMarkings?: { dynamics: boolean; lyrics: boolean };
+    rightMarkings?: { dynamics: boolean; lyrics: boolean };
 };
 
 /**

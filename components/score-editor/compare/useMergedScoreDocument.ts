@@ -305,12 +305,17 @@ export function useMergedScoreDocument({
             engineId: string;
             baseEngineId: string;
             candidateEngineId: string;
+            /** Absent takes the bars; present takes only that marking. */
+            kind?: 'dynamics' | 'lyrics';
         }): Promise<MergedTakeOutcome> => {
             if (!current) return { ok: false, error: 'This page cannot carry a merged score.' };
             setSaving(true);
             setError(null);
             try {
-                const response = await fetch(resolveUrl(`${current.url}/decisions`), {
+                const path = input.kind
+                    ? `${current.url}/decisions/markings`
+                    : `${current.url}/decisions`;
+                const response = await fetch(resolveUrl(path), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -320,6 +325,7 @@ export function useMergedScoreDocument({
                         baseEngine: input.baseEngineId,
                         candidateEngine: input.candidateEngineId,
                         revision: current.revision,
+                        ...(input.kind ? { kind: input.kind } : {}),
                     }),
                 });
                 const body = await response.json().catch(() => null);
