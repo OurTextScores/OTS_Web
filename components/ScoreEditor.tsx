@@ -2,7 +2,7 @@
 
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { PanelRightOpen, PanelRightClose, Pause, Play, Square } from 'lucide-react';
 import {
     loadWebMscore,
     loadWebMscoreInProcess,
@@ -1318,7 +1318,24 @@ export default function ScoreEditor() {
     const compareMode = searchParams.get('compareMode')?.trim() || '';
     const isSystemRowsMode = isSuppliedRegionsMode && compareMode === 'rows';
     const isChangeReviewSingleScoreMode = Boolean(reviewScoreUrl && changeReviewId);
-    const isEmbedMode = isCompareEmbedMode || isChangeReviewSingleScoreMode;
+    /**
+     * One score, no chrome: `?score=<url>&embed=1`.
+     *
+     * The two embed modes above both exist to serve a *review*, and each
+     * requires a second identifier — a right-hand score, or a change review —
+     * so neither can express "just show me this score". A host page that wants
+     * an inline preview had no way to ask for one, which is why the work page
+     * kept a second renderer around to do it instead.
+     *
+     * Opt-in rather than implied by `score`, because `?score=` is also how the
+     * full editor is launched from elsewhere in the product, and that must keep
+     * its chrome.
+     */
+    const isSingleScoreEmbedMode = Boolean(
+        searchParams.get('score') && searchParams.get('embed') === '1',
+    );
+    const isEmbedMode =
+        isCompareEmbedMode || isChangeReviewSingleScoreMode || isSingleScoreEmbedMode;
     const isChangeReviewCompareMode = isCompareEmbedMode && Boolean(changeReviewId);
     const isChangeReviewMode = isChangeReviewCompareMode || isChangeReviewSingleScoreMode;
     const launchContext = useMemo(
@@ -6277,15 +6294,21 @@ ${partsBodyXml}
             } else {
                 setInteractionState({ preparing: false, ready: true });
             }
+            // Fitting the height suits a full-window editor, where a whole page
+            // at a glance is what a reader wants. An inline preview is the
+            // opposite shape — wide and short — and fitting its height there
+            // leaves a postage stamp in a field of white. Fit the width and let
+            // the frame scroll, which is how music is read anyway.
+            const autoFit = isSingleScoreEmbedMode ? handleFitWidth : handleFitHeight;
             if (autoFitPendingRef.current && typeof window !== 'undefined') {
                 window.requestAnimationFrame(() => {
                     window.requestAnimationFrame(() => {
-                        handleFitHeight();
+                        autoFit();
                         autoFitPendingRef.current = false;
                     });
                 });
             } else {
-                handleFitHeight();
+                autoFit();
                 autoFitPendingRef.current = false;
             }
             if (!signal?.aborted) {
@@ -16982,6 +17005,38 @@ ${partsBodyXml}
                             </div>
                         )}
                         <div className="mb-3 flex items-center justify-end gap-2 text-sm text-gray-600">
+                            {/*
+                                A preview embed hides the toolbar, and with it
+                                the only way to hear the score. These are the
+                                same three controls the compare panes carry, in
+                                the same vocabulary: one button that plays,
+                                pauses and resumes, and a stop that is only
+                                enabled while something is running.
+                            */}
+                            {isSingleScoreEmbedMode && (
+                                <div className="mr-auto flex items-center gap-1">
+                                    <button
+                                        type="button"
+                                        data-testid="btn-embed-play"
+                                        onClick={() => void handleTogglePlayPause()}
+                                        disabled={!score || (audioBusy && !(isPlaying || isPaused))}
+                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                        title={isPlaying && !isPaused ? 'Pause' : isPaused ? 'Resume' : 'Play'}
+                                    >
+                                        {isPlaying && !isPaused ? <Pause size={14} /> : <Play size={14} />}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        data-testid="btn-embed-stop"
+                                        onClick={() => void stopAudio()}
+                                        disabled={!isPlaying && !isPaused}
+                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                        title="Stop"
+                                    >
+                                        <Square size={14} />
+                                    </button>
+                                </div>
+                            )}
                             <button
                                 type="button"
                                 onClick={() => setProgressiveLoadEnabled((prev) => !prev)}
