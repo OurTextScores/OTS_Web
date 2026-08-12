@@ -143,6 +143,7 @@ import { MusicXmlPanel, CODE_EDITOR_THEME_OPTIONS } from './score-editor/MusicXm
 import { AiToolsTabStrip, type AiToolsTab } from './score-editor/ai-tools/AiToolsTabStrip';
 import { resolveComparePaneStatus } from './score-editor/compare/compare-pane-status';
 import { CompareScorePane } from './score-editor/compare/CompareScorePane';
+import { ScannerSystemRows } from './score-editor/compare/ScannerSystemRows';
 import { XmlDiffView } from './score-editor/XmlDiffView';
 import {
     useAiAssistantController,
@@ -1311,6 +1312,10 @@ export default function ScoreEditor() {
     const compareRegionsUrl = searchParams.get('compareRegions')?.trim() || '';
     const isCompareEmbedMode = Boolean(compareLeftUrl && compareRightUrl);
     const isSuppliedRegionsMode = isCompareEmbedMode && Boolean(compareRegionsUrl);
+    // Row-per-scanned-system layout. Opt-in, because it only makes sense when a
+    // caller can say where the scan's systems are.
+    const compareMode = searchParams.get('compareMode')?.trim() || '';
+    const isSystemRowsMode = isSuppliedRegionsMode && compareMode === 'rows';
     const isChangeReviewSingleScoreMode = Boolean(reviewScoreUrl && changeReviewId);
     const isEmbedMode = isCompareEmbedMode || isChangeReviewSingleScoreMode;
     const isChangeReviewCompareMode = isCompareEmbedMode && Boolean(changeReviewId);
@@ -1585,6 +1590,7 @@ export default function ScoreEditor() {
     const [compareRightStaffBands, setCompareRightStaffBands] = useState<StaffBands>(EMPTY_STAFF_BANDS);
     const [compareAlignments, setCompareAlignments] = useState<PartAlignment[]>([]);
     const [suppliedRegions, setSuppliedRegions] = useState<SuppliedCompareRegion[] | null>(null);
+    const [suppliedSystems, setSuppliedSystems] = useState<any[]>([]);
     const [suppliedRegionsError, setSuppliedRegionsError] = useState<string | null>(null);
     const [compareAlignmentLoading, setCompareAlignmentLoading] = useState(false);
     const [compareAlignmentRevision, setCompareAlignmentRevision] = useState(0);
@@ -2730,12 +2736,14 @@ export default function ScoreEditor() {
                 // would hide differences that were computed correctly.
                 if (body?.analysisStatus && body.analysisStatus !== 'succeeded') {
                     setSuppliedRegions([]);
+                    setSuppliedSystems([]);
                     setSuppliedRegionsError(
                         body?.refusalReasons?.[0]?.detail || 'These readings could not be compared.',
                     );
                     return;
                 }
                 setSuppliedRegions(Array.isArray(body?.regions) ? body.regions : []);
+                setSuppliedSystems(Array.isArray(body?.systems) ? body.systems : []);
             })
             .catch((err) => {
                 if (cancelled || controller.signal.aborted) return;
@@ -17851,6 +17859,20 @@ ${partsBodyXml}
                         </div>
                         )}
                         <div className={isEmbedMode ? "flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4" : "flex min-h-0 flex-1 flex-col gap-4 overflow-auto"}>
+                            {isSystemRowsMode ? (
+                                <ScannerSystemRows
+                                    systems={suppliedSystems}
+                                    regions={suppliedRegions || []}
+                                    leftXml={compareLeftXml}
+                                    rightXml={compareRightXml}
+                                    leftLabel={compareLeftLabel}
+                                    rightLabel={compareRightLabel}
+                                    resolveUrl={(relative) =>
+                                        new URL(relative, new URL(compareRegionsUrl, window.location.href)).toString()
+                                    }
+                                />
+                            ) : (
+                            <>
                             {isAiCompareMode && (
                                 <AiCompareWorkspace
                                     proposalController={aiProposalController}
@@ -18096,6 +18118,8 @@ ${partsBodyXml}
                                 leftXml={compareLeftXml}
                                 rightXml={compareRightXml}
                             />
+                            </>
+                            )}
                         </div>
                     </div>
                 </div>
