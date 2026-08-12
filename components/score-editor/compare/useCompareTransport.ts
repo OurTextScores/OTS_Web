@@ -2,6 +2,7 @@ import {
     useCallback,
     useEffect,
     useLayoutEffect,
+    useMemo,
     useRef,
     useState,
     type MutableRefObject,
@@ -10,6 +11,17 @@ import type { Score, SynthAudioBatchIterator } from '@/lib/webmscore-loader';
 import type { CompareSide, CompareTransportState } from './compare-types';
 
 export type { CompareSide, CompareTransportState };
+
+/**
+ * Every position a compare workspace can hold a score at.
+ *
+ * Two-pane workspaces simply leave `middle` null. Keyed rather than duplicated
+ * per side because this hook previously carried one set of state and refs for
+ * `left` and another for `right`, with a two-armed ternary to pick between
+ * them — the shape `compare-types.ts` warns about, and one that silently
+ * treats any third position as `right`.
+ */
+const COMPARE_SIDES: readonly CompareSide[] = ['left', 'middle', 'right'];
 
 export type CompareStreamTarget = {
     sourcesRef: MutableRefObject<AudioBufferSourceNode[]>;
@@ -50,65 +62,51 @@ type CompareTransportOptions = {
     trackOperation?: <T>(operation: Promise<T>) => Promise<T>;
 };
 
+const idleState = (): CompareTransportState => ({
+    isPlaying: false,
+    isPaused: false,
+    isBusy: false,
+});
+
+const bySide = <T,>(make: () => T): Record<CompareSide, T> => ({
+    left: make(),
+    middle: make(),
+    right: make(),
+});
+
 export function useCompareTransport(options: CompareTransportOptions) {
     const optionsRef = useRef(options);
     useLayoutEffect(() => {
         optionsRef.current = options;
     }, [options]);
 
-    const [leftIsPlaying, setLeftIsPlayingState] = useState(false);
-    const [leftIsPaused, setLeftIsPausedState] = useState(false);
-    const [leftIsBusy, setLeftIsBusy] = useState(false);
-    const [rightIsPlaying, setRightIsPlayingState] = useState(false);
-    const [rightIsPaused, setRightIsPausedState] = useState(false);
-    const [rightIsBusy, setRightIsBusy] = useState(false);
-    const leftIsPlayingRef = useRef(false);
-    const leftIsPausedRef = useRef(false);
-    const rightIsPlayingRef = useRef(false);
-    const rightIsPausedRef = useRef(false);
-    const leftSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-    const leftIteratorRef = useRef<SynthAudioBatchIterator | null>(null);
-    const leftGenerationRef = useRef(0);
-    const rightSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-    const rightIteratorRef = useRef<SynthAudioBatchIterator | null>(null);
-    const rightGenerationRef = useRef(0);
+    const [states, setStates] = useState<Record<CompareSide, CompareTransportState>>(
+        () => bySide(idleState),
+    );
+    const statesRef = useRef(states);
+    const sourcesRefs = useRef(bySide(() => ({ current: [] as AudioBufferSourceNode[] })));
+    const iteratorRefs = useRef(
+        bySide(() => ({ current: null as SynthAudioBatchIterator | null })),
+    );
+    const generationRefs = useRef(bySide(() => ({ current: 0 })));
 
-    const setLeftIsPlaying = useCallback((value: boolean) => {
-        leftIsPlayingRef.current = value;
-        setLeftIsPlayingState(value);
-    }, []);
-    const setLeftIsPaused = useCallback((value: boolean) => {
-        leftIsPausedRef.current = value;
-        setLeftIsPausedState(value);
-    }, []);
-    const setRightIsPlaying = useCallback((value: boolean) => {
-        rightIsPlayingRef.current = value;
-        setRightIsPlayingState(value);
-    }, []);
-    const setRightIsPaused = useCallback((value: boolean) => {
-        rightIsPausedRef.current = value;
-        setRightIsPausedState(value);
+    const update = useCallback((side: CompareSide, patch: Partial<CompareTransportState>) => {
+        statesRef.current = {
+            ...statesRef.current,
+            [side]: { ...statesRef.current[side], ...patch },
+        };
+        setStates(statesRef.current);
     }, []);
 
-    const getSideTransport = useCallback((side: CompareSide) => (side === 'left' ? {
-        isPlayingRef: leftIsPlayingRef,
-        isPausedRef: leftIsPausedRef,
-        setIsPlaying: setLeftIsPlaying,
-        setIsPaused: setLeftIsPaused,
-        setIsBusy: setLeftIsBusy,
-        sourcesRef: leftSourcesRef,
-        iteratorRef: leftIteratorRef,
-        generationRef: leftGenerationRef,
-    } : {
-        isPlayingRef: rightIsPlayingRef,
-        isPausedRef: rightIsPausedRef,
-        setIsPlaying: setRightIsPlaying,
-        setIsPaused: setRightIsPaused,
-        setIsBusy: setRightIsBusy,
-        sourcesRef: rightSourcesRef,
-        iteratorRef: rightIteratorRef,
-        generationRef: rightGenerationRef,
-    }), [setLeftIsPaused, setLeftIsPlaying, setRightIsPaused, setRightIsPlaying]);
+    const getSideTransport = useCallback((side: CompareSide) => ({
+        state: () => statesRef.current[side],
+        setIsPlaying: (value: boolean) => update(side, { isPlaying: value }),
+        setIsPaused: (value: boolean) => update(side, { isPaused: value }),
+        setIsBusy: (value: boolean) => update(side, { isBusy: value }),
+        sourcesRef: sourcesRefs.current[side],
+        iteratorRef: iteratorRefs.current[side],
+        generationRef: generationRefs.current[side],
+    }), [update]);
 
     const track = useCallback(<T,>(operation: Promise<T>): Promise<T> => (
         optionsRef.current.trackOperation?.(operation) ?? operation
@@ -128,32 +126,41 @@ export function useCompareTransport(options: CompareTransportOptions) {
                 transport.iteratorRef,
                 stopOptions,
             );
-            transport.setIsPlaying(false);
-            transport.setIsPaused(false);
-            transport.setIsBusy(false);
+            update(side, idleState());
         })());
-    }, [getSideTransport, track]);
+    }, [getSideTransport, track, update]);
 
     const pauseSideAudio = useCallback(async (side: CompareSide) => {
         const audioContext = optionsRef.current.audioContextRef.current;
         if (audioContext?.state === 'running') {
             await audioContext.suspend();
         }
-        getSideTransport(side).setIsPaused(true);
-    }, [getSideTransport]);
+        update(side, { isPaused: true });
+    }, [update]);
 
     const resumeSideAudio = useCallback(async (side: CompareSide) => {
         const audioContext = optionsRef.current.audioContextRef.current;
         if (audioContext?.state === 'suspended') {
             await audioContext.resume();
         }
-        getSideTransport(side).setIsPaused(false);
-    }, [getSideTransport]);
+        update(side, { isPaused: false });
+    }, [update]);
 
-    const playSideAudio = useCallback(async (side: CompareSide) => {
+    /**
+     * `range` plays one measure span rather than the whole score.
+     *
+     * The scanner's rows are systems of a scanned page, and the reviewer is
+     * asking "does this line sound right" — starting every reading from bar one
+     * would answer a question nobody asked. Falls back to whole-score playback
+     * when the build does not expose a ranged synth.
+     */
+    const playSideAudio = useCallback(async (
+        side: CompareSide,
+        range?: { startMeasureIndex: number; endMeasureIndex: number },
+    ) => {
         const transport = getSideTransport(side);
         const targetScore = optionsRef.current.scores[side];
-        if (!targetScore?.synthAudioBatch) {
+        if (!targetScore?.synthAudioBatch && !targetScore?.synthAudioBatchForMeasureRange) {
             optionsRef.current.reportUnavailable();
             return;
         }
@@ -180,16 +187,28 @@ export function useCompareTransport(options: CompareTransportOptions) {
             if (!isCurrent()) {
                 return;
             }
-            const otherSide = side === 'left' ? 'right' : 'left';
-            await stopSideAudio(otherSide, { awaitCancel: true });
+            // One transport is active at a time. With three panes this is no
+            // longer "the other side" — comparing by ear means hearing one
+            // reading at a time, and two at once is noise, not a comparison.
+            await Promise.all(
+                COMPARE_SIDES.filter((other) => other !== side).map((other) => (
+                    stopSideAudio(other, { awaitCancel: true })
+                )),
+            );
             if (!isCurrent()) {
                 return;
             }
 
-            const iterator = await targetScore.synthAudioBatch(
-                0,
-                optionsRef.current.batchSize,
-            ) as SynthAudioBatchIterator;
+            const iterator = (range && targetScore.synthAudioBatchForMeasureRange
+                ? await targetScore.synthAudioBatchForMeasureRange(
+                      range.startMeasureIndex,
+                      range.endMeasureIndex,
+                      optionsRef.current.batchSize,
+                  )
+                : await targetScore.synthAudioBatch!(
+                      0,
+                      optionsRef.current.batchSize,
+                  )) as SynthAudioBatchIterator;
             if (!isCurrent()) {
                 // Track the cancel: this iterator already holds engine state for
                 // targetScore, and teardown must not destroy it mid-cancel.
@@ -217,47 +236,44 @@ export function useCompareTransport(options: CompareTransportOptions) {
         }
     }, [getSideTransport, stopSideAudio, track]);
 
-    const toggleSidePlayPause = useCallback(async (side: CompareSide) => {
-        const transport = getSideTransport(side);
-        if (transport.isPlayingRef.current && !transport.isPausedRef.current) {
+    const toggleSidePlayPause = useCallback(async (
+        side: CompareSide,
+        range?: { startMeasureIndex: number; endMeasureIndex: number },
+    ) => {
+        const state = statesRef.current[side];
+        if (state.isPlaying && !state.isPaused) {
             await pauseSideAudio(side);
             return;
         }
-        if (transport.isPausedRef.current) {
+        if (state.isPaused) {
             await resumeSideAudio(side);
             return;
         }
-        await playSideAudio(side);
-    }, [getSideTransport, pauseSideAudio, playSideAudio, resumeSideAudio]);
+        await playSideAudio(side, range);
+    }, [pauseSideAudio, playSideAudio, resumeSideAudio]);
 
-    const previousLeftScoreRef = useRef<Score | null>(null);
-    const previousRightScoreRef = useRef<Score | null>(null);
+    // A score that has been replaced must not keep playing: the audio would no
+    // longer be of anything on screen.
+    const previousScoresRef = useRef<Record<CompareSide, Score | null>>(bySide(() => null));
     useEffect(() => {
-        if (previousLeftScoreRef.current && previousLeftScoreRef.current !== options.scores.left) {
-            void stopSideAudio('left');
+        for (const side of COMPARE_SIDES) {
+            const previous = previousScoresRef.current[side];
+            if (previous && previous !== options.scores[side]) {
+                void stopSideAudio(side);
+            }
+            previousScoresRef.current[side] = options.scores[side];
         }
-        previousLeftScoreRef.current = options.scores.left;
-    }, [options.scores.left, stopSideAudio]);
-    useEffect(() => {
-        if (previousRightScoreRef.current && previousRightScoreRef.current !== options.scores.right) {
-            void stopSideAudio('right');
-        }
-        previousRightScoreRef.current = options.scores.right;
-    }, [options.scores.right, stopSideAudio]);
+    }, [options.scores, stopSideAudio]);
 
-    return {
-        left: {
-            isPlaying: leftIsPlaying,
-            isPaused: leftIsPaused,
-            isBusy: leftIsBusy,
-        } satisfies CompareTransportState,
-        right: {
-            isPlaying: rightIsPlaying,
-            isPaused: rightIsPaused,
-            isBusy: rightIsBusy,
-        } satisfies CompareTransportState,
+    return useMemo(() => ({
+        left: states.left,
+        middle: states.middle,
+        right: states.right,
+        states,
         playSideAudio,
         stopSideAudio,
         toggleSidePlayPause,
-    };
+    }), [playSideAudio, states, stopSideAudio, toggleSidePlayPause]);
 }
+
+export type CompareTransport = ReturnType<typeof useCompareTransport>;

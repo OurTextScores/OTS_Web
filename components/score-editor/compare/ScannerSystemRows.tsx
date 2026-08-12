@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadWebMscore, type Positions, type Score } from '@/lib/webmscore-loader';
 import { routeCompareKeyboardShortcut } from './compare-keyboard-policy';
+import type { CompareSide, CompareTransportState } from './compare-types';
+import type { CompareTransport } from './useCompareTransport';
 import {
     measureCount,
     useMergedScoreDocument,
@@ -173,12 +175,17 @@ function SystemPane({
     paneWidth,
     tone,
     onPointMutate,
+    transport,
+    onTogglePlay,
 }: {
     rendered: RenderedSide | null;
     measureIndexes: number[];
     label: string;
     paneWidth: number;
     tone?: 'merged';
+    /** Playback state for this pane, when the workspace supplies a transport. */
+    transport?: CompareTransportState;
+    onTogglePlay?: () => void;
     /**
      * Score-space coordinates of a click, for the one pane that is editable.
      * Absent on engine panes, which is what makes them read-only: there is no
@@ -288,6 +295,31 @@ function SystemPane({
                 // The SVG comes from the engine build, not from user input.
                 dangerouslySetInnerHTML={{ __html: rendered.svg }}
             />
+            {onTogglePlay && (
+                /*
+                    Playback is read-only, so it costs the engine panes nothing
+                    — and a wrong pitch or a dropped beat announces itself in a
+                    second of audio, which is often faster than reading for it.
+                */
+                <button
+                    type="button"
+                    onClick={(event) => {
+                        // The merged pane turns a click into an edit; playing it
+                        // must not also place a note.
+                        event.stopPropagation();
+                        onTogglePlay();
+                    }}
+                    disabled={transport?.isBusy}
+                    aria-label={`${transport?.isPlaying && !transport?.isPaused ? 'Pause' : 'Play'} ${label}`}
+                    className="absolute right-1 top-1 rounded border border-gray-300 bg-white/90 px-1.5 py-0.5 text-[11px] leading-none shadow-sm hover:bg-white disabled:opacity-50"
+                >
+                    {transport?.isBusy
+                        ? '…'
+                        : transport?.isPlaying && !transport?.isPaused
+                          ? '❚❚'
+                          : '▶'}
+                </button>
+            )}
         </div>
     );
 }
@@ -311,6 +343,8 @@ export function ScannerSystemRows({
     leftEngineId,
     rightEngineId,
     merged: mergedState,
+    transport,
+    onMergedScoreChange,
     resolveUrl,
 }: {
     systems: ScannerSystem[];
@@ -322,6 +356,17 @@ export function ScannerSystemRows({
     leftEngineId?: string;
     rightEngineId?: string;
     merged?: MergedScoreState | null;
+    /**
+     * Playback for all three panes, owned by the workspace so there is one
+     * transport rather than a second competing one. Absent in tests that do not
+     * exercise audio.
+     */
+    transport?: CompareTransport;
+    /**
+     * The merged score is owned here — this is where it is edited — but the
+     * transport lives with the workspace, so it has to be reported upward.
+     */
+    onMergedScoreChange?: (score: Score | null) => void;
     resolveUrl: (relative: string) => string;
 }) {
     const [left, setLeft] = useState<RenderedSide | null>(null);
@@ -430,6 +475,10 @@ export function ScannerSystemRows({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [mergeSourceXml, systems.length, mergeSource]);
 
+    useEffect(() => {
+        onMergedScoreChange?.(mergedScore);
+    }, [mergedScore, onMergedScoreChange]);
+
     // Re-render the merged rows after every edit.
     useEffect(() => {
         if (!mergedScore) {
@@ -476,6 +525,25 @@ export function ScannerSystemRows({
         setPaneWidth(node.clientWidth);
         return () => observer.disconnect();
     }, []);
+
+    /**
+     * Playback for one pane of one row, over that row's measures only.
+     *
+     * A button on system 7 that started the reading from bar one would answer a
+     * question nobody asked — the reviewer is deciding whether *this line*
+     * sounds right.
+     */
+    const paneTransport = (side: CompareSide, measureIndexes: number[]) => {
+        if (!transport || measureIndexes.length === 0) return {};
+        const range = {
+            startMeasureIndex: Math.min(...measureIndexes),
+            endMeasureIndex: Math.max(...measureIndexes),
+        };
+        return {
+            transport: transport.states[side],
+            onTogglePlay: () => void transport.toggleSidePlayPause(side, range),
+        };
+    };
 
     const mergedIndexes = (system: ScannerSystem) =>
         mergeSource === 'left' ? system.leftMeasureIndexes : system.rightMeasureIndexes;
@@ -776,6 +844,7 @@ export function ScannerSystemRows({
                                     measureIndexes={system.leftMeasureIndexes}
                                     label={leftLabel}
                                     paneWidth={paneWidth}
+                                    {...paneTransport('left', system.leftMeasureIndexes)}
                                 />
                             </div>
                             <div>
@@ -794,6 +863,7 @@ export function ScannerSystemRows({
                                     paneWidth={paneWidth}
                                     tone="merged"
                                     onPointMutate={handleMergedPoint}
+                                    {...paneTransport('middle', mergedIndexes(system))}
                                 />
                             </div>
                             <div>
@@ -805,6 +875,7 @@ export function ScannerSystemRows({
                                     measureIndexes={system.rightMeasureIndexes}
                                     label={rightLabel}
                                     paneWidth={paneWidth}
+                                    {...paneTransport('right', system.rightMeasureIndexes)}
                                 />
                             </div>
                         </div>

@@ -20,8 +20,9 @@ const deferred = <T,>() => {
 const makeScore = () => {
     const iterator = vi.fn(async () => undefined) as unknown as SynthAudioBatchIterator;
     const synthAudioBatch = vi.fn(async () => iterator);
-    const score = { synthAudioBatch } as unknown as Score;
-    return { iterator, score, synthAudioBatch };
+    const synthAudioBatchForMeasureRange = vi.fn(async () => iterator);
+    const score = { synthAudioBatch, synthAudioBatchForMeasureRange } as unknown as Score;
+    return { iterator, score, synthAudioBatch, synthAudioBatchForMeasureRange };
 };
 
 const renderTransport = (
@@ -198,22 +199,66 @@ describe('useCompareTransport', () => {
         expect(destroy).toHaveBeenCalledOnce();
     });
 
-    it('stops the main and opposite transports before starting a side', async () => {
+    it('leaves exactly one transport playing, whichever pane it is', async () => {
+        // The scanner comparator has three panes, so "stop the other side" is no
+        // longer well defined — comparing by ear means hearing one reading at a
+        // time, and two at once is noise rather than a comparison.
         const left = makeScore();
+        const middle = makeScore();
         const right = makeScore();
         const transport = renderTransport(
-            { left: left.score, middle: null, right: right.score },
+            { left: left.score, middle: middle.score, right: right.score },
             vi.fn(async () => true),
         );
 
         await act(async () => transport.result.current.playSideAudio('left'));
         expect(transport.result.current.left.isPlaying).toBe(true);
 
-        await act(async () => transport.result.current.playSideAudio('right'));
-
-        expect(transport.stopMainAudio).toHaveBeenCalledTimes(2);
-        expect(transport.stopStream).toHaveBeenCalledTimes(2);
+        await act(async () => transport.result.current.playSideAudio('middle'));
         expect(transport.result.current.left.isPlaying).toBe(false);
+        expect(transport.result.current.middle.isPlaying).toBe(true);
+        expect(transport.result.current.right.isPlaying).toBe(false);
+
+        await act(async () => transport.result.current.playSideAudio('right'));
+        expect(transport.result.current.left.isPlaying).toBe(false);
+        expect(transport.result.current.middle.isPlaying).toBe(false);
         expect(transport.result.current.right.isPlaying).toBe(true);
+
+        // The editor's own playback is stopped on every attempt, not just the first.
+        expect(transport.stopMainAudio).toHaveBeenCalledTimes(3);
+    });
+
+    it('plays only the row the reviewer asked about', async () => {
+        // The scanner's rows are systems of a scanned page. A play button on
+        // system 7 that started from bar one would answer a question nobody
+        // asked.
+        const left = makeScore();
+        const transport = renderTransport(
+            { left: left.score, middle: null, right: null },
+            vi.fn(async () => true),
+        );
+
+        await act(async () =>
+            transport.result.current.playSideAudio('left', {
+                startMeasureIndex: 12,
+                endMeasureIndex: 15,
+            }),
+        );
+
+        expect(left.synthAudioBatchForMeasureRange).toHaveBeenCalledWith(12, 15, expect.any(Number));
+        expect(left.synthAudioBatch).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the whole score when no row is named', async () => {
+        const left = makeScore();
+        const transport = renderTransport(
+            { left: left.score, middle: null, right: null },
+            vi.fn(async () => true),
+        );
+
+        await act(async () => transport.result.current.playSideAudio('left'));
+
+        expect(left.synthAudioBatch).toHaveBeenCalledWith(0, expect.any(Number));
+        expect(left.synthAudioBatchForMeasureRange).not.toHaveBeenCalled();
     });
 });

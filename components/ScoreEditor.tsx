@@ -1597,6 +1597,7 @@ export default function ScoreEditor() {
     // The page's merged score, carried by the regions document because this
     // embed reaches the scanner only through the host's proxy.
     const [suppliedMerged, setSuppliedMerged] = useState<MergedScoreState | null>(null);
+    const [scannerMergedScore, setScannerMergedScore] = useState<Score | null>(null);
     // Engine identity, which the merged score must name: a merge that does not
     // record where it started from cannot be re-examined later.
     const [suppliedCompareLeftEngineId, setSuppliedCompareLeftEngineId] = useState<string>('');
@@ -14697,9 +14698,11 @@ ${partsBodyXml}
     const compareTransport = useCompareTransport({
         scores: {
             left: compareLeftScore,
-            // This workspace compares two documents; the scanner comparator is
-            // the one with a third.
-            middle: null,
+            // The scanner's merged score, when the row layout is showing one.
+            // It is owned by `ScannerSystemRows` — which is where it is edited —
+            // and reported up to here so playback has one transport for all
+            // three panes rather than a second, competing one.
+            middle: scannerMergedScore,
             right: compareRightScoreDisplay,
         },
         audioContextRef: audioCtxRef,
@@ -17904,6 +17907,8 @@ ${partsBodyXml}
                                     leftEngineId={suppliedCompareLeftEngineId}
                                     rightEngineId={suppliedCompareRightEngineId}
                                     merged={suppliedMerged}
+                                    transport={compareTransport}
+                                    onMergedScoreChange={setScannerMergedScore}
                                     resolveUrl={(relative) =>
                                         new URL(relative, new URL(compareRegionsUrl, window.location.href)).toString()
                                     }
