@@ -1,5 +1,7 @@
 'use client';
 
+import type { CompareSide } from './compare/compare-types';
+
 export function ComparePaneEditorControls({
     side,
     active,
@@ -13,7 +15,7 @@ export function ComparePaneEditorControls({
     onToggleNoteInput,
     onOpenPalettes,
 }: {
-    side: 'left' | 'right';
+    side: CompareSide;
     active: boolean;
     busy: boolean;
     noteInputActive: boolean;

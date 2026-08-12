@@ -1,30 +1,10 @@
 import { detectScoreInputFormat } from './public-score-url';
 import {
+    decodeScoreXml as decodeSavedXml,
     loadWebMscore,
     loadWebMscoreInProcess,
     type Score,
 } from './webmscore-loader';
-
-const decodeSavedXml = async (value: unknown): Promise<string> => {
-    if (typeof value === 'string') {
-        return value;
-    }
-    if (value instanceof Uint8Array) {
-        return new TextDecoder().decode(value);
-    }
-    if (value instanceof ArrayBuffer) {
-        return new TextDecoder().decode(new Uint8Array(value));
-    }
-    if (ArrayBuffer.isView(value)) {
-        return new TextDecoder().decode(
-            new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
-        );
-    }
-    if (value instanceof Blob) {
-        return value.text();
-    }
-    throw new Error('The score engine returned an unsupported MusicXML payload.');
-};
 
 /** Load any editor-supported score file and return a MusicXML snapshot for comparison. */
 export async function loadCompareScoreMusicXml(file: File): Promise<string> {

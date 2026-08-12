@@ -5,7 +5,11 @@ const mocked = vi.hoisted(() => ({
     loadWebMscoreInProcess: vi.fn(),
 }));
 
-vi.mock('../lib/webmscore-loader', () => ({
+// Only the loaders are faked. `decodeScoreXml` is real logic worth exercising
+// here rather than stubbing — it is what turns whatever the engine returned
+// into the MusicXML this function promises.
+vi.mock('../lib/webmscore-loader', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../lib/webmscore-loader')>()),
     loadWebMscore: mocked.loadWebMscore,
     loadWebMscoreInProcess: mocked.loadWebMscoreInProcess,
 }));

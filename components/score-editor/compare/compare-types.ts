@@ -1,13 +1,20 @@
 /**
  * Role and side vocabulary shared by every compare module.
  *
- * `CompareScoreRole` ('current' | 'proposal') is score identity and owns editing
- * state. `CompareSide` ('left' | 'right') is visual position and owns DOM refs and
- * scroll state only. Never derive one from the other.
+ * `CompareScoreRole` ('current' | 'proposal' | 'merged') is score identity and
+ * owns editing state. `CompareSide` ('left' | 'middle' | 'right') is visual
+ * position and owns DOM refs and scroll state only. Never derive one from the
+ * other: two separate defects have already come from a `left`-named value
+ * holding live-keyed data, and a third pane makes that trap easier to fall
+ * into, not harder.
+ *
+ * Two-pane comparators use only the first two values of each. The third exists
+ * for the scanner comparator, whose merged score is a document in its own
+ * right at a position of its own.
  */
 export type { CompareScoreRole } from '@/lib/compare-user-edit-diff';
 
-export type CompareSide = 'left' | 'right';
+export type CompareSide = 'left' | 'middle' | 'right';
 
 export type CompareTransportState = {
     isPlaying: boolean;

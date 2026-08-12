@@ -144,6 +144,7 @@ import { AiToolsTabStrip, type AiToolsTab } from './score-editor/ai-tools/AiTool
 import { resolveComparePaneStatus } from './score-editor/compare/compare-pane-status';
 import { CompareScorePane } from './score-editor/compare/CompareScorePane';
 import { ScannerSystemRows } from './score-editor/compare/ScannerSystemRows';
+import type { MergedScoreState } from './score-editor/compare/useMergedScoreDocument';
 import { XmlDiffView } from './score-editor/XmlDiffView';
 import {
     useAiAssistantController,
@@ -1549,7 +1550,9 @@ export default function ScoreEditor() {
     const [compareRightError, setCompareRightError] = useState<string | null>(null);
     const [compareFitZoom, setCompareFitZoom] = useState(0.5);
     const [compareZoom, setCompareZoom] = useState<number | null>(null);
-    const [compareActiveSide, setCompareActiveSide] = useState<'left' | 'right' | null>(null);
+    // Widened with `CompareSide`; this two-pane workspace never sets 'middle',
+    // but the shared compare modules are keyed by the full position vocabulary.
+    const [compareActiveSide, setCompareActiveSide] = useState<CompareSide | null>(null);
     const compareEditing = useCompareEditing<SelectionBox, NoteInputCursorRect>();
     const {
         busy: compareEditBusy,
@@ -1591,6 +1594,13 @@ export default function ScoreEditor() {
     const [compareAlignments, setCompareAlignments] = useState<PartAlignment[]>([]);
     const [suppliedRegions, setSuppliedRegions] = useState<SuppliedCompareRegion[] | null>(null);
     const [suppliedSystems, setSuppliedSystems] = useState<any[]>([]);
+    // The page's merged score, carried by the regions document because this
+    // embed reaches the scanner only through the host's proxy.
+    const [suppliedMerged, setSuppliedMerged] = useState<MergedScoreState | null>(null);
+    // Engine identity, which the merged score must name: a merge that does not
+    // record where it started from cannot be re-examined later.
+    const [suppliedCompareLeftEngineId, setSuppliedCompareLeftEngineId] = useState<string>('');
+    const [suppliedCompareRightEngineId, setSuppliedCompareRightEngineId] = useState<string>('');
     const [suppliedRegionsError, setSuppliedRegionsError] = useState<string | null>(null);
     const [compareAlignmentLoading, setCompareAlignmentLoading] = useState(false);
     const [compareAlignmentRevision, setCompareAlignmentRevision] = useState(0);
@@ -2737,6 +2747,9 @@ export default function ScoreEditor() {
                 if (body?.analysisStatus && body.analysisStatus !== 'succeeded') {
                     setSuppliedRegions([]);
                     setSuppliedSystems([]);
+                    setSuppliedMerged(null);
+                    setSuppliedCompareLeftEngineId('');
+                    setSuppliedCompareRightEngineId('');
                     setSuppliedRegionsError(
                         body?.refusalReasons?.[0]?.detail || 'These readings could not be compared.',
                     );
@@ -2744,6 +2757,9 @@ export default function ScoreEditor() {
                 }
                 setSuppliedRegions(Array.isArray(body?.regions) ? body.regions : []);
                 setSuppliedSystems(Array.isArray(body?.systems) ? body.systems : []);
+                setSuppliedMerged(body?.merged ?? null);
+                setSuppliedCompareLeftEngineId(String(body?.left?.engineId || ''));
+                setSuppliedCompareRightEngineId(String(body?.right?.engineId || ''));
             })
             .catch((err) => {
                 if (cancelled || controller.signal.aborted) return;
@@ -3162,11 +3178,20 @@ export default function ScoreEditor() {
     const compareRightRole: CompareScoreRole | null = compareRightScoreDisplay
         ? (compareRightIsCurrent ? 'current' : 'proposal')
         : null;
-    const compareActiveScore = compareActiveSide === 'left'
-        ? compareLeftScore
-        : compareActiveSide === 'right'
-            ? compareRightScoreDisplay
-            : null;
+    /**
+     * The score at a position in *this* workspace, which has only two.
+     *
+     * `CompareSide` carries a third value for the scanner comparator's merged
+     * pane. Resolving it to null here is the honest answer — folding it into
+     * 'right' with a two-armed ternary is how a position-keyed value ends up
+     * holding another pane's score, which has already caused two defects.
+     */
+    const compareScoreForSide = useCallback((side: CompareSide | null): Score | null => {
+        if (side === 'left') return compareLeftScore;
+        if (side === 'right') return compareRightScoreDisplay;
+        return null;
+    }, [compareLeftScore, compareRightScoreDisplay]);
+    const compareActiveScore = compareScoreForSide(compareActiveSide);
     const compareActiveRole: CompareScoreRole | null = compareActiveScore
         ? (compareActiveScore === score ? 'current' : 'proposal')
         : null;
@@ -6796,7 +6821,7 @@ ${partsBodyXml}
     const refreshCompareSelectionGeometry = useCallback(async (
         targetScore: Score,
         role: CompareScoreRole,
-        side: 'left' | 'right',
+        side: CompareSide,
         selected?: boolean,
         isCurrent?: () => boolean,
     ) => {
@@ -6923,9 +6948,15 @@ ${partsBodyXml}
 
     const renderEditedCompareScore = useCallback(async (
         targetScore: Score,
-        side: 'left' | 'right',
+        side: CompareSide,
         highlightSelection = true,
     ) => {
+        // Written out rather than `side === 'left' ? … : …` because that shape
+        // silently folds any third position into 'right'. This workspace has
+        // only two, and saying so is how it stays true.
+        if (side !== 'left' && side !== 'right') {
+            return;
+        }
         const container = side === 'left' ? compareLeftContainerRef.current : compareRightContainerRef.current;
         const setSize = side === 'left' ? setCompareLeftSvgSize : setCompareRightSvgSize;
         const setPositions = side === 'left' ? setCompareLeftMeasurePositions : setCompareRightMeasurePositions;
@@ -7027,9 +7058,9 @@ ${partsBodyXml}
 
     const setCompareNoteInputMode = useCallback(async (
         enabled: boolean,
-        side: 'left' | 'right' = compareActiveSide ?? 'left',
+        side: CompareSide = compareActiveSide ?? 'left',
     ) => {
-        const targetScore = side === 'left' ? compareLeftScore : compareRightScoreDisplay;
+        const targetScore = compareScoreForSide(side);
         if (
             !targetScore?.setNoteEntryMode
             || isCompareEditBusy()
@@ -7102,8 +7133,8 @@ ${partsBodyXml}
         trackCompareOperation,
     ]);
 
-    const toggleCompareNoteInputMode = useCallback((side: 'left' | 'right') => {
-        const targetScore = side === 'left' ? compareLeftScore : compareRightScoreDisplay;
+    const toggleCompareNoteInputMode = useCallback((side: CompareSide) => {
+        const targetScore = compareScoreForSide(side);
         if (!targetScore) {
             return;
         }
@@ -14666,6 +14697,9 @@ ${partsBodyXml}
     const compareTransport = useCompareTransport({
         scores: {
             left: compareLeftScore,
+            // This workspace compares two documents; the scanner comparator is
+            // the one with a third.
+            middle: null,
             right: compareRightScoreDisplay,
         },
         audioContextRef: audioCtxRef,
@@ -17867,6 +17901,9 @@ ${partsBodyXml}
                                     rightXml={compareRightXml}
                                     leftLabel={compareLeftLabel}
                                     rightLabel={compareRightLabel}
+                                    leftEngineId={suppliedCompareLeftEngineId}
+                                    rightEngineId={suppliedCompareRightEngineId}
+                                    merged={suppliedMerged}
                                     resolveUrl={(relative) =>
                                         new URL(relative, new URL(compareRegionsUrl, window.location.href)).toString()
                                     }

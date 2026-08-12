@@ -25,12 +25,17 @@ describe('useCompareEditing', () => {
             result.current.setNoteInputCursor('proposal', { voice: 2 });
         });
 
+        // Three roles: the scanner comparator's merged score is a document in
+        // its own right, and its editing state must not be shared with either
+        // engine reading.
         expect(result.current.state.selectionBoxesByRole).toEqual({
             current: [],
+            merged: [],
             proposal: [{ x: 12 }],
         });
         expect(result.current.state.noteInputByRole).toEqual({
             current: false,
+            merged: false,
             proposal: true,
         });
         expect(result.current.state.noteInputCursorByRole.proposal).toEqual({ voice: 2 });

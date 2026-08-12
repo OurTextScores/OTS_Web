@@ -25,7 +25,9 @@ const makeScore = () => {
 };
 
 const renderTransport = (
-    scores: { left: Score | null; right: Score | null },
+    // `middle` is the scanner comparator's merged pane; a two-pane transport
+    // simply has no score there.
+    scores: { left: Score | null; middle: Score | null; right: Score | null },
     ensureSoundFontLoaded: (score: Score, options: { forceRetry: boolean }) => Promise<boolean>,
 ) => {
     const audioContextRef = createRef<AudioContext | null>();
@@ -65,7 +67,7 @@ describe('useCompareTransport', () => {
         const soundFont = deferred<boolean>();
         const left = makeScore();
         const transport = renderTransport(
-            { left: left.score, right: null },
+            { left: left.score, middle: null, right: null },
             vi.fn(() => soundFont.promise),
         );
 
@@ -89,7 +91,7 @@ describe('useCompareTransport', () => {
         const original = makeScore();
         const replacement = makeScore();
         const transport = renderTransport(
-            { left: original.score, right: null },
+            { left: original.score, middle: null, right: null },
             vi.fn(() => soundFont.promise),
         );
 
@@ -98,7 +100,7 @@ describe('useCompareTransport', () => {
             play = transport.result.current.playSideAudio('left');
             await Promise.resolve();
         });
-        transport.rerender({ nextScores: { left: replacement.score, right: null } });
+        transport.rerender({ nextScores: { left: replacement.score, middle: null, right: null } });
         await waitFor(() => expect(transport.stopStream).toHaveBeenCalledOnce());
         soundFont.resolve(true);
         await act(async () => play);
@@ -114,7 +116,7 @@ describe('useCompareTransport', () => {
         const soundFonts = [first.promise, second.promise];
         const left = makeScore();
         const transport = renderTransport(
-            { left: left.score, right: null },
+            { left: left.score, middle: null, right: null },
             vi.fn(() => soundFonts.shift() ?? Promise.resolve(true)),
         );
 
@@ -157,7 +159,7 @@ describe('useCompareTransport', () => {
             });
             const audioContextRef = useRef<AudioContext | null>(null);
             const transport = useCompareTransport({
-                scores: { left: null, right: auxiliaryScore },
+                scores: { left: null, middle: null, right: auxiliaryScore },
                 audioContextRef,
                 batchSize: 2,
                 ensureSoundFontLoaded: async () => true,
@@ -200,7 +202,7 @@ describe('useCompareTransport', () => {
         const left = makeScore();
         const right = makeScore();
         const transport = renderTransport(
-            { left: left.score, right: right.score },
+            { left: left.score, middle: null, right: right.score },
             vi.fn(async () => true),
         );
 

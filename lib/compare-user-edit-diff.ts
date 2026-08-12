@@ -1,6 +1,15 @@
 import { createTwoFilesPatch } from 'diff';
 
-export type CompareScoreRole = 'current' | 'proposal';
+/**
+ * Score identity in a compare workspace.
+ *
+ * `merged` is the scanner comparator's third document (its design §3): a score
+ * the reviewer owns, distinct from both engine readings, and the only one of
+ * the three that is editable. It is a role rather than a flag because the
+ * identity/position split these types exist to enforce becomes *more*
+ * load-bearing with three panes, not less — see `compare-types.ts`.
+ */
+export type CompareScoreRole = 'current' | 'proposal' | 'merged';
 
 export type CompareUserEditDiff = {
   side: CompareScoreRole;

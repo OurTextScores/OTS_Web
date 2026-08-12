@@ -461,3 +461,36 @@ export const loadWebMscoreInProcess = async (): Promise<WebMscoreInstance> => {
         inProcessInitPromise = null;
     }
 };
+
+/**
+ * Decode whatever this build of webmscore returned from `saveXml`.
+ *
+ * Deliberately not `new TextDecoder().decode(value)`: the bytes can arrive from
+ * another realm (the WASM module, a worker, or an embed iframe), where
+ * `value instanceof Uint8Array` is false even though the value is a perfectly
+ * good typed array. `TextDecoder` then refuses it with a message that says
+ * nothing about realms, and the symptom is a save that silently does nothing.
+ */
+export async function decodeScoreXml(value: unknown): Promise<string> {
+    if (typeof value === 'string') {
+        return value;
+    }
+    // `ArrayBuffer.isView` is realm-safe by specification; `instanceof` is not,
+    // which is the whole point of this function.
+    if (ArrayBuffer.isView(value)) {
+        return new TextDecoder().decode(
+            new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
+        );
+    }
+    // For a bare buffer there is no `isView` equivalent, so match the brand
+    // rather than the constructor — `instanceof ArrayBuffer` is false for a
+    // buffer that came from another realm, which is exactly the case here.
+    const brand = Object.prototype.toString.call(value);
+    if (brand === '[object ArrayBuffer]' || brand === '[object SharedArrayBuffer]') {
+        return new TextDecoder().decode(new Uint8Array(value as ArrayBuffer));
+    }
+    if (brand === '[object Blob]' || brand === '[object File]') {
+        return (value as Blob).text();
+    }
+    throw new Error('The score engine returned an unsupported MusicXML payload.');
+}

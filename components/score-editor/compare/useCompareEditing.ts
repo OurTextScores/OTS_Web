@@ -185,6 +185,10 @@ export function useCompareMutationController({
 const emptyRoleRecord = <T,>(value: T): RoleRecord<T> => ({
     current: value,
     proposal: value,
+    // Two-pane comparators never key anything here; the scanner's merged score
+    // does, and keying it by role is what keeps its editing state from being
+    // confused with either engine's.
+    merged: value,
 });
 
 export function useCompareEditing<TSelection, TCursor>() {

@@ -1,7 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadWebMscore, type Positions, type Score } from '@/lib/webmscore-loader';
+import { routeCompareKeyboardShortcut } from './compare-keyboard-policy';
+import {
+    measureCount,
+    useMergedScoreDocument,
+    type MergedScoreState,
+} from './useMergedScoreDocument';
 
 /**
  * The scan's systems, with each engine's measures and a crop of the source page.
@@ -76,6 +82,10 @@ type RenderedSide = {
     /** Pixel bounds per measure index, at RENDER_WIDTH. */
     measures: Array<MeasureBox | undefined>;
     width: number;
+    /** Page height in the same scaled pixels, so a click can find its page. */
+    pageHeight: number;
+    /** RENDER_WIDTH / pageWidth: undoes the scaling to reach score coordinates. */
+    renderScale: number;
 };
 
 function measureBounds(positions: Positions | null, scale: number): Array<MeasureBox | undefined> {
@@ -96,7 +106,7 @@ function measureBounds(positions: Positions | null, scale: number): Array<Measur
 }
 
 /**
- * Draw the engine's page at exactly `RENDER_WIDTH`.
+ * Draw the score's page at exactly `RENDER_WIDTH`.
  *
  * The measure coordinates below are scaled by `RENDER_WIDTH / pageWidth`, so
  * unless the SVG is drawn at that same width the clip windows point at the
@@ -116,6 +126,22 @@ function svgAtRenderWidth(svg: string): string {
     });
 }
 
+/** Draw an already-loaded score; used for the merged document, which is live. */
+async function renderScoreSide(score: Score): Promise<RenderedSide | null> {
+    const svg = await score.saveSvg(0, true, false);
+    const positions = await score.measurePositions();
+    const pageWidth = positions?.pageSize?.width || 0;
+    const renderScale = pageWidth > 0 ? RENDER_WIDTH / pageWidth : 1;
+    return {
+        svg: svgAtRenderWidth(svg),
+        measures: measureBounds(positions, renderScale),
+        width: RENDER_WIDTH,
+        pageHeight: (positions?.pageSize?.height ?? 0) * renderScale,
+        renderScale,
+    };
+}
+
+/** Draw an engine reading. Its score is transient: engine panes are evidence. */
 async function renderSide(xml: string, startIndexes: number[]): Promise<RenderedSide | null> {
     const WebMscore = await loadWebMscore();
     const reflowed = withForcedSystemBreaks(xml, startIndexes);
@@ -123,15 +149,7 @@ async function renderSide(xml: string, startIndexes: number[]): Promise<Rendered
     try {
         score = await (WebMscore as any).load('xml', new TextEncoder().encode(reflowed));
         if (!score) return null;
-        const svg = await score.saveSvg(0, true, false);
-        const positions = await score.measurePositions();
-        const pageWidth = positions?.pageSize?.width || 0;
-        const scale = pageWidth > 0 ? RENDER_WIDTH / pageWidth : 1;
-        return {
-            svg: svgAtRenderWidth(svg),
-            measures: measureBounds(positions, scale),
-            width: RENDER_WIDTH,
-        };
+        return await renderScoreSide(score);
     } finally {
         try {
             (score as any)?.destroy?.();
@@ -141,18 +159,32 @@ async function renderSide(xml: string, startIndexes: number[]): Promise<Rendered
     }
 }
 
+type PaneGeometry = {
+    /** Left edge of the system's music, in RENDER_WIDTH pixels. */
+    left: number;
+    top: number;
+    scale: number;
+};
+
 function SystemPane({
     rendered,
     measureIndexes,
     label,
     paneWidth,
     tone,
+    onPointMutate,
 }: {
     rendered: RenderedSide | null;
     measureIndexes: number[];
     label: string;
     paneWidth: number;
     tone?: 'merged';
+    /**
+     * Score-space coordinates of a click, for the one pane that is editable.
+     * Absent on engine panes, which is what makes them read-only: there is no
+     * path from a click to a mutation at all, rather than a disabled one.
+     */
+    onPointMutate?: (point: { page: number; x: number; y: number }) => void;
 }) {
     if (measureIndexes.length === 0) {
         return (
@@ -163,7 +195,7 @@ function SystemPane({
     }
     const boxes = measureIndexes
         .map((index) => rendered?.measures[index])
-        .filter((box): box is { top: number; height: number } => Boolean(box));
+        .filter((box): box is MeasureBox => Boolean(box));
     if (!rendered || boxes.length === 0) {
         return (
             <div className="flex min-h-16 items-center rounded border border-dashed border-gray-300 px-3 text-xs text-gray-500">
@@ -179,7 +211,7 @@ function SystemPane({
     // notes off, so the band is padded — but only as far as the halfway point to
     // whatever is rendered next, so a row never shows part of its neighbour.
     const others = rendered.measures.filter(
-        (box): box is { top: number; height: number } =>
+        (box): box is MeasureBox =>
             Boolean(box) && (box!.top + box!.height <= rawTop || box!.top >= rawBottom),
     );
     const nearestAbove = others
@@ -206,13 +238,46 @@ function SystemPane({
     const right = Math.max(...boxes.map((box) => box.left + box.width));
     const bandWidth = Math.max(1, right - left);
     const scale = paneWidth > 0 ? paneWidth / bandWidth : 1;
+    const geometry: PaneGeometry = { left, top, scale };
+
+    /**
+     * Undo everything the pane did to the drawing, to reach score coordinates.
+     *
+     * The pane shows a clipped, scaled window onto one long endless-layout
+     * page, so a click has to be walked back through the pane scale, the clip
+     * offset, the render scale, and finally the page stacking that
+     * `measureBounds` folded into `top`.
+     */
+    const toScorePoint = (event: React.MouseEvent<HTMLDivElement>) => {
+        if (!rendered) return null;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const renderX = (event.clientX - rect.left) / geometry.scale + geometry.left;
+        const renderY = (event.clientY - rect.top) / geometry.scale + geometry.top;
+        const page =
+            rendered.pageHeight > 0 ? Math.floor(renderY / rendered.pageHeight) : 0;
+        const pageY = renderY - page * rendered.pageHeight;
+        return {
+            page,
+            x: renderX / rendered.renderScale,
+            y: pageY / rendered.renderScale,
+        };
+    };
 
     return (
         <div
             className={`relative overflow-hidden rounded border bg-white ${
                 tone === 'merged' ? 'border-cyan-300 ring-1 ring-cyan-200' : 'border-gray-200'
-            }`}
+            } ${onPointMutate ? 'cursor-crosshair' : ''}`}
             style={{ height: Math.max(1, (bottom - top) * scale) }}
+            onClick={
+                onPointMutate
+                    ? (event) => {
+                          const point = toScorePoint(event);
+                          if (point) onPointMutate(point);
+                      }
+                    : undefined
+            }
+            data-testid={tone === 'merged' ? 'merged-system-pane' : undefined}
         >
             <div
                 className="absolute left-0 top-0 origin-top-left"
@@ -229,7 +294,12 @@ function SystemPane({
 
 /**
  * The page, one scanned system at a time: the scan, then each engine's reading
- * of it. Read-only — no decisions are offered here (design §8, S1).
+ * of it, with the reviewer's merged score between them.
+ *
+ * The engine panes are evidence and stay read-only — an edited HOMR pane is no
+ * longer a record of what HOMR produced, which destroys both the provenance the
+ * signature model protects and the training signal phase E depends on. The
+ * merged pane is where a correction goes (design §3.1).
  */
 export function ScannerSystemRows({
     systems,
@@ -238,6 +308,9 @@ export function ScannerSystemRows({
     rightXml,
     leftLabel,
     rightLabel,
+    leftEngineId,
+    rightEngineId,
+    merged: mergedState,
     resolveUrl,
 }: {
     systems: ScannerSystem[];
@@ -246,12 +319,19 @@ export function ScannerSystemRows({
     rightXml: string;
     leftLabel: string;
     rightLabel: string;
+    leftEngineId?: string;
+    rightEngineId?: string;
+    merged?: MergedScoreState | null;
     resolveUrl: (relative: string) => string;
 }) {
     const [left, setLeft] = useState<RenderedSide | null>(null);
     const [right, setRight] = useState<RenderedSide | null>(null);
+    const [mergedRender, setMergedRender] = useState<RenderedSide | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const [noteInput, setNoteInput] = useState(false);
+    const [hasSelection, setHasSelection] = useState(false);
+    const [notice, setNotice] = useState<string | null>(null);
     const rowRefs = useRef<Array<HTMLDivElement | null>>([]);
     const paneRef = useRef<HTMLDivElement>(null);
     const [paneWidth, setPaneWidth] = useState(0);
@@ -264,7 +344,11 @@ export function ScannerSystemRows({
      * Transcoda page" the ordinary entry point rather than a special action, and
      * per-bar decisions override it from S3 onward.
      */
-    const [mergeSource, setMergeSource] = useState<'left' | 'right'>('left');
+    const [mergeSource, setMergeSource] = useState<'left' | 'right'>(
+        mergedState?.sourceEngineId && mergedState.sourceEngineId === rightEngineId
+            ? 'right'
+            : 'left',
+    );
 
     const leftStarts = useMemo(
         () => systems.map((system) => system.leftMeasureIndexes[0]).filter((n) => n !== undefined),
@@ -274,6 +358,44 @@ export function ScannerSystemRows({
         () => systems.map((system) => system.rightMeasureIndexes[0]).filter((n) => n !== undefined),
         [systems],
     );
+
+    const mergeStarts = mergeSource === 'left' ? leftStarts : rightStarts;
+    const mergeSourceXml = mergeSource === 'left' ? leftXml : rightXml;
+    const mergedLabel = mergeSource === 'left' ? leftLabel : rightLabel;
+    const mergedEngineId = (mergeSource === 'left' ? leftEngineId : rightEngineId) || '';
+
+    /**
+     * Reflow whatever the merged document is onto the scan's systems.
+     *
+     * The persisted score is saved without imposed breaks, so it needs exactly
+     * the same treatment an engine reading does — the rows are a way of reading
+     * the page, not a property of any of the three documents.
+     */
+    const prepare = useCallback(
+        (persistedXml: string | null) => {
+            const source = persistedXml ?? mergeSourceXml;
+            if (!source) return null;
+            return {
+                xml: withForcedSystemBreaks(source, mergeStarts as number[]),
+                baselineMeasures: measureCount(source),
+            };
+        },
+        [mergeSourceXml, mergeStarts],
+    );
+
+    const merged = useMergedScoreDocument({
+        state: mergedState ?? null,
+        resolveUrl,
+        prepare,
+        sourceEngineId: mergedEngineId,
+    });
+
+    const {
+        load: loadMerged,
+        mutate: mutateMerged,
+        score: mergedScore,
+        revision: mergedRevision,
+    } = merged;
 
     useEffect(() => {
         if (!leftXml || !rightXml || systems.length === 0) return;
@@ -299,6 +421,34 @@ export function ScannerSystemRows({
             cancelled = true;
         };
     }, [leftXml, rightXml, systems.length, leftStarts, rightStarts]);
+
+    // The merged document is loaded once per source choice; switching engines
+    // wholesale is a reload, which is exactly what "starts from" means.
+    useEffect(() => {
+        if (!mergeSourceXml || systems.length === 0) return;
+        void loadMerged();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [mergeSourceXml, systems.length, mergeSource]);
+
+    // Re-render the merged rows after every edit.
+    useEffect(() => {
+        if (!mergedScore) {
+            setMergedRender(null);
+            return;
+        }
+        let cancelled = false;
+        void (async () => {
+            try {
+                const rendered = await renderScoreSide(mergedScore);
+                if (!cancelled) setMergedRender(rendered);
+            } catch (err) {
+                if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [mergedScore, mergedRevision]);
 
     // The gutter is the only index: which differences fall in each system.
     const differencesBySystem = useMemo(() => {
@@ -327,10 +477,103 @@ export function ScannerSystemRows({
         return () => observer.disconnect();
     }, []);
 
-    const merged = mergeSource === 'left' ? left : right;
-    const mergedLabel = mergeSource === 'left' ? leftLabel : rightLabel;
     const mergedIndexes = (system: ScannerSystem) =>
         mergeSource === 'left' ? system.leftMeasureIndexes : system.rightMeasureIndexes;
+
+    /** A click in the merged pane either places a note or selects what is there. */
+    const handleMergedPoint = useCallback(
+        (point: { page: number; x: number; y: number }) => {
+            void mutateMerged(
+                noteInput ? 'place a note' : 'select that bar',
+                async (target) => {
+                    if (noteInput && target.putNote) {
+                        await target.putNote(point.page, point.x, point.y, false, false);
+                        return;
+                    }
+                    if (target.selectElementAtPoint) {
+                        await target.selectElementAtPoint(point.page, point.x, point.y);
+                    } else if (target.selectMeasureAtPoint) {
+                        await target.selectMeasureAtPoint(point.page, point.x, point.y);
+                    }
+                    setHasSelection(true);
+                },
+                // Selecting changes nothing about the document, so it must not
+                // mark the merge edited — an untouched merge saved after a stray
+                // click would otherwise be filed as hand-corrected.
+                { mutates: noteInput, skipRelayout: !noteInput },
+            );
+        },
+        [mutateMerged, noteInput],
+    );
+
+    const toggleNoteInput = useCallback(() => {
+        const next = !noteInput;
+        void mutateMerged(
+            next ? 'start note input' : 'stop note input',
+            async (target) => {
+                await target.setNoteEntryMode?.(next);
+                setNoteInput(next);
+            },
+            { mutates: false, skipRelayout: true },
+        );
+    }, [mutateMerged, noteInput]);
+
+    // Keyboard editing, routed through the same policy the other comparators
+    // use. Only the merged score is reachable from it.
+    useEffect(() => {
+        if (!mergedScore) return;
+        const onKeyDown = (event: KeyboardEvent) => {
+            const target = event.target as HTMLElement | null;
+            if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+            routeCompareKeyboardShortcut(event, {
+                active: true,
+                activeRole: 'merged',
+                hasSelection,
+                noteMode: noteInput,
+                mutate: (label, methodName, args, skipRelayout) => {
+                    void mutateMerged(
+                        label,
+                        async (score) => {
+                            const method = (score as any)[methodName];
+                            if (typeof method === 'function') await method.apply(score, args || []);
+                        },
+                        { skipRelayout },
+                    );
+                },
+                updateInputState: (methodName, args) => {
+                    void mutateMerged(
+                        'change note input',
+                        async (score) => {
+                            const method = (score as any)[methodName];
+                            if (typeof method === 'function') await method.apply(score, args || []);
+                        },
+                        { mutates: false, skipRelayout: true },
+                    );
+                },
+                copySelection: () => undefined,
+                pasteSelection: () => undefined,
+                disableNoteInput: () => {
+                    if (noteInput) toggleNoteInput();
+                },
+                toggleNoteInput,
+                setHasSelection: (_role, selected) => setHasSelection(selected),
+            });
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [hasSelection, mergedScore, mutateMerged, noteInput, toggleNoteInput]);
+
+    const save = useCallback(
+        async (acceptStale = false) => {
+            const outcome = await merged.save({ acceptStale });
+            setNotice(
+                outcome.ok
+                    ? `Saved. This merged score is now what page assembly uses.`
+                    : outcome.error,
+            );
+        },
+        [merged],
+    );
 
     const step = (direction: 1 | -1, from: number) => {
         for (
@@ -345,6 +588,8 @@ export function ScannerSystemRows({
         }
     };
 
+    const canSave = Boolean(merged.state && mergedEngineId);
+
     return (
         <div ref={paneRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-gray-600">
@@ -352,35 +597,110 @@ export function ScannerSystemRows({
                     {systems.length} system{systems.length === 1 ? '' : 's'} from the scan
                     {differingRows > 0 ? `, ${differingRows} with differences` : ', none differing'}
                 </span>
-                {busy && <span aria-live="polite">Laying out both readings…</span>}
-                {error && (
+                {(busy || merged.loading) && <span aria-live="polite">Laying out the readings…</span>}
+                {(error || merged.error) && (
                     <span className="text-red-700" role="alert">
-                        {error}
+                        {error || merged.error}
                     </span>
                 )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50/50 px-3 py-2 text-xs">
-                <span className="font-medium text-gray-700">Merged score starts from</span>
-                {(['left', 'right'] as const).map((side) => (
+            <div className="flex flex-col gap-2 rounded-lg border border-cyan-200 bg-cyan-50/50 px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-gray-700">Merged score starts from</span>
+                    {(['left', 'right'] as const).map((side) => (
+                        <button
+                            key={side}
+                            type="button"
+                            aria-pressed={mergeSource === side}
+                            onClick={() => setMergeSource(side)}
+                            className={`rounded border px-2 py-1 ${
+                                mergeSource === side
+                                    ? 'border-cyan-500 bg-white font-semibold text-cyan-900'
+                                    : 'border-gray-300 hover:bg-white'
+                            }`}
+                        >
+                            {side === 'left' ? leftLabel : rightLabel}
+                        </button>
+                    ))}
+                    <span className="text-gray-600">
+                        Neither engine is the score. Only the merged pane can be edited; the engine
+                        panes are the evidence it is judged against.
+                    </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
                     <button
-                        key={side}
                         type="button"
-                        aria-pressed={mergeSource === side}
-                        onClick={() => setMergeSource(side)}
-                        className={`rounded border px-2 py-1 ${
-                            mergeSource === side
+                        onClick={toggleNoteInput}
+                        aria-pressed={noteInput}
+                        disabled={!mergedScore || merged.busy}
+                        data-testid="btn-merged-note-input"
+                        className={`rounded border px-2 py-1 disabled:opacity-50 ${
+                            noteInput
                                 ? 'border-cyan-500 bg-white font-semibold text-cyan-900'
                                 : 'border-gray-300 hover:bg-white'
                         }`}
                     >
-                        {side === 'left' ? leftLabel : rightLabel}
+                        {noteInput ? 'Note input on' : 'Note input'}
                     </button>
-                ))}
-                <span className="text-gray-600">
-                    Neither engine is the score. Choosing here decides where the merge begins;
-                    per-bar decisions are not available yet.
-                </span>
+                    <button
+                        type="button"
+                        onClick={() => void save()}
+                        disabled={!canSave || merged.saving || merged.busy}
+                        data-testid="btn-merged-save"
+                        className="rounded border border-cyan-500 bg-white px-2 py-1 font-semibold text-cyan-900 disabled:opacity-50"
+                    >
+                        {merged.saving ? 'Saving…' : 'Save merged score'}
+                    </button>
+                    {merged.state?.present && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                void merged.discard().then((outcome) => {
+                                    setNotice(
+                                        outcome.ok
+                                            ? 'Discarded. This page is back to its engine readings.'
+                                            : outcome.error,
+                                    );
+                                });
+                            }}
+                            disabled={merged.saving}
+                            className="rounded border border-gray-300 px-2 py-1 hover:bg-white disabled:opacity-50"
+                        >
+                            Discard merged score
+                        </button>
+                    )}
+                    <span className="text-gray-600" data-testid="merged-status">
+                        {merged.dirty
+                            ? 'Unsaved changes'
+                            : merged.state?.present
+                              ? `Saved, revision ${merged.state.revision}${merged.state.edited ? ', hand-corrected' : ''}`
+                              : 'Not saved yet'}
+                    </span>
+                </div>
+
+                {merged.state?.stale && (
+                    <div
+                        className="rounded border border-amber-400 bg-amber-50 px-2 py-1 text-amber-900"
+                        role="alert"
+                    >
+                        An engine has re-read this page since this merge was saved. Nothing has been
+                        thrown away, but the merge answers readings that no longer exist and is not
+                        being used for assembly. Review it, then{' '}
+                        <button
+                            type="button"
+                            onClick={() => void save(true)}
+                            className="underline"
+                            data-testid="btn-merged-accept-stale"
+                        >
+                            save it against the new readings
+                        </button>
+                        , or discard it.
+                    </div>
+                )}
+
+                {notice && <div className="text-gray-700">{notice}</div>}
             </div>
 
             {systems.map((system, rowIndex) => {
@@ -462,15 +782,18 @@ export function ScannerSystemRows({
                                 <div className="mb-1 flex items-baseline gap-2 text-[11px] uppercase tracking-wide text-cyan-800">
                                     <span className="font-semibold">Merged</span>
                                     <span className="normal-case tracking-normal text-gray-500">
-                                        every bar inherited from {mergedLabel}
+                                        {merged.dirty
+                                            ? `started from ${mergedLabel}, edited here`
+                                            : `every bar inherited from ${mergedLabel}`}
                                     </span>
                                 </div>
                                 <SystemPane
-                                    rendered={merged}
+                                    rendered={mergedRender}
                                     measureIndexes={mergedIndexes(system)}
                                     label="The merged score"
                                     paneWidth={paneWidth}
                                     tone="merged"
+                                    onPointMutate={handleMergedPoint}
                                 />
                             </div>
                             <div>
