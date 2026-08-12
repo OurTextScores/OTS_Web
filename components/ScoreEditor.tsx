@@ -395,6 +395,67 @@ export function buildPartLocalizedChangeReviewHighlights(
     });
 }
 
+export type SuppliedCompareRegion = {
+    blockIndex: number;
+    leftPartIndex?: number;
+    rightPartIndex?: number;
+    leftMeasureIndexes: number[];
+    rightMeasureIndexes: number[];
+    differenceClasses?: string[];
+    grounded?: boolean;
+};
+
+/**
+ * Highlights from differences a caller already computed.
+ *
+ * Two shape differences from change review, both load-bearing. A region carries
+ * **several** measures per side, because two independent recognitions of one
+ * page disagree about barlines and a block can span three measures on one side
+ * and none on the other. And each side carries **its own part index**, because
+ * a part matched across two documents need not sit at the same ordinal in both;
+ * change review can share one index only because both its sides are revisions
+ * of a single score.
+ */
+export function buildPartLocalizedSuppliedHighlights(
+    positions: Positions | null,
+    regions: SuppliedCompareRegion[],
+    side: 'left' | 'right',
+    zoomValue: number,
+    partCount: number,
+    staffBands: StaffBands = EMPTY_STAFF_BANDS,
+) {
+    if (!positions?.elements.length || partCount <= 0) {
+        return [];
+    }
+    const pageHeight = positions.pageSize?.height ?? 0;
+    return regions.flatMap((region) => {
+        const partIndex = side === 'left' ? region.leftPartIndex : region.rightPartIndex;
+        const measureIndexes = side === 'left' ? region.leftMeasureIndexes : region.rightMeasureIndexes;
+        if (partIndex === undefined || partIndex < 0 || partIndex >= partCount) {
+            return [];
+        }
+        return (measureIndexes || []).flatMap((measureIndex) => {
+            const element = positions.elements[measureIndex];
+            if (!element) {
+                return [];
+            }
+            const rect = localizeMeasureToPart(
+                element,
+                partIndex,
+                partCount,
+                pageHeight,
+                zoomValue,
+                staffBands,
+            );
+            return [{
+                id: `supplied-${region.blockIndex}-${side}-${measureIndex}`,
+                status: side === 'left' ? 'old-diff' as const : 'new-diff' as const,
+                ...rect,
+            }];
+        });
+    });
+}
+
 export function buildPartLocalizedChangeReviewBarHighlights(
     positions: Positions | null,
     bars: ChangeReviewBar[],
@@ -1241,7 +1302,15 @@ export default function ScoreEditor() {
     const rightLabel = searchParams.get('rightLabel') || 'Right';
     const changeReviewId = searchParams.get('changeReviewId')?.trim() || '';
     const changeReviewPatchset = searchParams.get('patchset')?.trim() || '';
+    // Server-supplied differences. The client measure signature cannot tell two
+    // independently generated MusicXML documents apart — it strips layout but
+    // not `<divisions>`, so an engine writing a sixteenth as duration 1 and one
+    // writing it as 2520 differ in every measure of an agreeing page. A caller
+    // that has already computed the diff hands it over instead.
+    // docs/private/SCANNER_COMPARATOR_DESIGN_2026-08-12.md
+    const compareRegionsUrl = searchParams.get('compareRegions')?.trim() || '';
     const isCompareEmbedMode = Boolean(compareLeftUrl && compareRightUrl);
+    const isSuppliedRegionsMode = isCompareEmbedMode && Boolean(compareRegionsUrl);
     const isChangeReviewSingleScoreMode = Boolean(reviewScoreUrl && changeReviewId);
     const isEmbedMode = isCompareEmbedMode || isChangeReviewSingleScoreMode;
     const isChangeReviewCompareMode = isCompareEmbedMode && Boolean(changeReviewId);
@@ -1515,6 +1584,8 @@ export default function ScoreEditor() {
     const [compareLeftStaffBands, setCompareLeftStaffBands] = useState<StaffBands>(EMPTY_STAFF_BANDS);
     const [compareRightStaffBands, setCompareRightStaffBands] = useState<StaffBands>(EMPTY_STAFF_BANDS);
     const [compareAlignments, setCompareAlignments] = useState<PartAlignment[]>([]);
+    const [suppliedRegions, setSuppliedRegions] = useState<SuppliedCompareRegion[] | null>(null);
+    const [suppliedRegionsError, setSuppliedRegionsError] = useState<string | null>(null);
     const [compareAlignmentLoading, setCompareAlignmentLoading] = useState(false);
     const [compareAlignmentRevision, setCompareAlignmentRevision] = useState(0);
     const [compareSwapBusy, setCompareSwapBusy] = useState(false);
@@ -2634,6 +2705,50 @@ export default function ScoreEditor() {
             setXmlSidebarTab('xml');
         }
     }, [aiEnabled, xmlSidebarTab]);
+
+    // Differences computed by whoever launched this embed.
+    useEffect(() => {
+        if (!compareRegionsUrl) {
+            setSuppliedRegions(null);
+            setSuppliedRegionsError(null);
+            return;
+        }
+        const controller = new AbortController();
+        let cancelled = false;
+        setSuppliedRegions(null);
+        setSuppliedRegionsError(null);
+        fetch(compareRegionsUrl, { cache: 'no-store', signal: controller.signal })
+            .then(async (response) => {
+                if (!response.ok) throw new Error(`Comparison regions unavailable (${response.status})`);
+                return response.json();
+            })
+            .then((body) => {
+                if (cancelled) return;
+                // Highlighting depends on the measure analysis alone. A page can
+                // be refused page-wide because one block's location on the source
+                // image is unproven, and withholding every highlight for that
+                // would hide differences that were computed correctly.
+                if (body?.analysisStatus && body.analysisStatus !== 'succeeded') {
+                    setSuppliedRegions([]);
+                    setSuppliedRegionsError(
+                        body?.refusalReasons?.[0]?.detail || 'These readings could not be compared.',
+                    );
+                    return;
+                }
+                setSuppliedRegions(Array.isArray(body?.regions) ? body.regions : []);
+            })
+            .catch((err) => {
+                if (cancelled || controller.signal.aborted) return;
+                // Never fall back to the client diff: a wrong highlight cannot be
+                // told apart from a real disagreement, which is worse than none.
+                setSuppliedRegions([]);
+                setSuppliedRegionsError(err instanceof Error ? err.message : String(err));
+            });
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
+    }, [compareRegionsUrl]);
 
     // Load external XML files in embed mode
     useEffect(() => {
@@ -3788,7 +3903,16 @@ export default function ScoreEditor() {
         };
     }, [compareAlignments, compareLeftMeasurePositions, compareRightMeasurePositions]);
     const compareLeftHighlights = useMemo(
-        () => isChangeReviewCompareMode
+        () => isSuppliedRegionsMode
+            ? buildPartLocalizedSuppliedHighlights(
+                compareLeftMeasurePositions,
+                suppliedRegions || [],
+                'left',
+                compareEffectiveZoom,
+                comparePartCount,
+                compareLeftStaffBands,
+            )
+            : isChangeReviewCompareMode
             ? buildPartLocalizedChangeReviewHighlights(
                 compareLeftMeasurePositions,
                 changeReviewDiff?.scoreRegions || [],
@@ -3813,10 +3937,21 @@ export default function ScoreEditor() {
             compareEffectiveZoom,
             comparePartCount,
             isChangeReviewCompareMode,
+            isSuppliedRegionsMode,
+            suppliedRegions,
         ],
     );
     const compareRightHighlights = useMemo(
-        () => isChangeReviewCompareMode
+        () => isSuppliedRegionsMode
+            ? buildPartLocalizedSuppliedHighlights(
+                compareRightMeasurePositions,
+                suppliedRegions || [],
+                'right',
+                compareEffectiveZoom,
+                comparePartCount,
+                compareRightStaffBands,
+            )
+            : isChangeReviewCompareMode
             ? buildPartLocalizedChangeReviewHighlights(
                 compareRightMeasurePositions,
                 changeReviewDiff?.scoreRegions || [],
@@ -3841,6 +3976,8 @@ export default function ScoreEditor() {
             compareEffectiveZoom,
             comparePartCount,
             isChangeReviewCompareMode,
+            isSuppliedRegionsMode,
+            suppliedRegions,
         ],
     );
     const compareCommentedLeftHighlights = useMemo(() => {
@@ -9639,7 +9776,10 @@ ${partsBodyXml}
     ]);
 
     useEffect(() => {
-        if (!compareView) {
+        // When a caller supplies the differences, the client diff is not merely
+        // redundant — it is wrong here, and running it anyway would leave a
+        // second, disagreeing answer available to anything that reads it.
+        if (!compareView || isSuppliedRegionsMode) {
             setCompareAlignments([]);
             setCompareAlignmentLoading(false);
             setCompareSignatures(null);
@@ -9742,6 +9882,7 @@ ${partsBodyXml}
         };
     }, [
         compareView,
+        isSuppliedRegionsMode,
         compareAlignmentRevision,
         compareLeftXml,
         compareRightXml,

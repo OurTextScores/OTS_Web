@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     buildPartLocalizedChangeReviewBarHighlights,
     buildPartLocalizedChangeReviewHighlights,
+    buildPartLocalizedSuppliedHighlights,
     scoreLoadErrorMessage,
     sortChangeReviewRegionsByMeasure,
 } from '../../components/ScoreEditor';
@@ -87,6 +88,79 @@ describe('buildPartLocalizedChangeReviewHighlights', () => {
         height: 25,
       }),
     ]);
+  });
+});
+
+describe('buildPartLocalizedSuppliedHighlights', () => {
+  const positions = {
+    elements: [
+      { id: 1, x: 10, y: 100, sx: 80, sy: 200, page: 0 },
+      { id: 2, x: 90, y: 100, sx: 80, sy: 200, page: 0 },
+      { id: 3, x: 170, y: 100, sx: 80, sy: 200, page: 0 },
+    ],
+    events: [],
+    pageSize: { width: 1000, height: 1200 },
+  };
+
+  it('highlights every measure of a multi-measure region', () => {
+    // Two independent recognitions of one page disagree about barlines, so a
+    // region spans several measures. Change review's one-measure shape would
+    // silently drop all but the first.
+    const region = {
+      blockIndex: 0,
+      leftPartIndex: 0,
+      rightPartIndex: 0,
+      leftMeasureIndexes: [0, 1, 2],
+      rightMeasureIndexes: [0],
+    };
+    const left = buildPartLocalizedSuppliedHighlights(positions, [region], 'left', 1, 1);
+    expect(left).toHaveLength(3);
+    expect(left.map((rect) => rect.left)).toEqual([10, 90, 170]);
+  });
+
+  it('gives a one-sided region no highlight on the empty side', () => {
+    const region = {
+      blockIndex: 4,
+      leftPartIndex: 0,
+      rightPartIndex: 0,
+      leftMeasureIndexes: [1, 2],
+      rightMeasureIndexes: [],
+    };
+    expect(buildPartLocalizedSuppliedHighlights(positions, [region], 'left', 1, 1)).toHaveLength(2);
+    expect(buildPartLocalizedSuppliedHighlights(positions, [region], 'right', 1, 1)).toEqual([]);
+  });
+
+  it('uses each side its own part index', () => {
+    // A part matched across two documents need not sit at the same ordinal in
+    // both, so one shared index would highlight the wrong stave on one side.
+    const region = {
+      blockIndex: 1,
+      leftPartIndex: 0,
+      rightPartIndex: 3,
+      leftMeasureIndexes: [0],
+      rightMeasureIndexes: [0],
+    };
+    const [left] = buildPartLocalizedSuppliedHighlights(positions, [region], 'left', 1, 4);
+    const [right] = buildPartLocalizedSuppliedHighlights(positions, [region], 'right', 1, 4);
+    expect(left.top).toBe(100);
+    expect(right.top).toBe(250);
+    expect(left.height).toBe(50);
+  });
+
+  it('drops a region whose part index is missing or out of range', () => {
+    const missing = {
+      blockIndex: 2,
+      leftMeasureIndexes: [0],
+      rightMeasureIndexes: [0],
+    };
+    const outOfRange = {
+      blockIndex: 3,
+      leftPartIndex: 9,
+      leftMeasureIndexes: [0],
+      rightMeasureIndexes: [],
+    };
+    expect(buildPartLocalizedSuppliedHighlights(positions, [missing], 'left', 1, 4)).toEqual([]);
+    expect(buildPartLocalizedSuppliedHighlights(positions, [outOfRange], 'left', 1, 4)).toEqual([]);
   });
 });
 
