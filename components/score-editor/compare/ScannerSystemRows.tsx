@@ -69,25 +69,29 @@ export function withForcedSystemBreaks(xml: string, startMeasureIndexes: number[
     return new XMLSerializer().serializeToString(doc);
 }
 
+type MeasureBox = { left: number; width: number; top: number; height: number };
+
 type RenderedSide = {
     svg: string;
     /** Pixel bounds per measure index, at RENDER_WIDTH. */
-    measures: Array<{ top: number; height: number } | undefined>;
+    measures: Array<MeasureBox | undefined>;
     width: number;
 };
 
-function measureBounds(positions: Positions | null, scale: number) {
+function measureBounds(positions: Positions | null, scale: number): Array<MeasureBox | undefined> {
     if (!positions?.elements?.length) return [];
     const pageHeight = positions.pageSize?.height ?? 0;
     return positions.elements.map((element) => {
         const rawHeight =
             typeof element.sy === 'number' ? element.sy : ((element as any).height ?? 0);
+        const rawWidth =
+            typeof element.sx === 'number' ? element.sx : ((element as any).width ?? 0);
         // Endless layout still reports per-page coordinates, so a later page's
         // measures would otherwise stack on top of the first.
         const needsPageOffset =
             pageHeight > 0 && element.page > 0 && element.y + rawHeight <= pageHeight * 1.2;
         const top = (element.y + (needsPageOffset ? element.page * pageHeight : 0)) * scale;
-        return { top, height: rawHeight * scale };
+        return { left: element.x * scale, width: rawWidth * scale, top, height: rawHeight * scale };
     });
 }
 
@@ -141,10 +145,14 @@ function SystemPane({
     rendered,
     measureIndexes,
     label,
+    paneWidth,
+    tone,
 }: {
     rendered: RenderedSide | null;
     measureIndexes: number[];
     label: string;
+    paneWidth: number;
+    tone?: 'merged';
 }) {
     if (measureIndexes.length === 0) {
         return (
@@ -188,14 +196,30 @@ function SystemPane({
     const bottom =
         rawBottom +
         (Number.isFinite(nearestBelow) ? Math.min(wanted, (nearestBelow - rawBottom) / 2) : wanted);
+
+    // Clip horizontally to the music, not the page. An engraved page carries
+    // margins the scan crop above does not, so without this the reading sits
+    // narrower than the scan it is being compared against and the bars do not
+    // line up with the image. Scaling that band to the pane puts both on the
+    // same horizontal axis.
+    const left = Math.min(...boxes.map((box) => box.left));
+    const right = Math.max(...boxes.map((box) => box.left + box.width));
+    const bandWidth = Math.max(1, right - left);
+    const scale = paneWidth > 0 ? paneWidth / bandWidth : 1;
+
     return (
         <div
-            className="relative overflow-hidden rounded border border-gray-200 bg-white"
-            style={{ height: Math.max(1, bottom - top) }}
+            className={`relative overflow-hidden rounded border bg-white ${
+                tone === 'merged' ? 'border-cyan-300 ring-1 ring-cyan-200' : 'border-gray-200'
+            }`}
+            style={{ height: Math.max(1, (bottom - top) * scale) }}
         >
             <div
-                className="absolute left-0"
-                style={{ top: -top, width: rendered.width }}
+                className="absolute left-0 top-0 origin-top-left"
+                style={{
+                    width: rendered.width,
+                    transform: `scale(${scale}) translate(${-left}px, ${-top}px)`,
+                }}
                 // The SVG comes from the engine build, not from user input.
                 dangerouslySetInnerHTML={{ __html: rendered.svg }}
             />
@@ -229,6 +253,18 @@ export function ScannerSystemRows({
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
     const rowRefs = useRef<Array<HTMLDivElement | null>>([]);
+    const paneRef = useRef<HTMLDivElement>(null);
+    const [paneWidth, setPaneWidth] = useState(0);
+
+    /**
+     * Which engine the merged score starts from, wholesale.
+     *
+     * Not an empty document: a page where one engine is almost right would then
+     * cost a decision per bar. Starting from a chosen engine makes "this is a
+     * Transcoda page" the ordinary entry point rather than a special action, and
+     * per-bar decisions override it from S3 onward.
+     */
+    const [mergeSource, setMergeSource] = useState<'left' | 'right'>('left');
 
     const leftStarts = useMemo(
         () => systems.map((system) => system.leftMeasureIndexes[0]).filter((n) => n !== undefined),
@@ -282,6 +318,20 @@ export function ScannerSystemRows({
         0,
     );
 
+    useEffect(() => {
+        const node = paneRef.current;
+        if (!node || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(() => setPaneWidth(node.clientWidth));
+        observer.observe(node);
+        setPaneWidth(node.clientWidth);
+        return () => observer.disconnect();
+    }, []);
+
+    const merged = mergeSource === 'left' ? left : right;
+    const mergedLabel = mergeSource === 'left' ? leftLabel : rightLabel;
+    const mergedIndexes = (system: ScannerSystem) =>
+        mergeSource === 'left' ? system.leftMeasureIndexes : system.rightMeasureIndexes;
+
     const step = (direction: 1 | -1, from: number) => {
         for (
             let index = from + direction;
@@ -296,7 +346,7 @@ export function ScannerSystemRows({
     };
 
     return (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
+        <div ref={paneRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-gray-600">
                 <span>
                     {systems.length} system{systems.length === 1 ? '' : 's'} from the scan
@@ -308,6 +358,29 @@ export function ScannerSystemRows({
                         {error}
                     </span>
                 )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50/50 px-3 py-2 text-xs">
+                <span className="font-medium text-gray-700">Merged score starts from</span>
+                {(['left', 'right'] as const).map((side) => (
+                    <button
+                        key={side}
+                        type="button"
+                        aria-pressed={mergeSource === side}
+                        onClick={() => setMergeSource(side)}
+                        className={`rounded border px-2 py-1 ${
+                            mergeSource === side
+                                ? 'border-cyan-500 bg-white font-semibold text-cyan-900'
+                                : 'border-gray-300 hover:bg-white'
+                        }`}
+                    >
+                        {side === 'left' ? leftLabel : rightLabel}
+                    </button>
+                ))}
+                <span className="text-gray-600">
+                    Neither engine is the score. Choosing here decides where the merge begins;
+                    per-bar decisions are not available yet.
+                </span>
             </div>
 
             {systems.map((system, rowIndex) => {
@@ -367,6 +440,12 @@ export function ScannerSystemRows({
                             />
                         )}
 
+                        {/*
+                            Reading, merge, reading — the merged score in the
+                            middle so "take from above" and "take from below"
+                            read the way a three-way merge does, once S3 adds
+                            the controls.
+                        */}
                         <div className="space-y-2">
                             <div>
                                 <div className="mb-1 text-[11px] uppercase tracking-wide text-gray-500">
@@ -376,6 +455,22 @@ export function ScannerSystemRows({
                                     rendered={left}
                                     measureIndexes={system.leftMeasureIndexes}
                                     label={leftLabel}
+                                    paneWidth={paneWidth}
+                                />
+                            </div>
+                            <div>
+                                <div className="mb-1 flex items-baseline gap-2 text-[11px] uppercase tracking-wide text-cyan-800">
+                                    <span className="font-semibold">Merged</span>
+                                    <span className="normal-case tracking-normal text-gray-500">
+                                        every bar inherited from {mergedLabel}
+                                    </span>
+                                </div>
+                                <SystemPane
+                                    rendered={merged}
+                                    measureIndexes={mergedIndexes(system)}
+                                    label="The merged score"
+                                    paneWidth={paneWidth}
+                                    tone="merged"
                                 />
                             </div>
                             <div>
@@ -386,6 +481,7 @@ export function ScannerSystemRows({
                                     rendered={right}
                                     measureIndexes={system.rightMeasureIndexes}
                                     label={rightLabel}
+                                    paneWidth={paneWidth}
                                 />
                             </div>
                         </div>
