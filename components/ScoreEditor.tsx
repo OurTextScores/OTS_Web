@@ -8339,10 +8339,20 @@ ${partsBodyXml}
             }
         }
 
-        add('/soundfonts/MuseScore_General.sf3');
-        add('/soundfonts/MuseScore_General.sf2');
-        add('/soundfonts/default.sf3');
-        add('/soundfonts/default.sf2');
+        // Same-origin fallbacks. The embed is served under a basePath, and a
+        // path written from the origin root misses the files vendored beside
+        // it — which is why playback failed in the scanner with the soundfont
+        // sitting right there at `/score-editor/soundfonts/default.sf3`. Next's
+        // `basePath` rewrites links and imports, not strings fetched at
+        // runtime, so this has to say so itself.
+        const basePath =
+            process.env.NEXT_PUBLIC_BUILD_MODE === 'embed' ? '/score-editor' : '';
+        for (const prefix of basePath ? [basePath, ''] : ['']) {
+            add(`${prefix}/soundfonts/MuseScore_General.sf3`);
+            add(`${prefix}/soundfonts/MuseScore_General.sf2`);
+            add(`${prefix}/soundfonts/default.sf3`);
+            add(`${prefix}/soundfonts/default.sf2`);
+        }
 
         return urls;
     }, []);
@@ -8511,7 +8521,9 @@ ${partsBodyXml}
             setTriedSoundFont(true);
         } catch (err) {
             console.error('Failed to load soundfont', err);
-            alert('Failed to load soundfont. See console for details.');
+            alert(
+                `Failed to load soundfont: ${err instanceof Error ? err.message : String(err)}`,
+            );
         }
     };
 
@@ -14720,7 +14732,12 @@ ${partsBodyXml}
             }
         } catch (err) {
             console.error('Failed to play audio', err);
-            alert('Unable to play audio. See console for details.');
+            // Say what went wrong here rather than deferring to a console the
+            // reader may not be able to open: in an embed this runs inside an
+            // iframe, where the browser can refuse DevTools outright.
+            alert(
+                `Unable to play audio: ${err instanceof Error ? err.message : String(err)}`,
+            );
             await stopAudio({ awaitCancel: true });
         } finally {
             setAudioBusy(false);
