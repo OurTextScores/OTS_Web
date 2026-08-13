@@ -143,7 +143,10 @@ import { MusicXmlPanel, CODE_EDITOR_THEME_OPTIONS } from './score-editor/MusicXm
 import { AiToolsTabStrip, type AiToolsTab } from './score-editor/ai-tools/AiToolsTabStrip';
 import { resolveComparePaneStatus } from './score-editor/compare/compare-pane-status';
 import { CompareScorePane } from './score-editor/compare/CompareScorePane';
-import { ScannerSystemRows } from './score-editor/compare/ScannerSystemRows';
+import {
+    ScannerSystemRows,
+    type ScannerSymbolDifference
+} from './score-editor/compare/ScannerSystemRows';
 import type { MergedScoreState } from './score-editor/compare/useMergedScoreDocument';
 import { XmlDiffView } from './score-editor/XmlDiffView';
 import {
@@ -414,6 +417,12 @@ export type SuppliedCompareRegion = {
     /** What each side has to give, per marking kind; gates the take controls. */
     leftMarkings?: { dynamics: boolean; lyrics: boolean };
     rightMarkings?: { dynamics: boolean; lyrics: boolean };
+    /**
+     * Which events inside each bar are unmatched, so a reader can be pointed at
+     * the note rather than at the bar around it. Carried through untouched;
+     * only `ScannerSystemRows` knows how to place them in a drawing.
+     */
+    symbolDifferences?: ScannerSymbolDifference[];
 };
 
 /**

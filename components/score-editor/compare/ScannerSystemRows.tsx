@@ -42,6 +42,21 @@ export type ScannerRowRegion = {
      */
     leftMarkings?: { dynamics: boolean; lyrics: boolean };
     rightMarkings?: { dynamics: boolean; lyrics: boolean };
+    /**
+     * Which events inside each bar are unmatched, so the reader is pointed at
+     * the note rather than at the bar containing it.
+     */
+    symbolDifferences?: ScannerSymbolDifference[];
+};
+
+export type ScannerSymbolDifference = {
+    leftMeasureIndex: number;
+    rightMeasureIndex: number;
+    leftEventIndexes: number[];
+    rightEventIndexes: number[];
+    /** Totals, so a mismatched idea of "an event" can be detected, not trusted. */
+    leftEventCount: number;
+    rightEventCount: number;
 };
 
 const DIFFERENCE_LABELS: Record<string, string> = {
@@ -97,6 +112,14 @@ type RenderedSide = {
     svg: string;
     /** Pixel bounds per measure index, at RENDER_WIDTH. */
     measures: Array<MeasureBox | undefined>;
+    /**
+     * Every rhythmic position in the drawing, left to right, at RENDER_WIDTH.
+     *
+     * Kept flat and unattributed because a segment does not say which bar it
+     * belongs to; the bar it falls inside decides that, and only at the point
+     * of use, where the measure box is already in hand.
+     */
+    segments: MeasureBox[];
     width: number;
     /** Page height in the same scaled pixels, so a click can find its page. */
     pageHeight: number;
@@ -142,15 +165,74 @@ function svgAtRenderWidth(svg: string): string {
     });
 }
 
+
+/**
+ * Where the unmatched events of one bar are drawn.
+ *
+ * The analysis counts events in a bar; this rendering knows where each
+ * rhythmic position sits. Nothing connects them but the ordering, so the count
+ * is checked first: if this drawing has a different number of positions in the
+ * bar than the analysis found events, the two are not counting the same thing
+ * and no box is returned. The row then stays marked at bar level, which is
+ * true, rather than pointing confidently at the wrong note.
+ */
+function eventBoxes(
+    rendered: RenderedSide | null,
+    measureIndex: number,
+    eventIndexes: readonly number[],
+    eventCount: number,
+): MeasureBox[] {
+    const measure = rendered?.measures[measureIndex];
+    if (!rendered || !measure || eventIndexes.length === 0) return [];
+    const inside = rendered.segments
+        .filter(
+            (segment) =>
+                segment.left >= measure.left - 1 &&
+                segment.left < measure.left + measure.width &&
+                segment.top + segment.height > measure.top &&
+                segment.top < measure.top + measure.height,
+        )
+        .sort((left, right) => left.left - right.left);
+    if (inside.length !== eventCount) {
+        // Worth saying out loud rather than silently falling back: if this ever
+        // fires on every bar of a page, the two sides have stopped counting the
+        // same thing and symbol highlighting is off everywhere.
+        console.debug(
+            '[scanner-rows] symbol highlight skipped: measure',
+            measureIndex,
+            'has',
+            inside.length,
+            'drawn positions against',
+            eventCount,
+            'analysed events',
+        );
+        return [];
+    }
+    return eventIndexes.map((index) => inside[index]).filter(Boolean);
+}
+
 /** Draw an already-loaded score; used for the merged document, which is live. */
 async function renderScoreSide(score: Score): Promise<RenderedSide | null> {
     const svg = await score.saveSvg(0, true, false);
     const positions = await score.measurePositions();
+    // Rhythmic positions, for pointing at a note rather than at the bar around
+    // it. Optional: a build without it loses symbol highlighting and nothing
+    // else, so it must not cost the rows their rendering.
+    const segments = await (async () => {
+        try {
+            return await score.segmentPositions();
+        } catch {
+            return null;
+        }
+    })();
     const pageWidth = positions?.pageSize?.width || 0;
     const renderScale = pageWidth > 0 ? RENDER_WIDTH / pageWidth : 1;
     return {
         svg: svgAtRenderWidth(svg),
         measures: measureBounds(positions, renderScale),
+        segments: measureBounds(segments, renderScale).filter(
+            (box): box is MeasureBox => Boolean(box),
+        ),
         width: RENDER_WIDTH,
         pageHeight: (positions?.pageSize?.height ?? 0) * renderScale,
         renderScale,
@@ -192,6 +274,7 @@ function SystemPane({
     transport,
     onTogglePlay,
     onStop,
+    highlights,
 }: {
     rendered: RenderedSide | null;
     measureIndexes: number[];
@@ -202,6 +285,8 @@ function SystemPane({
     transport?: CompareTransportState;
     onTogglePlay?: () => void;
     onStop?: () => void;
+    /** Unmatched events, in the same RENDER_WIDTH pixels as the drawing. */
+    highlights?: MeasureBox[];
     /**
      * Score-space coordinates of a click, for the one pane that is editable.
      * Absent on engine panes, which is what makes them read-only: there is no
@@ -352,6 +437,35 @@ function SystemPane({
                 // The SVG comes from the engine build, not from user input.
                 dangerouslySetInnerHTML={{ __html: rendered.svg }}
             />
+            {/*
+                Painted in the same transformed frame as the music, so a box
+                stays on its note under any pane width. Behind nothing: it is a
+                wash rather than an outline because an outline at this scale
+                reads as a notation mark of its own.
+            */}
+            {(highlights || []).length > 0 && (
+                <div
+                    className="pointer-events-none absolute left-0 top-0 origin-top-left"
+                    style={{
+                        width: rendered.width,
+                        transform: `scale(${scale}) translate(${-left}px, ${-top}px)`,
+                    }}
+                >
+                    {(highlights || []).map((box, index) => (
+                        <div
+                            key={`${box.left}-${box.top}-${index}`}
+                            data-testid="symbol-highlight"
+                            className="absolute rounded-sm bg-amber-300/40 ring-1 ring-amber-500/70"
+                            style={{
+                                left: box.left - 2,
+                                top: box.top - 2,
+                                width: Math.max(6, box.width) + 4,
+                                height: box.height + 4,
+                            }}
+                        />
+                    ))}
+                </div>
+            )}
             {onTogglePlay && (
                 /*
                     Playback is read-only, so it costs the engine panes nothing
@@ -1025,6 +1139,47 @@ export function ScannerSystemRows({
                 const classes = [
                     ...new Set(differences.flatMap((region) => region.differenceClasses || [])),
                 ];
+                // Every unmatched event on this row, from every difference that
+                // touches it. The merged pane inherits the highlights of
+                // whichever reading it was started from — it *is* that reading
+                // until a decision changes it, so marking it differently would
+                // be claiming a difference that has not happened yet.
+                const symbols = differences.flatMap((region) => region.symbolDifferences || []);
+                const highlightsFor = (
+                    rendered: RenderedSide | null,
+                    pick: (difference: ScannerSymbolDifference) => {
+                        measureIndex: number;
+                        indexes: number[];
+                        count: number;
+                    },
+                ) =>
+                    symbols.flatMap((difference) => {
+                        const { measureIndex, indexes, count } = pick(difference);
+                        return eventBoxes(rendered, measureIndex, indexes, count);
+                    });
+                const leftHighlights = highlightsFor(left, (difference) => ({
+                    measureIndex: difference.leftMeasureIndex,
+                    indexes: difference.leftEventIndexes,
+                    count: difference.leftEventCount,
+                }));
+                const rightHighlights = highlightsFor(right, (difference) => ({
+                    measureIndex: difference.rightMeasureIndex,
+                    indexes: difference.rightEventIndexes,
+                    count: difference.rightEventCount,
+                }));
+                const mergedHighlights = highlightsFor(mergedRender, (difference) =>
+                    mergeSource === 'left'
+                        ? {
+                              measureIndex: difference.leftMeasureIndex,
+                              indexes: difference.leftEventIndexes,
+                              count: difference.leftEventCount,
+                          }
+                        : {
+                              measureIndex: difference.rightMeasureIndex,
+                              indexes: difference.rightEventIndexes,
+                              count: difference.rightEventCount,
+                          },
+                );
                 return (
                     <div
                         key={system.systemIndex}
@@ -1097,6 +1252,7 @@ export function ScannerSystemRows({
                                 </div>
                                 <SystemPane
                                     rendered={left}
+                                    highlights={leftHighlights}
                                     measureIndexes={system.leftMeasureIndexes}
                                     label={leftLabel}
                                     paneWidth={paneWidth}
@@ -1122,6 +1278,7 @@ export function ScannerSystemRows({
                                 </div>
                                 <SystemPane
                                     rendered={mergedRender}
+                                    highlights={mergedHighlights}
                                     measureIndexes={mergedIndexes(system)}
                                     label="The merged score"
                                     paneWidth={paneWidth}
@@ -1144,6 +1301,7 @@ export function ScannerSystemRows({
                                 </div>
                                 <SystemPane
                                     rendered={right}
+                                    highlights={rightHighlights}
                                     measureIndexes={system.rightMeasureIndexes}
                                     label={rightLabel}
                                     paneWidth={paneWidth}

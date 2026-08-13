@@ -57,6 +57,19 @@ function renderRows(regions: ScannerRowRegion[], calls: any[]) {
             events: [],
             pageSize: { width: 100, height: 40 },
         })),
+        // Four rhythmic positions across the one measure above.
+        segmentPositions: vi.fn(async () => ({
+            elements: [0, 1, 2, 3].map((index) => ({
+                id: index,
+                x: index * 25,
+                y: 5,
+                sx: 8,
+                sy: 30,
+                page: 0,
+            })),
+            events: [],
+            pageSize: { width: 100, height: 40 },
+        })),
         saveXml: vi.fn(async () => new TextEncoder().encode(XML)),
         relayout: vi.fn(async () => undefined),
         destroy: vi.fn(),
@@ -140,6 +153,64 @@ describe('the row gutter', () => {
     beforeEach(() => {
         mocked.loadWebMscore.mockReset();
         vi.unstubAllGlobals();
+    });
+
+    it('marks the events that did not match, not the whole bar', async () => {
+        // A block names bars, and a bar is a coarse thing to point at. The
+        // scanner aligns the two readings event by event, so the row can put
+        // the mark on the note rather than around it.
+        const calls: any[] = [];
+        renderRows(
+            [
+                {
+                    ...grounded,
+                    symbolDifferences: [
+                        {
+                            leftMeasureIndex: 0,
+                            rightMeasureIndex: 0,
+                            leftEventIndexes: [2],
+                            rightEventIndexes: [2],
+                            leftEventCount: 4,
+                            rightEventCount: 4,
+                        },
+                    ],
+                },
+            ],
+            calls,
+        );
+
+        await screen.findByTestId('btn-take-down-0');
+        // One per pane that renders: both readings and the merged score.
+        expect(await screen.findAllByTestId('symbol-highlight')).not.toHaveLength(0);
+    });
+
+    it('marks nothing when this drawing counts events differently', async () => {
+        // The analysis counts events; the drawing knows where positions sit,
+        // and nothing connects them but the ordering. When the totals disagree
+        // the two are not counting the same thing, and a confident box on the
+        // wrong note is worse than the bar-level mark the row already carries.
+        const calls: any[] = [];
+        renderRows(
+            [
+                {
+                    ...grounded,
+                    symbolDifferences: [
+                        {
+                            leftMeasureIndex: 0,
+                            rightMeasureIndex: 0,
+                            leftEventIndexes: [2],
+                            rightEventIndexes: [2],
+                            leftEventCount: 9,
+                            rightEventCount: 9,
+                        },
+                    ],
+                },
+            ],
+            calls,
+        );
+
+        await screen.findByTestId('btn-take-down-0');
+        expect(screen.queryAllByTestId('symbol-highlight')).toHaveLength(0);
     });
 
     it('offers a control on each side, pointing at the merged score', async () => {
