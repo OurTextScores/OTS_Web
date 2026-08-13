@@ -191,6 +191,7 @@ function SystemPane({
     onPointMutate,
     transport,
     onTogglePlay,
+    onStop,
 }: {
     rendered: RenderedSide | null;
     measureIndexes: number[];
@@ -200,6 +201,7 @@ function SystemPane({
     /** Playback state for this pane, when the workspace supplies a transport. */
     transport?: CompareTransportState;
     onTogglePlay?: () => void;
+    onStop?: () => void;
     /**
      * Score-space coordinates of a click, for the one pane that is editable.
      * Absent on engine panes, which is what makes them read-only: there is no
@@ -287,6 +289,7 @@ function SystemPane({
     const bandWidth = Math.max(1, right - left);
     const scale = usableWidth > 0 ? usableWidth / bandWidth : 1;
     const geometry: PaneGeometry = { left, top, scale };
+    const playing = Boolean(transport?.isPlaying) && !transport?.isPaused;
 
     /**
      * Undo everything the pane did to the drawing, to reach score coordinates.
@@ -354,25 +357,46 @@ function SystemPane({
                     Playback is read-only, so it costs the engine panes nothing
                     — and a wrong pitch or a dropped beat announces itself in a
                     second of audio, which is often faster than reading for it.
+
+                    Left, with the label and the clef, rather than off in the
+                    right margin: the controls belong to the reading they play,
+                    and the eye is already at that end of the row.
                 */
-                <button
-                    type="button"
-                    onClick={(event) => {
-                        // The merged pane turns a click into an edit; playing it
-                        // must not also place a note.
-                        event.stopPropagation();
-                        onTogglePlay();
-                    }}
-                    disabled={transport?.isBusy}
-                    aria-label={`${transport?.isPlaying && !transport?.isPaused ? 'Pause' : 'Play'} ${label}`}
-                    className="absolute right-1 top-1 rounded border border-gray-400 bg-white px-1.5 py-0.5 text-[11px] leading-none text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-                >
-                    {transport?.isBusy
-                        ? '…'
-                        : transport?.isPlaying && !transport?.isPaused
-                          ? '❚❚'
-                          : '▶'}
-                </button>
+                <div className="absolute left-1 top-1 flex gap-1">
+                    <button
+                        type="button"
+                        onClick={(event) => {
+                            // The merged pane turns a click into an edit; playing
+                            // it must not also place a note.
+                            event.stopPropagation();
+                            onTogglePlay();
+                        }}
+                        disabled={transport?.isBusy}
+                        aria-label={`${playing ? 'Pause' : 'Play'} ${label}`}
+                        className="rounded border border-gray-400 bg-white px-1.5 py-0.5 text-[11px] leading-none text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                    >
+                        {transport?.isBusy ? '…' : playing ? '❚❚' : '▶'}
+                    </button>
+                    {/*
+                        Stop is not pause: it gives the row back its silence and
+                        puts the next play at the top of the passage. Only shown
+                        once there is something to stop, so a row at rest carries
+                        one control rather than two.
+                    */}
+                    {onStop && (transport?.isPlaying || transport?.isPaused) && (
+                        <button
+                            type="button"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onStop();
+                            }}
+                            aria-label={`Stop ${label}`}
+                            className="rounded border border-gray-400 bg-white px-1.5 py-0.5 text-[11px] leading-none text-gray-800 shadow-sm hover:bg-gray-50"
+                        >
+                            ■
+                        </button>
+                    )}
+                </div>
             )}
         </div>
     );
@@ -719,6 +743,7 @@ export function ScannerSystemRows({
         return {
             transport: transport.states[side],
             onTogglePlay: () => void transport.toggleSidePlayPause(side, range),
+            onStop: () => void transport.stopSideAudio(side),
         };
     };
 
@@ -1006,9 +1031,16 @@ export function ScannerSystemRows({
                         ref={(node) => {
                             rowRefs.current[rowIndex] = node;
                         }}
+                        /*
+                            A row that contains a difference gets a marked edge,
+                            not a wash. Tinting the whole card said "different"
+                            about the five agreeing staves in it as loudly as
+                            about the one bar that differs, and the gutter below
+                            already names exactly which bar that is.
+                        */
                         className={`rounded-lg border p-3 ${
                             differences.length > 0
-                                ? 'border-amber-300 bg-amber-50/40'
+                                ? 'border-gray-200 border-l-4 border-l-amber-400'
                                 : 'border-gray-200'
                         }`}
                     >

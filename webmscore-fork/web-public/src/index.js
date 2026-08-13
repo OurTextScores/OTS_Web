@@ -870,6 +870,43 @@ class WebMscore {
     }
 
     /**
+     * Synthesize audio frames for a measure range.
+     *
+     * The private half of `synthAudioBatchForMeasureRange`, and the layer that
+     * was missing. In worker mode `worker-helper.js` never calls the public
+     * method — it RPCs the underscore-prefixed one and holds the returned
+     * pointer itself, so that the batch iterator can be driven across the
+     * thread boundary. Without this, `worker.js` looked up
+     * `score['_synthAudioForMeasureRange']`, found nothing, and threw
+     * `Cannot read properties of undefined (reading 'apply')` — which reads
+     * exactly like a broken WASM build, and is not one: the native export has
+     * been there all along.
+     *
+     * @private
+     * @param {number} startMeasureIndex
+     * @param {number} endMeasureIndex
+     * @returns {Promise<number>} Pointer to the iterator function
+     */
+    async _synthAudioForMeasureRange(startMeasureIndex, endMeasureIndex) {
+        if (!WebMscore.hasSoundfont) {
+            throw new Error('The soundfont is not set.')
+        }
+
+        const iteratorFnPtr = Module.ccall('synthAudioForMeasureRange',
+            'number',
+            ['number', 'number', 'number', 'number'],
+            [this.scoreptr, startMeasureIndex, endMeasureIndex, this.excerptId]
+        )
+
+        const success = iteratorFnPtr !== 0
+        if (!success) {
+            throw new Error('synthAudioForMeasureRange: Internal Error.')
+        }
+
+        return iteratorFnPtr
+    }
+
+    /**
      * Synthesize a short isolated preview for the current selection (note/chord).
      * @private
      * @param {number} durationMs - preview duration in milliseconds
