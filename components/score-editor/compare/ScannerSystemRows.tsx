@@ -207,6 +207,33 @@ function SystemPane({
      */
     onPointMutate?: (point: { page: number; x: number; y: number }) => void;
 }) {
+    /**
+     * The pane measures itself rather than trusting a width from above.
+     *
+     * It used to be handed the scroll container's `clientWidth`, which includes
+     * that container's padding and knows nothing about the row card's — so
+     * every pane was scaled about 58px wider than the box it had to fit in, and
+     * the music ran off the right edge of a clipped row. Measuring the element
+     * the drawing actually lands in cannot drift from the layout, whatever
+     * padding is added between here and the top.
+     */
+    const [measuredWidth, setMeasuredWidth] = useState(0);
+    const observed = useRef<ResizeObserver | null>(null);
+    // A callback ref rather than an effect: a pane that first renders "no
+    // measure here" and only later gets a layout attaches its node long after
+    // mount, and an effect with an empty dependency list would never see it.
+    const attachPane = useCallback((node: HTMLDivElement | null) => {
+        observed.current?.disconnect();
+        observed.current = null;
+        if (!node || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(() => setMeasuredWidth(node.clientWidth));
+        observer.observe(node);
+        observed.current = observer;
+        setMeasuredWidth(node.clientWidth);
+    }, []);
+    // The passed width is only a first-frame estimate, until the observer runs.
+    const usableWidth = measuredWidth || paneWidth;
+
     if (measureIndexes.length === 0) {
         return (
             <div className="flex min-h-16 items-center rounded border border-dashed border-gray-300 px-3 text-xs text-gray-500">
@@ -258,7 +285,7 @@ function SystemPane({
     const left = Math.min(...boxes.map((box) => box.left));
     const right = Math.max(...boxes.map((box) => box.left + box.width));
     const bandWidth = Math.max(1, right - left);
-    const scale = paneWidth > 0 ? paneWidth / bandWidth : 1;
+    const scale = usableWidth > 0 ? usableWidth / bandWidth : 1;
     const geometry: PaneGeometry = { left, top, scale };
 
     /**
@@ -286,7 +313,8 @@ function SystemPane({
 
     return (
         <div
-            className={`relative overflow-hidden rounded border bg-white ${
+            ref={attachPane}
+            className={`relative w-full overflow-hidden rounded border bg-white ${
                 tone === 'merged' ? 'border-cyan-300 ring-1 ring-cyan-200' : 'border-gray-200'
             } ${onPointMutate ? 'cursor-crosshair' : ''}`}
             style={{ height: Math.max(1, (bottom - top) * scale) }}
@@ -325,7 +353,7 @@ function SystemPane({
                     }}
                     disabled={transport?.isBusy}
                     aria-label={`${transport?.isPlaying && !transport?.isPaused ? 'Pause' : 'Play'} ${label}`}
-                    className="absolute right-1 top-1 rounded border border-gray-300 bg-white/90 px-1.5 py-0.5 text-[11px] leading-none shadow-sm hover:bg-white disabled:opacity-50"
+                    className="absolute right-1 top-1 rounded border border-gray-400 bg-white px-1.5 py-0.5 text-[11px] leading-none text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
                 >
                     {transport?.isBusy
                         ? '…'
@@ -372,8 +400,8 @@ function Gutter({
 }) {
     if (regions.length === 0 || !engineId) return null;
     return (
-        <div className="flex flex-wrap items-center gap-1 py-0.5 text-[11px] text-gray-600">
-            <span className="mr-1 uppercase tracking-wide text-gray-400">
+        <div className="flex flex-wrap items-center gap-1 py-0.5 text-[11px] text-gray-700">
+            <span className="mr-1 uppercase tracking-wide text-gray-500">
                 take from {label}
             </span>
             {regions.map((region) => {
@@ -395,7 +423,7 @@ function Gutter({
                                     : 'This difference has no verified place on the scan, so it cannot be decided'
                             }
                             onClick={() => onTake(region, engineId)}
-                            className="rounded border border-gray-300 bg-white px-1.5 py-0.5 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="rounded border border-cyan-600 bg-white px-1.5 py-0.5 font-semibold text-cyan-800 shadow-sm hover:bg-cyan-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan-600 disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-50 disabled:font-normal disabled:text-gray-400 disabled:shadow-none"
                         >
                             {arrow} {region.blockIndex + 1}
                             {bars === 0 ? ' (remove)' : bars > 1 ? ` (${bars} bars)` : ''}
@@ -413,7 +441,7 @@ function Gutter({
                                 disabled={busy}
                                 title={`Take only the dynamics of difference ${region.blockIndex + 1} from ${label}, leaving the notes`}
                                 onClick={() => onTake(region, engineId, 'dynamics')}
-                                className="rounded border border-gray-200 bg-white px-1 py-0.5 text-gray-500 hover:bg-gray-50 disabled:opacity-40"
+                                className="rounded border border-cyan-300 bg-white px-1 py-0.5 text-cyan-800 hover:bg-cyan-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan-600 disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-400"
                             >
                                 {arrow} dynamics
                             </button>
@@ -425,7 +453,7 @@ function Gutter({
                                 disabled={busy}
                                 title={`Take only the lyrics of difference ${region.blockIndex + 1} from ${label}, leaving the notes`}
                                 onClick={() => onTake(region, engineId, 'lyrics')}
-                                className="rounded border border-gray-200 bg-white px-1 py-0.5 text-gray-500 hover:bg-gray-50 disabled:opacity-40"
+                                className="rounded border border-cyan-300 bg-white px-1 py-0.5 text-cyan-800 hover:bg-cyan-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan-600 disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-400"
                             >
                                 {arrow} lyrics
                             </button>
@@ -861,8 +889,8 @@ export function ScannerSystemRows({
                             onClick={() => setMergeSource(side)}
                             className={`rounded border px-2 py-1 ${
                                 mergeSource === side
-                                    ? 'border-cyan-500 bg-white font-semibold text-cyan-900'
-                                    : 'border-gray-300 hover:bg-white'
+                                    ? 'border-cyan-700 bg-cyan-600 font-semibold text-white shadow-sm'
+                                    : 'border-gray-400 bg-white text-gray-800 hover:bg-gray-50'
                             }`}
                         >
                             {side === 'left' ? leftLabel : rightLabel}
@@ -883,8 +911,8 @@ export function ScannerSystemRows({
                         data-testid="btn-merged-note-input"
                         className={`rounded border px-2 py-1 disabled:opacity-50 ${
                             noteInput
-                                ? 'border-cyan-500 bg-white font-semibold text-cyan-900'
-                                : 'border-gray-300 hover:bg-white'
+                                ? 'border-cyan-700 bg-cyan-600 font-semibold text-white shadow-sm'
+                                : 'border-gray-400 bg-white text-gray-800 hover:bg-gray-50'
                         }`}
                     >
                         {noteInput ? 'Note input on' : 'Note input'}
@@ -911,7 +939,7 @@ export function ScannerSystemRows({
                                 });
                             }}
                             disabled={merged.saving}
-                            className="rounded border border-gray-300 px-2 py-1 hover:bg-white disabled:opacity-50"
+                            className="rounded border border-gray-400 bg-white px-2 py-1 text-gray-800 hover:bg-gray-50 disabled:opacity-50"
                         >
                             Discard merged score
                         </button>

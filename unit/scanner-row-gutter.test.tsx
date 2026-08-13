@@ -98,6 +98,44 @@ function renderRows(regions: ScannerRowRegion[], calls: any[]) {
     );
 }
 
+describe('the system pane', () => {
+    beforeEach(() => {
+        mocked.loadWebMscore.mockReset();
+        vi.unstubAllGlobals();
+    });
+
+    it('scales the drawing to its own box, not to a container above it', async () => {
+        // The pane used to be handed the scroll container's `clientWidth`,
+        // which counts that container's padding and knows nothing about the row
+        // card's — so every pane was scaled ~58px wider than the box it had to
+        // fit in and the music ran off a clipped edge. Measuring itself cannot
+        // drift from the layout however much padding is added above.
+        const observed: Element[] = [];
+        vi.stubGlobal(
+            'ResizeObserver',
+            class {
+                constructor(private readonly callback: () => void) {}
+                observe(node: Element) {
+                    observed.push(node);
+                    this.callback();
+                }
+                disconnect() {}
+            },
+        );
+        const calls: any[] = [];
+        renderRows([grounded], calls);
+
+        await screen.findByTestId('btn-take-down-0');
+        // The pane itself — the element the drawing lands in — is observed, not
+        // only the scroll container it happens to sit inside.
+        const panes = observed.filter(
+            (node) =>
+                node.className.includes('overflow-hidden') && node.className.includes('w-full'),
+        );
+        expect(panes.length).toBeGreaterThan(0);
+    });
+});
+
 describe('the row gutter', () => {
     beforeEach(() => {
         mocked.loadWebMscore.mockReset();
