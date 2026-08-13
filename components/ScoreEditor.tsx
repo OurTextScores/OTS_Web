@@ -14780,6 +14780,15 @@ ${partsBodyXml}
             renderWindow: DEFAULT_RENDER_WINDOW,
         }),
         reportUnavailable: () => alert('Audio playback is not available for this score.'),
+        reportRangedSynthUnavailable: (error: unknown) => {
+            // Not an alert: playback still happens, from the top of the score
+            // instead of from this row. Saying so once in the console is the
+            // proportionate response to a build limitation.
+            console.warn(
+                'This webmscore build cannot synthesize a measure range; playing the whole score instead.',
+                error,
+            );
+        },
         reportMissingSoundFont: () => alert('No default soundfont found. Configure NEXT_PUBLIC_SOUNDFONT_CDN_URL or provide /public/soundfonts/default.sf3 (or .sf2).'),
         reportPlaybackError: (side, error) => {
             console.error(`Failed to play ${side} compare audio`, error);

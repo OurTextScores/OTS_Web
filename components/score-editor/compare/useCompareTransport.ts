@@ -52,6 +52,8 @@ type CompareTransportOptions = {
     ) => Promise<void>;
     reportUnavailable: () => void;
     reportMissingSoundFont: () => void;
+    /** Told once, when the build turns out to have no ranged synth. */
+    reportRangedSynthUnavailable?: (error: unknown) => void;
     reportPlaybackError: (side: CompareSide, error: unknown) => void;
     /**
      * Registers playback cancellation with the compare operation coordinator so a
@@ -89,6 +91,9 @@ export function useCompareTransport(options: CompareTransportOptions) {
         bySide(() => ({ current: null as SynthAudioBatchIterator | null })),
     );
     const generationRefs = useRef(bySide(() => ({ current: 0 })));
+    // A property of the engine build, not of a score or a side, so it is
+    // learned once and remembered for the life of the workspace.
+    const rangedSynthUnavailable = useRef(false);
 
     const update = useCallback((side: CompareSide, patch: Partial<CompareTransportState>) => {
         statesRef.current = {
@@ -199,19 +204,48 @@ export function useCompareTransport(options: CompareTransportOptions) {
                 return;
             }
 
-            const iterator = (range && targetScore.synthAudioBatchForMeasureRange
-                ? await targetScore.synthAudioBatchForMeasureRange(
-                      range.startMeasureIndex,
-                      range.endMeasureIndex,
-                      optionsRef.current.batchSize,
-                  )
-                : await targetScore.synthAudioBatch!(
-                      0,
-                      optionsRef.current.batchSize,
-                  )) as SynthAudioBatchIterator;
+            /*
+             * Whether a ranged synth exists cannot be answered by asking.
+             *
+             * The worker proxy forwards any method name, so
+             * `synthAudioBatchForMeasureRange` is always present on the object
+             * and the capability check above always passes. What decides it is
+             * the WASM build, which either exports `synthAudioForMeasureRange`
+             * or does not — and when it does not, the call reaches
+             * `undefined.apply` inside the worker. This build is one of those,
+             * and every row's play button reported "unable to play audio"
+             * rather than playing anything.
+             *
+             * So it is settled by calling: try the range, and on failure fall
+             * back to the whole score, which is what the doc comment above has
+             * always promised. Recorded per side, so the failing call is made
+             * once and not on every row.
+             */
+            const wantsRange = Boolean(range) && !rangedSynthUnavailable.current;
+            let iterator: SynthAudioBatchIterator | null = null;
+            if (wantsRange && targetScore.synthAudioBatchForMeasureRange) {
+                try {
+                    iterator = (await targetScore.synthAudioBatchForMeasureRange(
+                        range!.startMeasureIndex,
+                        range!.endMeasureIndex,
+                        optionsRef.current.batchSize,
+                    )) as SynthAudioBatchIterator;
+                } catch (error) {
+                    rangedSynthUnavailable.current = true;
+                    optionsRef.current.reportRangedSynthUnavailable?.(error);
+                }
+            }
+            if (!iterator) {
+                if (!targetScore.synthAudioBatch) {
+                    optionsRef.current.reportUnavailable();
+                    return;
+                }
+                iterator = (await targetScore.synthAudioBatch(
+                    0,
+                    optionsRef.current.batchSize,
+                )) as SynthAudioBatchIterator;
+            }
             if (!isCurrent()) {
-                // Track the cancel: this iterator already holds engine state for
-                // targetScore, and teardown must not destroy it mid-cancel.
                 await track(Promise.resolve(iterator(true)).catch(() => {}));
                 return;
             }

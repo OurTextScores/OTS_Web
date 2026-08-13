@@ -45,6 +45,7 @@ const renderTransport = (
     const reportUnavailable = vi.fn();
     const reportMissingSoundFont = vi.fn();
     const reportPlaybackError = vi.fn<(side: CompareSide, error: unknown) => void>();
+    const reportRangedSynthUnavailable = vi.fn<(error: unknown) => void>();
     const dependencies = {
         audioContextRef,
         batchSize: 2,
@@ -55,6 +56,7 @@ const renderTransport = (
         reportUnavailable,
         reportMissingSoundFont,
         reportPlaybackError,
+        reportRangedSynthUnavailable,
     };
     const hook = renderHook(
         ({ nextScores }) => useCompareTransport({ scores: nextScores, ...dependencies }),
@@ -247,6 +249,44 @@ describe('useCompareTransport', () => {
 
         expect(left.synthAudioBatchForMeasureRange).toHaveBeenCalledWith(12, 15, expect.any(Number));
         expect(left.synthAudioBatch).not.toHaveBeenCalled();
+    });
+
+    it('plays the whole score when the build has no ranged synth', async () => {
+        // The worker proxy forwards any method name, so the capability check
+        // always passes and only the call finds out: a build without
+        // `synthAudioForMeasureRange` reaches `undefined.apply` inside the
+        // worker. Every row's play button reported "unable to play audio"
+        // rather than playing anything.
+        const left = makeScore();
+        left.synthAudioBatchForMeasureRange.mockRejectedValue(
+            new TypeError("Cannot read properties of undefined (reading 'apply')"),
+        );
+        const transport = renderTransport(
+            { left: left.score, middle: null, right: null },
+            vi.fn(async () => true),
+        );
+
+        await act(async () =>
+            transport.result.current.playSideAudio('left', {
+                startMeasureIndex: 12,
+                endMeasureIndex: 15,
+            }),
+        );
+
+        expect(left.synthAudioBatch).toHaveBeenCalledWith(0, expect.any(Number));
+        expect(transport.reportRangedSynthUnavailable).toHaveBeenCalledTimes(1);
+        expect(transport.reportUnavailable).not.toHaveBeenCalled();
+
+        // Learned once: the failing call is not repeated on the next row.
+        left.synthAudioBatchForMeasureRange.mockClear();
+        await act(async () =>
+            transport.result.current.playSideAudio('left', {
+                startMeasureIndex: 20,
+                endMeasureIndex: 21,
+            }),
+        );
+        expect(left.synthAudioBatchForMeasureRange).not.toHaveBeenCalled();
+        expect(transport.reportRangedSynthUnavailable).toHaveBeenCalledTimes(1);
     });
 
     it('falls back to the whole score when no row is named', async () => {
