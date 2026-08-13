@@ -17006,7 +17006,20 @@ ${partsBodyXml}
                             changeReviewGutterRef.current.scrollTop = event.currentTarget.scrollTop;
                         }
                     }}
-                    className="relative z-0 flex-1 overflow-auto bg-gray-50 p-8"
+                    /*
+                     * The scanner's row view is a vertical stack of clipped
+                     * bands; nothing in it is meant to scroll sideways. Each
+                     * band holds a whole page scaled up so that one system
+                     * fills the box, and the browser counts that clipped
+                     * drawing toward this container's scroll area — so a
+                     * horizontal scrollbar ran the width of the editor,
+                     * dragged 1441px, and revealed nothing, because there was
+                     * nothing there. Every other mode still scrolls a score
+                     * that really is wider than the window.
+                     */
+                    className={`relative z-0 flex-1 overflow-auto bg-gray-50 p-8 ${
+                        isSystemRowsMode ? 'overflow-x-hidden' : ''
+                    }`}
                 >
                 {loading && (
                     <div className="flex items-center justify-center h-full">

@@ -130,7 +130,7 @@ describe('the system pane', () => {
         // only the scroll container it happens to sit inside.
         const panes = observed.filter(
             (node) =>
-                node.className.includes('overflow-hidden') && node.className.includes('w-full'),
+                node.className.includes('overflow-clip') && node.className.includes('w-full'),
         );
         expect(panes.length).toBeGreaterThan(0);
     });

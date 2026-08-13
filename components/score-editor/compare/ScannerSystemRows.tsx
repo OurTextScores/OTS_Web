@@ -314,7 +314,19 @@ function SystemPane({
     return (
         <div
             ref={attachPane}
-            className={`relative w-full overflow-hidden rounded border bg-white ${
+            /*
+             * `overflow-clip`, not `overflow-hidden`.
+             *
+             * The drawing inside is a whole page scaled up so that one system's
+             * band fills this box, so most of it is outside — that is the point.
+             * But `hidden` makes this a scroll container, and the browser counts
+             * the transformed content it clips toward the scrollable area of the
+             * editor canvas above: a horizontal scrollbar appeared across the
+             * whole editor, dragged to 1441px, and revealed nothing, because
+             * there was nothing there. `clip` clips without becoming scrollable
+             * and without contributing, which is what was meant both times.
+             */
+            className={`relative w-full overflow-clip rounded border bg-white ${
                 tone === 'merged' ? 'border-cyan-300 ring-1 ring-cyan-200' : 'border-gray-200'
             } ${onPointMutate ? 'cursor-crosshair' : ''}`}
             style={{ height: Math.max(1, (bottom - top) * scale) }}
