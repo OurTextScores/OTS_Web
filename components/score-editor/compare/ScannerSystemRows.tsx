@@ -222,6 +222,54 @@ function eventBoxes(
     return eventIndexes.map((index) => inside[index]).filter(Boolean);
 }
 
+
+/**
+ * The bars a pane should actually draw for one row.
+ *
+ * A system is up to a dozen bars and a difference is usually one or two of
+ * them, so drawing the whole line spends most of the width on music both
+ * readings agree about — and shrinks the bars in question to the point where
+ * comparing a beam or an accidental means leaning at the screen. Narrowing to
+ * the difference makes them as large as the pane allows.
+ *
+ * Only the two engine panes narrow. The scan is the context the whole
+ * judgement rests on, and the merged score is the thing being built, which a
+ * reviewer needs to see as a line rather than as a fragment of one.
+ *
+ * One bar of context either side, because a barline join is part of what a
+ * reviewer is judging: whether a bar was split, and whether the bar after it
+ * still starts where it should.
+ *
+ * A side with no bars in the difference — the empty half of an insertion or a
+ * removal — keeps its whole line. There is nothing there to narrow to, and what
+ * that side is *missing* can only be judged against what it has instead.
+ */
+export function focusedMeasureIndexes(
+    systemIndexes: readonly number[],
+    differenceIndexes: readonly number[],
+    context = 1,
+): number[] {
+    if (differenceIndexes.length === 0) return [...systemIndexes];
+    const wanted = new Set<number>();
+    const ordered = [...systemIndexes].sort((left, right) => left - right);
+    for (const index of differenceIndexes) {
+        const position = ordered.indexOf(index);
+        if (position < 0) {
+            wanted.add(index);
+            continue;
+        }
+        for (
+            let step = Math.max(0, position - context);
+            step <= Math.min(ordered.length - 1, position + context);
+            step += 1
+        ) {
+            wanted.add(ordered[step]);
+        }
+    }
+    const focused = ordered.filter((index) => wanted.has(index));
+    return focused.length > 0 ? focused : [...systemIndexes];
+}
+
 /** Draw an already-loaded score; used for the merged document, which is live. */
 async function renderScoreSide(score: Score): Promise<RenderedSide | null> {
     const svg = await score.saveSvg(0, true, false);
@@ -439,6 +487,10 @@ function SystemPane({
             }
             data-testid={tone === 'merged' ? 'merged-system-pane' : undefined}
         >
+            {/* What this pane was asked to draw, so a test can read it. */}
+            <span className="hidden" data-testid="pane-measures">
+                {measureIndexes.join(',')}
+            </span>
             <div
                 className="absolute left-0 top-0 origin-top-left"
                 style={{
@@ -1225,6 +1277,31 @@ export function ScannerSystemRows({
                 // until a decision changes it, so marking it differently would
                 // be claiming a difference that has not happened yet.
                 const symbols = differences.flatMap((region) => region.symbolDifferences || []);
+                // What this row is about: the selected difference when there is
+                // one, and otherwise everything differing on the line.
+                const focusRegions =
+                    selectedRegion && differences.some((r) => r.blockIndex === selectedRegion.blockIndex)
+                        ? [selectedRegion]
+                        : differences;
+                /*
+                    The engine panes narrow; the scan and the merged score do
+                    not. The two readings are what is being compared, so their
+                    width should go to the bars in question — but the scan is
+                    the context the whole judgement rests on, and the merged
+                    score is the thing being built, which a reviewer needs to
+                    see as a line rather than as a fragment of one.
+                */
+                const focusIndexes = (side: 'left' | 'right') =>
+                    focusedMeasureIndexes(
+                        side === 'left' ? system.leftMeasureIndexes : system.rightMeasureIndexes,
+                        focusRegions.flatMap((region) =>
+                            side === 'left'
+                                ? region.leftMeasureIndexes
+                                : region.rightMeasureIndexes,
+                        ),
+                    );
+                const leftFocus = focusIndexes('left');
+                const rightFocus = focusIndexes('right');
                 const highlightsFor = (
                     rendered: RenderedSide | null,
                     pick: (difference: ScannerSymbolDifference) => {
@@ -1360,10 +1437,10 @@ export function ScannerSystemRows({
                                 <SystemPane
                                     rendered={left}
                                     highlights={leftHighlights}
-                                    measureIndexes={system.leftMeasureIndexes}
+                                    measureIndexes={leftFocus}
                                     label={leftLabel}
                                     paneWidth={paneWidth}
-                                    {...paneTransport('left', system.leftMeasureIndexes)}
+                                    {...paneTransport('left', leftFocus)}
                                 />
                             </div>
                             <Gutter
@@ -1409,10 +1486,10 @@ export function ScannerSystemRows({
                                 <SystemPane
                                     rendered={right}
                                     highlights={rightHighlights}
-                                    measureIndexes={system.rightMeasureIndexes}
+                                    measureIndexes={rightFocus}
                                     label={rightLabel}
                                     paneWidth={paneWidth}
-                                    {...paneTransport('right', system.rightMeasureIndexes)}
+                                    {...paneTransport('right', rightFocus)}
                                 />
                             </div>
                         </div>

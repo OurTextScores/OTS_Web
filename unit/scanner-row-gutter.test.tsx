@@ -10,6 +10,7 @@ vi.mock('../lib/webmscore-loader', async (importOriginal) => ({
 }));
 
 import {
+    focusedMeasureIndexes,
     ScannerSystemRows,
     type ScannerRowRegion,
     type ScannerSystem,
@@ -62,11 +63,20 @@ function renderRows(
     const score = {
         saveSvg: vi.fn(async () => '<svg><g/></svg>'),
         measurePositions: vi.fn(async () => ({
-            elements: [{ id: 0, x: 0, y: 0, sx: 100, sy: 40, page: 0 }],
+            // Five bars across the page, so a row can be narrowed to some of them.
+            elements: [0, 1, 2, 3, 4].map((index) => ({
+                id: index,
+                x: index * 100,
+                y: 0,
+                sx: 100,
+                sy: 40,
+                page: 0,
+            })),
             events: [],
-            pageSize: { width: 100, height: 40 },
+            pageSize: { width: 500, height: 40 },
         })),
         // Four rhythmic positions across the one measure above.
+        // Four rhythmic positions inside the first measure above.
         segmentPositions: vi.fn(async () => ({
             elements: [0, 1, 2, 3].map((index) => ({
                 id: index,
@@ -77,7 +87,7 @@ function renderRows(
                 page: 0,
             })),
             events: [],
-            pageSize: { width: 100, height: 40 },
+            pageSize: { width: 500, height: 40 },
         })),
         saveXml: vi.fn(async () => new TextEncoder().encode(XML)),
         relayout: vi.fn(async () => undefined),
@@ -159,6 +169,27 @@ describe('the system pane', () => {
     });
 });
 
+describe('choosing the bars a pane draws', () => {
+    it('keeps one bar of context either side of the difference', () => {
+        // A barline join is part of what a reviewer is judging: whether a bar
+        // was split, and whether the bar after it still starts where it should.
+        expect(focusedMeasureIndexes([0, 1, 2, 3, 4], [2])).toEqual([1, 2, 3]);
+        expect(focusedMeasureIndexes([0, 1, 2, 3, 4], [0])).toEqual([0, 1]);
+        expect(focusedMeasureIndexes([0, 1, 2, 3, 4], [4])).toEqual([3, 4]);
+    });
+
+    it('joins two differences on one line rather than showing each alone', () => {
+        expect(focusedMeasureIndexes([0, 1, 2, 3, 4], [1, 3])).toEqual([0, 1, 2, 3, 4]);
+    });
+
+    it('keeps the whole line for a side with nothing in the difference', () => {
+        // The empty half of an insertion or a removal. There is nothing there
+        // to narrow to, and what that side is missing can only be judged
+        // against what it has instead.
+        expect(focusedMeasureIndexes([0, 1, 2, 3], [])).toEqual([0, 1, 2, 3]);
+    });
+});
+
 describe('the difference navigator', () => {
     beforeEach(() => {
         mocked.loadWebMscore.mockReset();
@@ -210,6 +241,40 @@ describe('the difference navigator', () => {
         // A side with no matching bar says so rather than showing an empty gap.
         expect(screen.getByText(/Transcoda: no matching bar/)).toBeInTheDocument();
         expect(screen.getByTestId('btn-next-difference')).toBeDisabled();
+    });
+
+    it('narrows the engine panes to the contested bars, and nothing else', async () => {
+        // A system is up to a dozen bars and a difference is usually one or two
+        // of them. Spending the width on music both readings agree about
+        // shrinks the bars in question to the point where comparing a beam
+        // means leaning at the screen. The scan and the merged score keep their
+        // whole line: one is the context the judgement rests on, the other is
+        // the thing being built.
+        const calls: any[] = [];
+        const wideSystems: ScannerSystem[] = [
+            {
+                systemIndex: 0,
+                leftMeasureIndexes: [0, 1, 2, 3, 4],
+                rightMeasureIndexes: [0, 1, 2, 3, 4],
+            },
+        ];
+        renderRows(
+            [
+                {
+                    ...grounded,
+                    blockIndex: 0,
+                    leftMeasureIndexes: [2],
+                    rightMeasureIndexes: [2],
+                },
+            ],
+            calls,
+            { systems: wideSystems, onlyBlockIndex: 0 },
+        );
+
+        await screen.findByTestId('btn-take-down-0');
+        expect(
+            screen.getAllByTestId('pane-measures').map((node) => node.textContent),
+        ).toEqual(['1,2,3', '1,2,3']);
     });
 
     it('boxes the difference on the scan it came from', async () => {
