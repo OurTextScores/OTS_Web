@@ -47,6 +47,17 @@ export type ScannerRowRegion = {
      * the note rather than at the bar containing it.
      */
     symbolDifferences?: ScannerSymbolDifference[];
+    /** How a reader would name the bars this covers, per side. */
+    leftMeasureLabel?: string;
+    rightMeasureLabel?: string;
+    /** Where it sits inside its system's scan crop, as fractions of that crop. */
+    cropBoxes?: Array<{
+        systemIndex: number;
+        left: number;
+        top: number;
+        width: number;
+        height: number;
+    }>;
 };
 
 export type ScannerSymbolDifference = {
@@ -812,6 +823,43 @@ export function ScannerSystemRows({
     }, [systems, regions]);
 
     /**
+     * The differences a reader can actually be taken to, in page order.
+     *
+     * Ordered by the system they appear on rather than by block index, because
+     * the reader is walking down a page, and a list that jumps back up it is
+     * not a walk. Only differences that landed on a system are here: one whose
+     * place on the scan could not be proven has no row to show.
+     */
+    const navigableBlocks = useMemo(() => {
+        const seen = new Map<number, number>();
+        differencesBySystem.forEach((entries, rowIndex) => {
+            for (const region of entries) {
+                if (!seen.has(region.blockIndex)) seen.set(region.blockIndex, rowIndex);
+            }
+        });
+        return [...seen.entries()]
+            .sort((left, right) => left[1] - right[1] || left[0] - right[0])
+            .map(([blockIndex, rowIndex]) => ({ blockIndex, rowIndex }));
+    }, [differencesBySystem]);
+
+    // The host names the difference to open; moving between them is this
+    // view's own business, because everything a reader needs to move — the
+    // rows, the scan, the readings — is already here.
+    const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | undefined>(onlyBlockIndex);
+    const [staleCrops, setStaleCrops] = useState<Set<number>>(new Set());
+    useEffect(() => setSelectedBlockIndex(onlyBlockIndex), [onlyBlockIndex]);
+    const selectedPosition = navigableBlocks.findIndex(
+        (entry) => entry.blockIndex === selectedBlockIndex,
+    );
+    const selectedRegion = regions.find((region) => region.blockIndex === selectedBlockIndex);
+    const goToDifference = (position: number) => {
+        const target = navigableBlocks[position];
+        if (!target) return;
+        setSelectedBlockIndex(target.blockIndex);
+        rowRefs.current[target.rowIndex]?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    };
+
+    /**
      * The systems this view actually shows.
      *
      * Scoped to one difference when the host asked for one — and if that
@@ -821,11 +869,11 @@ export function ScannerSystemRows({
      */
     const visibleRows = useMemo(() => {
         const rows = systems.map((system, index) => ({ system, index }));
-        if (onlyBlockIndex === undefined) return rows;
+        if (selectedBlockIndex === undefined) return rows;
         return rows.filter(({ index }) =>
-            differencesBySystem[index].some((region) => region.blockIndex === onlyBlockIndex),
+            differencesBySystem[index].some((region) => region.blockIndex === selectedBlockIndex),
         );
-    }, [differencesBySystem, onlyBlockIndex, systems]);
+    }, [differencesBySystem, selectedBlockIndex, systems]);
 
     const differingRows = differencesBySystem.reduce(
         (total, entries) => total + (entries.length > 0 ? 1 : 0),
@@ -992,35 +1040,67 @@ export function ScannerSystemRows({
         [merged],
     );
 
-    const step = (direction: 1 | -1, from: number) => {
-        for (
-            let index = from + direction;
-            index >= 0 && index < systems.length;
-            index += direction
-        ) {
-            if (differencesBySystem[index].length > 0) {
-                rowRefs.current[index]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                return;
-            }
-        }
-    };
-
     const canSave = Boolean(merged.state && mergedEngineId);
 
     return (
         <div ref={paneRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
+            {/*
+                The difference under review, named and navigated here.
+
+                This used to be a card outside the editor: a list of blocks on
+                the left, a cropped scrap of the scan on the right, and the
+                editor below. Three places to look at one difference, and the
+                crop was the same system the editor already draws — just cut out
+                and shown again, smaller. Now the title says which difference it
+                is, the arrows move to the next one, and the scan keeps its
+                system with a box drawn on the bars in question.
+            */}
             <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-gray-600">
-                <span>
-                    {onlyBlockIndex === undefined
-                        ? `${systems.length} system${systems.length === 1 ? '' : 's'} from the scan${
-                              differingRows > 0
-                                  ? `, ${differingRows} with differences`
-                                  : ', none differing'
-                          }`
-                        : `Difference ${onlyBlockIndex + 1}, on ${visibleRows.length} system${
-                              visibleRows.length === 1 ? '' : 's'
-                          } of the scan`}
-                </span>
+                {selectedBlockIndex === undefined || navigableBlocks.length === 0 ? (
+                    <span>
+                        {`${systems.length} system${systems.length === 1 ? '' : 's'} from the scan${
+                            differingRows > 0
+                                ? `, ${differingRows} with differences`
+                                : ', none differing'
+                        }`}
+                    </span>
+                ) : (
+                    <span className="flex flex-wrap items-baseline gap-2">
+                        <button
+                            type="button"
+                            disabled={selectedPosition <= 0}
+                            onClick={() => goToDifference(selectedPosition - 1)}
+                            data-testid="btn-previous-difference"
+                            className="rounded border border-gray-400 bg-white px-2 py-0.5 text-gray-800 hover:bg-gray-50 disabled:border-gray-300 disabled:text-gray-400"
+                        >
+                            ← previous
+                        </button>
+                        <button
+                            type="button"
+                            disabled={
+                                selectedPosition < 0 || selectedPosition >= navigableBlocks.length - 1
+                            }
+                            onClick={() => goToDifference(selectedPosition + 1)}
+                            data-testid="btn-next-difference"
+                            className="rounded border border-gray-400 bg-white px-2 py-0.5 text-gray-800 hover:bg-gray-50 disabled:border-gray-300 disabled:text-gray-400"
+                        >
+                            next →
+                        </button>
+                        <span className="font-medium text-gray-800" data-testid="difference-title">
+                            Difference {Math.max(selectedPosition, 0) + 1} of{' '}
+                            {navigableBlocks.length}
+                        </span>
+                        <span>
+                            {(selectedRegion?.differenceClasses || [])
+                                .map((name) => DIFFERENCE_LABELS[name] || name)
+                                .join(', ')}
+                        </span>
+                        <span className="text-gray-500">
+                            {leftLabel}: {selectedRegion?.leftMeasureLabel || 'no matching bar'} ·{' '}
+                            {rightLabel}: {selectedRegion?.rightMeasureLabel || 'no matching bar'}
+                        </span>
+                    </span>
+                )}
                 {(busy || merged.loading) && <span aria-live="polite">Laying out the readings…</span>}
                 {(error || merged.error) && (
                     <span className="text-red-700" role="alert">
@@ -1210,33 +1290,60 @@ export function ScannerSystemRows({
                                           .map((name) => DIFFERENCE_LABELS[name] || name)
                                           .join(', ')}
                             </span>
-                            {differences.length > 0 && (
-                                <span className="flex gap-1">
-                                    <button
-                                        type="button"
-                                        onClick={() => step(-1, rowIndex)}
-                                        className="rounded border border-gray-300 px-2 py-0.5 hover:bg-gray-50"
-                                    >
-                                        ← previous
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => step(1, rowIndex)}
-                                        className="rounded border border-gray-300 px-2 py-0.5 hover:bg-gray-50"
-                                    >
-                                        next →
-                                    </button>
-                                </span>
-                            )}
+
                         </div>
 
-                        {system.cropUrl && (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img
-                                src={resolveUrl(system.cropUrl)}
-                                alt={`Scan of system ${rowIndex + 1}`}
-                                className="mb-2 w-full rounded border border-gray-200 bg-white object-contain"
-                            />
+                        {system.cropUrl && staleCrops.has(system.systemIndex) && (
+                            /*
+                                A crop is signature-bound and the server refuses
+                                it once the job moves on. An `<img>` cannot read
+                                that refusal, so it has to be said here — a
+                                broken image would look like a bug in the page
+                                rather than a scan that has been superseded.
+                            */
+                            <p
+                                role="alert"
+                                className="mb-2 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
+                            >
+                                This scan crop is no longer current. Reload the page to compare
+                                against the readings as they stand now.
+                            </p>
+                        )}
+                        {system.cropUrl && !staleCrops.has(system.systemIndex) && (
+                            <div className="relative mb-2">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                    src={resolveUrl(system.cropUrl)}
+                                    alt={`Scan of system ${rowIndex + 1}`}
+                                    onError={() =>
+                                        setStaleCrops((current) =>
+                                            new Set(current).add(system.systemIndex),
+                                        )
+                                    }
+                                    className="w-full rounded border border-gray-200 bg-white object-contain"
+                                />
+                                {/*
+                                    The bars in question, boxed on the scan they
+                                    came from. Fractions of this crop, so the box
+                                    holds wherever the image is scaled to — the
+                                    scan's own pixel size never reaches here.
+                                */}
+                                {(selectedRegion?.cropBoxes || [])
+                                    .filter((box) => box.systemIndex === system.systemIndex)
+                                    .map((box, boxIndex) => (
+                                        <div
+                                            key={`${box.left}-${boxIndex}`}
+                                            data-testid="scan-difference-box"
+                                            className="pointer-events-none absolute rounded-sm border-2 border-amber-500 bg-amber-300/15"
+                                            style={{
+                                                left: `${box.left * 100}%`,
+                                                top: `${box.top * 100}%`,
+                                                width: `${box.width * 100}%`,
+                                                height: `${box.height * 100}%`,
+                                            }}
+                                        />
+                                    ))}
+                            </div>
                         )}
 
                         {/*

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -32,6 +32,11 @@ const systems: ScannerSystem[] = [
     { systemIndex: 0, leftMeasureIndexes: [0], rightMeasureIndexes: [0] },
 ];
 
+const croppedSystems: ScannerSystem[] = [
+    { systemIndex: 0, leftMeasureIndexes: [0], rightMeasureIndexes: [0], cropUrl: 'systems/0/crop' },
+    { systemIndex: 1, leftMeasureIndexes: [1], rightMeasureIndexes: [1], cropUrl: 'systems/1/crop' },
+];
+
 const grounded: ScannerRowRegion = {
     blockIndex: 0,
     leftMeasureIndexes: [0],
@@ -49,7 +54,11 @@ const ungrounded: ScannerRowRegion = {
     grounded: false,
 };
 
-function renderRows(regions: ScannerRowRegion[], calls: any[]) {
+function renderRows(
+    regions: ScannerRowRegion[],
+    calls: any[],
+    options: { systems?: ScannerSystem[]; onlyBlockIndex?: number } = {},
+) {
     const score = {
         saveSvg: vi.fn(async () => '<svg><g/></svg>'),
         measurePositions: vi.fn(async () => ({
@@ -89,7 +98,8 @@ function renderRows(regions: ScannerRowRegion[], calls: any[]) {
 
     return render(
         <ScannerSystemRows
-            systems={systems}
+            systems={options.systems || systems}
+            onlyBlockIndex={options.onlyBlockIndex}
             regions={regions}
             leftXml={XML}
             rightXml={XML}
@@ -146,6 +156,91 @@ describe('the system pane', () => {
                 node.className.includes('overflow-clip') && node.className.includes('w-full'),
         );
         expect(panes.length).toBeGreaterThan(0);
+    });
+});
+
+describe('the difference navigator', () => {
+    beforeEach(() => {
+        mocked.loadWebMscore.mockReset();
+        vi.unstubAllGlobals();
+    });
+
+    const twoDifferences: ScannerRowRegion[] = [
+        {
+            ...grounded,
+            blockIndex: 0,
+            leftMeasureIndexes: [0],
+            rightMeasureIndexes: [0],
+            leftMeasureLabel: 'bar 1',
+            rightMeasureLabel: 'bar 1',
+            cropBoxes: [{ systemIndex: 0, left: 0.25, top: 0, width: 0.5, height: 1 }],
+        },
+        {
+            ...grounded,
+            blockIndex: 1,
+            leftMeasureIndexes: [1],
+            rightMeasureIndexes: [1],
+            differenceClasses: ['measure-removed'],
+            leftMeasureLabel: 'bar 2',
+            rightMeasureLabel: '',
+            contentSignature: 'scanner-block-content-v2:def',
+        },
+    ];
+
+    it('names the difference under review and moves to the next one', async () => {
+        // This used to be a card outside the editor: a list of blocks, a
+        // cropped scrap of scan, and the editor below — three places to look at
+        // one difference. The title says which one it is, and the arrows move.
+        const calls: any[] = [];
+        renderRows(twoDifferences, calls, {
+            systems: croppedSystems,
+            onlyBlockIndex: 0,
+        });
+
+        expect(await screen.findByTestId('difference-title')).toHaveTextContent(
+            'Difference 1 of 2',
+        );
+        expect(screen.getByText(/HOMR: bar 1/)).toBeInTheDocument();
+        // Nothing to go back to from the first.
+        expect(screen.getByTestId('btn-previous-difference')).toBeDisabled();
+
+        await userEvent.click(screen.getByTestId('btn-next-difference'));
+
+        expect(screen.getByTestId('difference-title')).toHaveTextContent('Difference 2 of 2');
+        // A side with no matching bar says so rather than showing an empty gap.
+        expect(screen.getByText(/Transcoda: no matching bar/)).toBeInTheDocument();
+        expect(screen.getByTestId('btn-next-difference')).toBeDisabled();
+    });
+
+    it('boxes the difference on the scan it came from', async () => {
+        // The crop is the system, not a cut-out of the bars: the reader keeps
+        // the line for context and the box says which part of it is in question.
+        const calls: any[] = [];
+        renderRows(twoDifferences, calls, {
+            systems: croppedSystems,
+            onlyBlockIndex: 0,
+        });
+
+        const box = await screen.findByTestId('scan-difference-box');
+        expect(box).toHaveStyle({ left: '25%', width: '50%' });
+    });
+
+    it('says a scan crop is stale rather than showing a broken image', async () => {
+        // The crop is signature-bound and the server refuses it once the job
+        // moves on. An <img> cannot read that refusal, so it has to be said.
+        const calls: any[] = [];
+        renderRows(twoDifferences, calls, {
+            systems: croppedSystems,
+            onlyBlockIndex: 0,
+        });
+
+        const crop = await screen.findByAltText('Scan of system 1');
+        fireEvent.error(crop);
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+            /This scan crop is no longer current/,
+        );
+        expect(screen.queryByAltText('Scan of system 1')).toBeNull();
     });
 });
 
