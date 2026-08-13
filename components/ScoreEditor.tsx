@@ -1320,6 +1320,14 @@ export default function ScoreEditor() {
     // that has already computed the diff hands it over instead.
     // docs/private/SCANNER_COMPARATOR_DESIGN_2026-08-12.md
     const compareRegionsUrl = searchParams.get('compareRegions')?.trim() || '';
+    /**
+     * Show only the systems one difference falls in.
+     *
+     * A reviewer who clicked a difference is asking about that line, and the
+     * agreeing lines below it are the answer to a question nobody asked — the
+     * gutter is the index (§5), so the rows do not also have to be one.
+     */
+    const compareBlockIndex = searchParams.get('compareBlock')?.trim() || '';
     const isCompareEmbedMode = Boolean(compareLeftUrl && compareRightUrl);
     const isSuppliedRegionsMode = isCompareEmbedMode && Boolean(compareRegionsUrl);
     // Row-per-scanned-system layout. Opt-in, because it only makes sense when a
@@ -17988,6 +17996,11 @@ ${partsBodyXml}
                                     leftEngineId={suppliedCompareLeftEngineId}
                                     rightEngineId={suppliedCompareRightEngineId}
                                     merged={suppliedMerged}
+                                    onlyBlockIndex={
+                                        compareBlockIndex === ''
+                                            ? undefined
+                                            : Number(compareBlockIndex)
+                                    }
                                     transport={compareTransport}
                                     onMergedScoreChange={setScannerMergedScore}
                                     resolveUrl={(relative) =>

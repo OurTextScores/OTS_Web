@@ -456,6 +456,7 @@ export function ScannerSystemRows({
     leftEngineId,
     rightEngineId,
     merged: mergedState,
+    onlyBlockIndex,
     transport,
     onMergedScoreChange,
     resolveUrl,
@@ -469,6 +470,13 @@ export function ScannerSystemRows({
     leftEngineId?: string;
     rightEngineId?: string;
     merged?: MergedScoreState | null;
+    /**
+     * Render only the systems one difference falls in.
+     *
+     * The reviewer clicked that difference; the agreeing lines below it answer
+     * a question nobody asked.
+     */
+    onlyBlockIndex?: number;
     /**
      * Playback for all three panes, owned by the workspace so there is one
      * transport rather than a second competing one. Absent in tests that do not
@@ -624,6 +632,22 @@ export function ScannerSystemRows({
             );
         });
     }, [systems, regions]);
+
+    /**
+     * The systems this view actually shows.
+     *
+     * Scoped to one difference when the host asked for one — and if that
+     * difference has no system at all, which happens when its place on the scan
+     * could not be proven, the result is empty and says so rather than silently
+     * showing the whole page instead.
+     */
+    const visibleRows = useMemo(() => {
+        const rows = systems.map((system, index) => ({ system, index }));
+        if (onlyBlockIndex === undefined) return rows;
+        return rows.filter(({ index }) =>
+            differencesBySystem[index].some((region) => region.blockIndex === onlyBlockIndex),
+        );
+    }, [differencesBySystem, onlyBlockIndex, systems]);
 
     const differingRows = differencesBySystem.reduce(
         (total, entries) => total + (entries.length > 0 ? 1 : 0),
@@ -808,8 +832,15 @@ export function ScannerSystemRows({
         <div ref={paneRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-gray-600">
                 <span>
-                    {systems.length} system{systems.length === 1 ? '' : 's'} from the scan
-                    {differingRows > 0 ? `, ${differingRows} with differences` : ', none differing'}
+                    {onlyBlockIndex === undefined
+                        ? `${systems.length} system${systems.length === 1 ? '' : 's'} from the scan${
+                              differingRows > 0
+                                  ? `, ${differingRows} with differences`
+                                  : ', none differing'
+                          }`
+                        : `Difference ${onlyBlockIndex + 1}, on ${visibleRows.length} system${
+                              visibleRows.length === 1 ? '' : 's'
+                          } of the scan`}
                 </span>
                 {(busy || merged.loading) && <span aria-live="polite">Laying out the readings…</span>}
                 {(error || merged.error) && (
@@ -917,7 +948,14 @@ export function ScannerSystemRows({
                 {notice && <div className="text-gray-700">{notice}</div>}
             </div>
 
-            {systems.map((system, rowIndex) => {
+            {onlyBlockIndex !== undefined && visibleRows.length === 0 && (
+                <p className="rounded border border-dashed border-gray-300 px-3 py-2 text-xs text-gray-500">
+                    This difference has no verified place on the scan, so there is no line to show
+                    it on.
+                </p>
+            )}
+
+            {visibleRows.map(({ system, index: rowIndex }) => {
                 const differences = differencesBySystem[rowIndex];
                 const classes = [
                     ...new Set(differences.flatMap((region) => region.differenceClasses || [])),
