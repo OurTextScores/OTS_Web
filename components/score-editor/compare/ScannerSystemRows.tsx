@@ -177,6 +177,50 @@ function svgAtRenderWidth(svg: string): string {
 }
 
 
+
+/**
+ * Where a reading's bars belong under the merged score's line.
+ *
+ * The merged pane draws its whole line across the pane, which fixes a scale and
+ * an origin for the row. An engine pane showing only the contested bars should
+ * appear at that same scale, over the merged bars it would replace — so the
+ * reader compares by looking up and down a column rather than across two
+ * differently-zoomed pictures of the same music.
+ *
+ * Null when there is nothing to line up against: the merged score does not draw
+ * this line, or the bars in question are not in it. The pane then fills its own
+ * width, which is what it did before there was anything to align to.
+ */
+export function placeUnderMerged(
+    merged: RenderedSide | null,
+    mergedIndexes: readonly number[],
+    ownIndexes: readonly number[],
+    paneWidth: number,
+): { left: number; width: number } | null {
+    if (!merged || paneWidth <= 0 || mergedIndexes.length === 0 || ownIndexes.length === 0) {
+        return null;
+    }
+    const boxesFor = (indexes: readonly number[]) =>
+        indexes
+            .map((index) => merged.measures[index])
+            .filter((box): box is MeasureBox => Boolean(box));
+    const lineBoxes = boxesFor(mergedIndexes);
+    const targetBoxes = boxesFor(ownIndexes);
+    if (lineBoxes.length === 0 || targetBoxes.length === 0) return null;
+
+    const lineLeft = Math.min(...lineBoxes.map((box) => box.left));
+    const lineRight = Math.max(...lineBoxes.map((box) => box.left + box.width));
+    const lineWidth = Math.max(1, lineRight - lineLeft);
+    const scale = paneWidth / lineWidth;
+
+    const targetLeft = Math.min(...targetBoxes.map((box) => box.left));
+    const targetRight = Math.max(...targetBoxes.map((box) => box.left + box.width));
+    return {
+        left: (targetLeft - lineLeft) * scale,
+        width: Math.max(1, (targetRight - targetLeft) * scale),
+    };
+}
+
 /**
  * Where the unmatched events of one bar are drawn.
  *
@@ -317,6 +361,8 @@ async function renderSide(xml: string, startIndexes: number[]): Promise<Rendered
 }
 
 type PaneGeometry = {
+    /** Where the drawing starts inside the pane, in pane pixels. */
+    offsetX: number;
     /** Left edge of the system's music, in RENDER_WIDTH pixels. */
     left: number;
     top: number;
@@ -335,6 +381,7 @@ function SystemPane({
     onStop,
     highlights,
     preview,
+    place,
 }: {
     rendered: RenderedSide | null;
     measureIndexes: number[];
@@ -349,6 +396,16 @@ function SystemPane({
     highlights?: MeasureBox[];
     /** Whole bars a hovered control is pointing at, in the same pixels. */
     preview?: MeasureBox[];
+    /**
+     * Where in the pane this reading's bars should be drawn, in pane pixels.
+     *
+     * Absent means "fill the pane", which is right for the merged score: it is
+     * the line, so it gets the width. An engine pane showing two contested bars
+     * of a twelve-bar line would otherwise blow them up to the full width and
+     * put them nowhere near the merged bars they replace — so it is handed the
+     * box its counterpart occupies, and draws at that size, in that place.
+     */
+    place?: { left: number; width: number } | null;
     /**
      * Score-space coordinates of a click, for the one pane that is editable.
      * Absent on engine panes, which is what makes them read-only: there is no
@@ -434,8 +491,11 @@ function SystemPane({
     const left = Math.min(...boxes.map((box) => box.left));
     const right = Math.max(...boxes.map((box) => box.left + box.width));
     const bandWidth = Math.max(1, right - left);
-    const scale = usableWidth > 0 ? usableWidth / bandWidth : 1;
-    const geometry: PaneGeometry = { left, top, scale };
+    // Fill the pane, or fit the box a counterpart pane says to sit in.
+    const targetWidth = place && place.width > 0 ? place.width : usableWidth;
+    const scale = targetWidth > 0 ? targetWidth / bandWidth : 1;
+    const offsetX = place ? place.left : 0;
+    const geometry: PaneGeometry = { left, top, scale, offsetX };
     const playing = Boolean(transport?.isPlaying) && !transport?.isPaused;
 
     /**
@@ -449,7 +509,8 @@ function SystemPane({
     const toScorePoint = (event: React.MouseEvent<HTMLDivElement>) => {
         if (!rendered) return null;
         const rect = event.currentTarget.getBoundingClientRect();
-        const renderX = (event.clientX - rect.left) / geometry.scale + geometry.left;
+        const renderX =
+            (event.clientX - rect.left - geometry.offsetX) / geometry.scale + geometry.left;
         const renderY = (event.clientY - rect.top) / geometry.scale + geometry.top;
         const page =
             rendered.pageHeight > 0 ? Math.floor(renderY / rendered.pageHeight) : 0;
@@ -490,15 +551,20 @@ function SystemPane({
             }
             data-testid={tone === 'merged' ? 'merged-system-pane' : undefined}
         >
-            {/* What this pane was asked to draw, so a test can read it. */}
-            <span className="hidden" data-testid="pane-measures">
+            {/* What this pane was asked to draw, and where, so a test can read it. */}
+            <span
+                className="hidden"
+                data-testid="pane-measures"
+                data-place-left={place ? Math.round(place.left) : ''}
+                data-place-width={place ? Math.round(place.width) : ''}
+            >
                 {measureIndexes.join(',')}
             </span>
             <div
                 className="absolute left-0 top-0 origin-top-left"
                 style={{
                     width: rendered.width,
-                    transform: `scale(${scale}) translate(${-left}px, ${-top}px)`,
+                    transform: `translate(${offsetX}px, 0) scale(${scale}) translate(${-left}px, ${-top}px)`,
                 }}
                 // The SVG comes from the engine build, not from user input.
                 dangerouslySetInnerHTML={{ __html: rendered.svg }}
@@ -516,7 +582,7 @@ function SystemPane({
                     className="pointer-events-none absolute left-0 top-0 origin-top-left"
                     style={{
                         width: rendered.width,
-                        transform: `scale(${scale}) translate(${-left}px, ${-top}px)`,
+                        transform: `translate(${offsetX}px, 0) scale(${scale}) translate(${-left}px, ${-top}px)`,
                     }}
                 >
                     {(preview || []).map((box, index) => (
@@ -545,7 +611,7 @@ function SystemPane({
                     className="pointer-events-none absolute left-0 top-0 origin-top-left"
                     style={{
                         width: rendered.width,
-                        transform: `scale(${scale}) translate(${-left}px, ${-top}px)`,
+                        transform: `translate(${offsetX}px, 0) scale(${scale}) translate(${-left}px, ${-top}px)`,
                     }}
                 >
                     {(highlights || []).map((box, index) => (
@@ -1199,7 +1265,16 @@ export function ScannerSystemRows({
     const canSave = Boolean(merged.state && mergedEngineId);
 
     return (
-        <div ref={paneRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
+        /*
+            No scroll container of its own.
+
+            The rows live in an iframe sized by the host, and a scrollable box
+            inside a fixed-height frame gives a reader two scrollbars and the
+            shorter of two viewports. Growing to fit instead lets the host size
+            the frame to the content and the page scroll it, which is the only
+            way this gets the window's full height.
+        */
+        <div ref={paneRef} className="flex flex-col gap-3 p-4">
             {/*
                 The difference under review, named and navigated here.
 
@@ -1418,6 +1493,22 @@ export function ScannerSystemRows({
                         : measureIndexes
                               .map((index) => rendered.measures[index])
                               .filter((box): box is MeasureBox => Boolean(box));
+                // Each engine pane sits over the merged bars it would replace,
+                // at the merged score's own scale. The merged score's bars are
+                // the ones its own reading contributed, so the indexes to line
+                // up against are that side's.
+                // Both engine panes get the same box: the span the merged score
+                // devotes to the bars in question. Each still draws its own
+                // bars — one reading may have three where the other has two —
+                // and they occupy the same column, which is the comparison.
+                const enginePlace = placeUnderMerged(
+                    mergedRender,
+                    mergedIndexes(system),
+                    mergeSource === 'left' ? leftFocus : rightFocus,
+                    paneWidth,
+                );
+                const leftPlace = enginePlace;
+                const rightPlace = enginePlace;
                 const leftPreview = previewBoxes(left, previewRegion?.leftMeasureIndexes || []);
                 const rightPreview = previewBoxes(right, previewRegion?.rightMeasureIndexes || []);
                 const mergedPreview = previewBoxes(
@@ -1562,6 +1653,7 @@ export function ScannerSystemRows({
                                     rendered={left}
                                     highlights={leftHighlights}
                                     preview={leftPreview}
+                                    place={leftPlace}
                                     measureIndexes={leftFocus}
                                     label={leftLabel}
                                     paneWidth={paneWidth}
@@ -1617,6 +1709,7 @@ export function ScannerSystemRows({
                                     rendered={right}
                                     highlights={rightHighlights}
                                     preview={rightPreview}
+                                    place={rightPlace}
                                     measureIndexes={rightFocus}
                                     label={rightLabel}
                                     paneWidth={paneWidth}

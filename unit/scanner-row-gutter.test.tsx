@@ -11,6 +11,7 @@ vi.mock('../lib/webmscore-loader', async (importOriginal) => ({
 
 import {
     focusedMeasureIndexes,
+    placeUnderMerged,
     ScannerSystemRows,
     type ScannerRowRegion,
     type ScannerSystem,
@@ -194,6 +195,49 @@ describe('choosing the bars a pane draws', () => {
         // to narrow to, and what that side is missing can only be judged
         // against what it has instead.
         expect(focusedMeasureIndexes([0, 1, 2, 3], [])).toEqual([0, 1, 2, 3]);
+    });
+});
+
+describe('placing a reading under the merged line', () => {
+    // A merged line of four equal bars across a 400px pane: 100px a bar.
+    const merged = {
+        svg: '',
+        segments: [],
+        width: 400,
+        pageHeight: 100,
+        renderScale: 1,
+        measures: [0, 1, 2, 3].map((index) => ({
+            left: index * 100,
+            width: 100,
+            top: 0,
+            height: 40,
+        })),
+    };
+
+    it("draws at the merged score's scale, over the bars it would replace", () => {
+        // Forced to fill the pane, two contested bars of a twelve-bar line blew
+        // up to the full width and sat nowhere near the merged bars they
+        // replace. Handed the box its counterpart occupies, a reading is drawn
+        // at that size, in that place — so the reader compares by looking up and
+        // down a column rather than across two differently-zoomed pictures.
+        expect(placeUnderMerged(merged as any, [0, 1, 2, 3], [1, 2], 400)).toEqual({
+            left: 100,
+            width: 200,
+        });
+        // The last bar of the line sits at the right-hand end of the pane.
+        expect(placeUnderMerged(merged as any, [0, 1, 2, 3], [3], 400)).toEqual({
+            left: 300,
+            width: 100,
+        });
+    });
+
+    it('gives no box when there is nothing to line up against', () => {
+        // The merged score does not draw this line, or the bars are not in it.
+        // The pane then fills its own width, as it did before there was
+        // anything to align to.
+        expect(placeUnderMerged(null, [0, 1], [0], 400)).toBeNull();
+        expect(placeUnderMerged(merged as any, [], [0], 400)).toBeNull();
+        expect(placeUnderMerged(merged as any, [0, 1, 2, 3], [9], 400)).toBeNull();
     });
 });
 

@@ -1343,6 +1343,28 @@ export default function ScoreEditor() {
     // caller can say where the scan's systems are.
     const compareMode = searchParams.get('compareMode')?.trim() || '';
     const isSystemRowsMode = isSuppliedRegionsMode && compareMode === 'rows';
+
+    /*
+     * Report the document's height to whoever embedded it.
+     *
+     * The rows view does not scroll itself — a scrollable box inside a
+     * fixed-height iframe gives a reader two scrollbars and the shorter of two
+     * viewports. Instead the host sizes the frame to the content and its own
+     * page scrolls, which is the only way this gets the window's full height.
+     * Ignored by any host that is not listening, which is every other embed.
+     */
+    useEffect(() => {
+        if (!isSystemRowsMode || typeof ResizeObserver === 'undefined') return;
+        if (window.parent === window) return;
+        const post = () => {
+            const height = Math.ceil(document.documentElement.scrollHeight);
+            window.parent.postMessage({ type: 'ots-compare-height', height }, '*');
+        };
+        const observer = new ResizeObserver(post);
+        observer.observe(document.documentElement);
+        post();
+        return () => observer.disconnect();
+    }, [isSystemRowsMode]);
     const isChangeReviewSingleScoreMode = Boolean(reviewScoreUrl && changeReviewId);
     /**
      * One score, no chrome: `?score=<url>&embed=1`.
@@ -16778,7 +16800,17 @@ ${partsBodyXml}
     );
 
     return (
-        <div className="flex flex-col h-screen">
+        /*
+            Rows mode grows; every other mode fills the window.
+
+            The editor is built for a fixed viewport — `h-screen` with
+            `overflow-auto` at each level — which is right when it owns the
+            window. Embedded in a page it is not: a scrollable box inside a
+            fixed-height frame gives the reader two scrollbars and the shorter
+            of two viewports. So in rows mode the chain grows to its content and
+            the host sizes the frame to match.
+        */
+        <div className={isSystemRowsMode ? 'flex flex-col' : 'flex flex-col h-screen'}>
             {!isEmbedMode && (
             <div className="relative" style={{ zIndex: 100 }} ref={toolbarRef}>
 	            <Toolbar
@@ -16946,7 +16978,7 @@ ${partsBodyXml}
                 />
             )}
 
-            <div className="flex flex-1 min-h-0">
+            <div className={isSystemRowsMode ? 'flex' : 'flex flex-1 min-h-0'}>
                 <LeftSidebar
                     hidden={isEmbedMode || !panelsVisible}
                     collapsed={checkpointsCollapsed}
@@ -17035,8 +17067,8 @@ ${partsBodyXml}
                      * nothing there. Every other mode still scrolls a score
                      * that really is wider than the window.
                      */
-                    className={`relative z-0 flex-1 overflow-auto bg-gray-50 p-8 ${
-                        isSystemRowsMode ? 'overflow-x-hidden' : ''
+                    className={`relative z-0 flex-1 bg-gray-50 p-8 ${
+                        isSystemRowsMode ? 'overflow-visible' : 'overflow-auto'
                     }`}
                 >
                 {loading && (
@@ -18015,7 +18047,15 @@ ${partsBodyXml}
                             </div>
                         </div>
                         )}
-                        <div className={isEmbedMode ? "flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4" : "flex min-h-0 flex-1 flex-col gap-4 overflow-auto"}>
+                        <div
+                            className={
+                                isSystemRowsMode
+                                    ? 'flex flex-1 flex-col gap-4'
+                                    : isEmbedMode
+                                      ? 'flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4'
+                                      : 'flex min-h-0 flex-1 flex-col gap-4 overflow-auto'
+                            }
+                        >
                             {isSystemRowsMode ? (
                                 <ScannerSystemRows
                                     systems={suppliedSystems}
