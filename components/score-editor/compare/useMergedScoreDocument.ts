@@ -20,6 +20,19 @@ export type MergedScoreState = {
     recordedBasisSignature?: string;
     /** The readings moved underneath this merge; the reviewer has to decide. */
     stale: boolean;
+    /**
+     * What has been decided so far, in order.
+     *
+     * The gutter needs it to know what the merged score currently reads: a
+     * control offering to take a bar it already reads that way does nothing,
+     * and a control that does nothing is worse than none — a reviewer cannot
+     * tell it from one that is merely unavailable.
+     */
+    decisions?: Array<{
+        blockIndex?: number;
+        engineId?: string;
+        markingsOnly?: 'dynamics' | 'lyrics';
+    }>;
     url: string;
     musicXmlUrl: string;
 };

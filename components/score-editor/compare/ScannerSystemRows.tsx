@@ -334,6 +334,7 @@ function SystemPane({
     onTogglePlay,
     onStop,
     highlights,
+    preview,
 }: {
     rendered: RenderedSide | null;
     measureIndexes: number[];
@@ -346,6 +347,8 @@ function SystemPane({
     onStop?: () => void;
     /** Unmatched events, in the same RENDER_WIDTH pixels as the drawing. */
     highlights?: MeasureBox[];
+    /** Whole bars a hovered control is pointing at, in the same pixels. */
+    preview?: MeasureBox[];
     /**
      * Score-space coordinates of a click, for the one pane that is editable.
      * Absent on engine panes, which is what makes them read-only: there is no
@@ -501,6 +504,37 @@ function SystemPane({
                 dangerouslySetInnerHTML={{ __html: rendered.svg }}
             />
             {/*
+                What a hovered control would take, or land on.
+
+                Over the music, not under it: the engraving is an opaque SVG, so
+                underneath is invisible. A whole bar of wash would sit on top of
+                exactly what a reviewer is reading to decide, so the fill is
+                faint and the edge does the work.
+            */}
+            {(preview || []).length > 0 && (
+                <div
+                    className="pointer-events-none absolute left-0 top-0 origin-top-left"
+                    style={{
+                        width: rendered.width,
+                        transform: `scale(${scale}) translate(${-left}px, ${-top}px)`,
+                    }}
+                >
+                    {(preview || []).map((box, index) => (
+                        <div
+                            key={`preview-${box.left}-${index}`}
+                            data-testid="take-preview"
+                            className="absolute rounded bg-cyan-400/10 ring-2 ring-cyan-500/70"
+                            style={{
+                                left: box.left,
+                                top: box.top - 4,
+                                width: box.width,
+                                height: box.height + 8,
+                            }}
+                        />
+                    ))}
+                </div>
+            )}
+            {/*
                 Painted in the same transformed frame as the music, so a box
                 stays on its note under any pane width. Behind nothing: it is a
                 wash rather than an outline because an outline at this scale
@@ -579,6 +613,27 @@ function SystemPane({
     );
 }
 
+
+/**
+ * Which reading the merged score currently takes a block's notes from.
+ *
+ * It starts as a copy of one engine's reading, so every block reads from that
+ * engine until a decision moves it. A marking take does not move it: taking
+ * dynamics leaves the notes where they were, and the record says so.
+ */
+export function mergedReadsBlockFrom(
+    blockIndex: number,
+    sourceEngineId: string,
+    decisions: MergedScoreState['decisions'],
+): string {
+    let current = sourceEngineId;
+    for (const decision of decisions || []) {
+        if (decision.blockIndex !== blockIndex || decision.markingsOnly) continue;
+        if (decision.engineId) current = decision.engineId;
+    }
+    return current;
+}
+
 /**
  * The decision surface: one control per difference in this row, on the side it
  * would come from.
@@ -597,6 +652,8 @@ function Gutter({
     label,
     regions,
     engineId,
+    readsFrom,
+    onPreview,
     onTake,
     busy,
 }: {
@@ -604,6 +661,17 @@ function Gutter({
     label: string;
     regions: ScannerRowRegion[];
     engineId?: string;
+    /** Which engine the merged score currently reads a block's notes from. */
+    readsFrom: (blockIndex: number) => string;
+    /**
+     * What the control under the pointer would change, or null on the way out.
+     *
+     * Hovering is how a reviewer asks "which bars is this one?" without
+     * pressing it, and the answer is two spans: what would be copied, and what
+     * it would land on. Saying it in the panes is the only place it can be
+     * said without words.
+     */
+    onPreview: (region: ScannerRowRegion | null) => void;
     onTake: (
         region: ScannerRowRegion,
         engineId: string,
@@ -618,7 +686,22 @@ function Gutter({
                 take from {label}
             </span>
             {regions.map((region) => {
-                const decidable = Boolean(region.contentSignature);
+                /*
+                    Offered only when pressing it would change something.
+
+                    Two ways it would not. A block whose place on the scan could
+                    not be proven cannot be decided at all (§7), and used to be
+                    drawn disabled — offered and then refused, which is what §7
+                    says not to do. And a block the merged score already reads
+                    from this engine has nothing to take: the server refuses it
+                    with "the merged score already reads this passage the way
+                    that engine does", and a control whose only outcome is that
+                    message is worse than no control, because a reviewer cannot
+                    tell it from one that is merely unavailable.
+                */
+                if (!region.contentSignature) return null;
+                if (readsFrom(region.blockIndex) === engineId) return null;
+                const decidable = true;
                 const from = direction === 'down' ? region.leftMarkings : region.rightMarkings;
                 const bars =
                     (direction === 'down' ? region.leftMeasureIndexes : region.rightMeasureIndexes)
@@ -636,6 +719,10 @@ function Gutter({
                                     : 'This difference has no verified place on the scan, so it cannot be decided'
                             }
                             onClick={() => onTake(region, engineId)}
+                            onMouseEnter={() => onPreview(region)}
+                            onMouseLeave={() => onPreview(null)}
+                            onFocus={() => onPreview(region)}
+                            onBlur={() => onPreview(null)}
                             className="rounded border border-cyan-600 bg-white px-1.5 py-0.5 font-semibold text-cyan-800 shadow-sm hover:bg-cyan-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan-600 disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-50 disabled:font-normal disabled:text-gray-400 disabled:shadow-none"
                         >
                             {arrow} {region.blockIndex + 1}
@@ -654,6 +741,10 @@ function Gutter({
                                 disabled={busy}
                                 title={`Take only the dynamics of difference ${region.blockIndex + 1} from ${label}, leaving the notes`}
                                 onClick={() => onTake(region, engineId, 'dynamics')}
+                                onMouseEnter={() => onPreview(region)}
+                                onMouseLeave={() => onPreview(null)}
+                                onFocus={() => onPreview(region)}
+                                onBlur={() => onPreview(null)}
                                 className="rounded border border-cyan-300 bg-white px-1 py-0.5 text-cyan-800 hover:bg-cyan-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan-600 disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-400"
                             >
                                 {arrow} dynamics
@@ -666,6 +757,10 @@ function Gutter({
                                 disabled={busy}
                                 title={`Take only the lyrics of difference ${region.blockIndex + 1} from ${label}, leaving the notes`}
                                 onClick={() => onTake(region, engineId, 'lyrics')}
+                                onMouseEnter={() => onPreview(region)}
+                                onMouseLeave={() => onPreview(null)}
+                                onFocus={() => onPreview(region)}
+                                onBlur={() => onPreview(null)}
                                 className="rounded border border-cyan-300 bg-white px-1 py-0.5 text-cyan-800 hover:bg-cyan-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan-600 disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-400"
                             >
                                 {arrow} lyrics
@@ -899,6 +994,9 @@ export function ScannerSystemRows({
     // rows, the scan, the readings — is already here.
     const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | undefined>(onlyBlockIndex);
     const [staleCrops, setStaleCrops] = useState<Set<number>>(new Set());
+    // The difference the pointer is over, if any. Hover is a question — "which
+    // bars is this one?" — and this is what answers it.
+    const [previewRegion, setPreviewRegion] = useState<ScannerRowRegion | null>(null);
     useEffect(() => setSelectedBlockIndex(onlyBlockIndex), [onlyBlockIndex]);
     const selectedPosition = navigableBlocks.findIndex(
         (entry) => entry.blockIndex === selectedBlockIndex,
@@ -1090,6 +1188,12 @@ export function ScannerSystemRows({
             );
         },
         [merged],
+    );
+
+    const readsFrom = useCallback(
+        (blockIndex: number) =>
+            mergedReadsBlockFrom(blockIndex, mergedEngineId, merged.state?.decisions),
+        [mergedEngineId, merged.state?.decisions],
     );
 
     const canSave = Boolean(merged.state && mergedEngineId);
@@ -1302,6 +1406,26 @@ export function ScannerSystemRows({
                     );
                 const leftFocus = focusIndexes('left');
                 const rightFocus = focusIndexes('right');
+                // Hovering a take shows both halves of what it would do: the
+                // bars it would copy, in the reading they come from, and the
+                // bars they would land on, in the merged score.
+                const previewBoxes = (
+                    rendered: RenderedSide | null,
+                    measureIndexes: readonly number[],
+                ): MeasureBox[] =>
+                    !previewRegion || !rendered
+                        ? []
+                        : measureIndexes
+                              .map((index) => rendered.measures[index])
+                              .filter((box): box is MeasureBox => Boolean(box));
+                const leftPreview = previewBoxes(left, previewRegion?.leftMeasureIndexes || []);
+                const rightPreview = previewBoxes(right, previewRegion?.rightMeasureIndexes || []);
+                const mergedPreview = previewBoxes(
+                    mergedRender,
+                    (mergeSource === 'left'
+                        ? previewRegion?.leftMeasureIndexes
+                        : previewRegion?.rightMeasureIndexes) || [],
+                );
                 const highlightsFor = (
                     rendered: RenderedSide | null,
                     pick: (difference: ScannerSymbolDifference) => {
@@ -1437,6 +1561,7 @@ export function ScannerSystemRows({
                                 <SystemPane
                                     rendered={left}
                                     highlights={leftHighlights}
+                                    preview={leftPreview}
                                     measureIndexes={leftFocus}
                                     label={leftLabel}
                                     paneWidth={paneWidth}
@@ -1444,6 +1569,8 @@ export function ScannerSystemRows({
                                 />
                             </div>
                             <Gutter
+                                readsFrom={readsFrom}
+                                onPreview={setPreviewRegion}
                                 direction="down"
                                 label={leftLabel}
                                 regions={differences}
@@ -1463,6 +1590,7 @@ export function ScannerSystemRows({
                                 <SystemPane
                                     rendered={mergedRender}
                                     highlights={mergedHighlights}
+                                    preview={mergedPreview}
                                     measureIndexes={mergedIndexes(system)}
                                     label="The merged score"
                                     paneWidth={paneWidth}
@@ -1472,6 +1600,8 @@ export function ScannerSystemRows({
                                 />
                             </div>
                             <Gutter
+                                readsFrom={readsFrom}
+                                onPreview={setPreviewRegion}
                                 direction="up"
                                 label={rightLabel}
                                 regions={differences}
@@ -1486,6 +1616,7 @@ export function ScannerSystemRows({
                                 <SystemPane
                                     rendered={right}
                                     highlights={rightHighlights}
+                                    preview={rightPreview}
                                     measureIndexes={rightFocus}
                                     label={rightLabel}
                                     paneWidth={paneWidth}

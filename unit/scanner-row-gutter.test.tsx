@@ -58,7 +58,12 @@ const ungrounded: ScannerRowRegion = {
 function renderRows(
     regions: ScannerRowRegion[],
     calls: any[],
-    options: { systems?: ScannerSystem[]; onlyBlockIndex?: number } = {},
+    options: {
+        systems?: ScannerSystem[];
+        onlyBlockIndex?: number;
+        sourceEngineId?: string;
+        decisions?: Array<{ blockIndex?: number; engineId?: string; markingsOnly?: 'dynamics' | 'lyrics' }>;
+    } = {},
 ) {
     const score = {
         saveSvg: vi.fn(async () => '<svg><g/></svg>'),
@@ -119,6 +124,8 @@ function renderRows(
             rightEngineId="transcoda"
             merged={{
                 present: true,
+                sourceEngineId: options.sourceEngineId ?? 'transcoda',
+                decisions: options.decisions,
                 revision: 1,
                 edited: false,
                 basisSignature: 'basis',
@@ -373,34 +380,88 @@ describe('the row gutter', () => {
         expect(screen.queryAllByTestId('symbol-highlight')).toHaveLength(0);
     });
 
-    it('offers a control on each side, pointing at the merged score', async () => {
+    it('points the arrow at the merged score, from the side that would change it', async () => {
+        // Only one side can change anything at a time: the merged score starts
+        // as a copy of one reading, so taking that reading again is a no-op.
         const calls: any[] = [];
-        renderRows([grounded], calls);
+        renderRows([grounded], calls, { sourceEngineId: 'transcoda' });
 
-        expect(await screen.findByTestId('btn-take-down-0')).toBeInTheDocument();
-        expect(screen.getByTestId('btn-take-up-0')).toBeInTheDocument();
-        // Down from the reading above, up from the reading below.
-        expect(screen.getByTestId('btn-take-down-0').textContent).toContain('↓');
-        expect(screen.getByTestId('btn-take-up-0').textContent).toContain('↑');
+        // Down from the reading above, into the merged score below it.
+        expect((await screen.findByTestId('btn-take-down-0')).textContent).toContain('↓');
+        expect(screen.queryByTestId('btn-take-up-0')).toBeNull();
+
+        // And the other way round when the merge started from the other side.
+        renderRows([grounded], calls, { sourceEngineId: 'homr' });
+        expect((await screen.findByTestId('btn-take-up-0')).textContent).toContain('↑');
     });
 
     it('offers nothing for a difference with no proven place on the scan', async () => {
-        // §7's rule made visible: a decision without evidence is not offered,
-        // rather than offered and then refused.
+        // §7's rule, now taken literally: a decision without evidence is not
+        // offered at all. It used to be drawn disabled, which is offering it
+        // and then refusing — and a disabled control cannot be told apart from
+        // one that is merely unavailable just now.
         const calls: any[] = [];
         renderRows([grounded, ungrounded], calls);
 
         await screen.findByTestId('btn-take-down-0');
-        expect(screen.getByTestId('btn-take-down-1')).toBeDisabled();
-        expect(screen.getByTestId('btn-take-down-1')).toHaveAttribute(
-            'title',
-            expect.stringContaining('no verified place'),
-        );
+        expect(screen.queryByTestId('btn-take-down-1')).toBeNull();
+    });
+
+    it('offers nothing from the reading the merged score already follows', async () => {
+        // The server refuses it with "the merged score already reads this
+        // passage the way that engine does", so the only outcome of pressing it
+        // is that message.
+        const calls: any[] = [];
+        renderRows([grounded], calls, { sourceEngineId: 'homr' });
+
+        await screen.findByTestId('btn-take-up-0');
+        expect(screen.queryByTestId('btn-take-down-0')).toBeNull();
+    });
+
+    it('offers it again once a decision has moved that bar away', async () => {
+        const calls: any[] = [];
+        renderRows([grounded], calls, {
+            sourceEngineId: 'homr',
+            decisions: [{ blockIndex: 0, engineId: 'transcoda' }],
+        });
+
+        // Now the merged score reads this block from Transcoda, so taking it
+        // back from HOMR would change something — and taking it from Transcoda
+        // again would not.
+        expect(await screen.findByTestId('btn-take-down-0')).toBeInTheDocument();
+        expect(screen.queryByTestId('btn-take-up-0')).toBeNull();
+    });
+
+    it('does not count a marking take as moving the notes', async () => {
+        const calls: any[] = [];
+        renderRows([grounded], calls, {
+            sourceEngineId: 'homr',
+            decisions: [{ blockIndex: 0, engineId: 'transcoda', markingsOnly: 'dynamics' }],
+        });
+
+        await screen.findByTestId('btn-take-up-0');
+        expect(screen.queryByTestId('btn-take-down-0')).toBeNull();
+    });
+
+    it('shows what a take would replace while the pointer is on it', async () => {
+        // Hover is a question — "which bars is this one?" — and the panes are
+        // the only place it can be answered without words.
+        const calls: any[] = [];
+        renderRows([grounded], calls, { sourceEngineId: 'transcoda' });
+
+        const take = await screen.findByTestId('btn-take-down-0');
+        expect(screen.queryAllByTestId('take-preview')).toHaveLength(0);
+
+        fireEvent.mouseEnter(take);
+        expect(screen.getAllByTestId('take-preview').length).toBeGreaterThan(0);
+
+        fireEvent.mouseLeave(take);
+        expect(screen.queryAllByTestId('take-preview')).toHaveLength(0);
     });
 
     it('sends the decision to the scanner with the engine it takes from', async () => {
         const calls: any[] = [];
-        renderRows([grounded], calls);
+        renderRows([grounded], calls, { sourceEngineId: 'homr' });
         const user = userEvent.setup();
 
         await user.click(await screen.findByTestId('btn-take-up-0'));
@@ -421,7 +482,7 @@ describe('the row gutter', () => {
         // A block one reading has no bars for removes them rather than replacing
         // them, and the count changes. Saying "take" alone would understate it.
         const calls: any[] = [];
-        renderRows([{ ...grounded, rightMeasureIndexes: [] }], calls);
+        renderRows([{ ...grounded, rightMeasureIndexes: [] }], calls, { sourceEngineId: 'homr' });
 
         const up = await screen.findByTestId('btn-take-up-0');
         expect(up.textContent).toContain('remove');
@@ -449,9 +510,6 @@ describe('the row gutter', () => {
         // HOMR above has dynamics but no lyrics.
         expect(screen.getByTestId('btn-take-down-dynamics-0')).toBeInTheDocument();
         expect(screen.queryByTestId('btn-take-down-lyrics-0')).not.toBeInTheDocument();
-        // Transcoda below has lyrics but no dynamics.
-        expect(screen.queryByTestId('btn-take-up-dynamics-0')).not.toBeInTheDocument();
-        expect(screen.getByTestId('btn-take-up-lyrics-0')).toBeInTheDocument();
     });
 
     it('offers no marking control when neither reading has any', async () => {
@@ -468,6 +526,7 @@ describe('the row gutter', () => {
         renderRows(
             [{ ...grounded, rightMarkings: { dynamics: true, lyrics: false } }],
             calls,
+            { sourceEngineId: 'homr' },
         );
         const user = userEvent.setup();
 
