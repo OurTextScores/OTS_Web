@@ -1356,14 +1356,47 @@ export default function ScoreEditor() {
     useEffect(() => {
         if (!isSystemRowsMode || typeof ResizeObserver === 'undefined') return;
         if (window.parent === window) return;
+
+        /*
+         * Nothing here may be measured against the viewport, and nothing may
+         * scroll.
+         *
+         * The frame is sized to this document, so `100vh` inside it *is* the
+         * frame — and the page wrapper's `min-h-screen` therefore grows to
+         * whatever height was last reported. Report a height, the frame grows,
+         * the wrapper grows to match, report a taller height: a ratchet that
+         * added a few hundred pixels every second. `min-height: 0` breaks it.
+         *
+         * `overflow: clip` is the other half. A frame a pixel shorter than its
+         * content can scroll by that pixel, and a wheel over a frame that can
+         * scroll is consumed by it and never reaches the page behind — which is
+         * what a broken scrollbar feels like. Clipping means no rounding error
+         * can produce one.
+         */
+        const root = document.documentElement;
+        const wrapper = document.querySelector('main');
+        const restore = {
+            rootOverflow: root.style.overflow,
+            bodyOverflow: document.body.style.overflow,
+            wrapperMinHeight: wrapper instanceof HTMLElement ? wrapper.style.minHeight : '',
+        };
+        root.style.overflow = 'clip';
+        document.body.style.overflow = 'clip';
+        if (wrapper instanceof HTMLElement) wrapper.style.minHeight = '0';
+
         const post = () => {
-            const height = Math.ceil(document.documentElement.scrollHeight);
+            const height = Math.ceil(document.body.scrollHeight);
             window.parent.postMessage({ type: 'ots-compare-height', height }, '*');
         };
         const observer = new ResizeObserver(post);
-        observer.observe(document.documentElement);
+        observer.observe(document.body);
         post();
-        return () => observer.disconnect();
+        return () => {
+            observer.disconnect();
+            root.style.overflow = restore.rootOverflow;
+            document.body.style.overflow = restore.bodyOverflow;
+            if (wrapper instanceof HTMLElement) wrapper.style.minHeight = restore.wrapperMinHeight;
+        };
     }, [isSystemRowsMode]);
     const isChangeReviewSingleScoreMode = Boolean(reviewScoreUrl && changeReviewId);
     /**
@@ -16810,7 +16843,11 @@ ${partsBodyXml}
             of two viewports. So in rows mode the chain grows to its content and
             the host sizes the frame to match.
         */
-        <div className={isSystemRowsMode ? 'flex flex-col' : 'flex flex-col h-screen'}>
+        <div
+            className={
+                isSystemRowsMode ? 'flex flex-col overflow-x-clip' : 'flex flex-col h-screen'
+            }
+        >
             {!isEmbedMode && (
             <div className="relative" style={{ zIndex: 100 }} ref={toolbarRef}>
 	            <Toolbar
@@ -17066,9 +17103,16 @@ ${partsBodyXml}
                      * dragged 1441px, and revealed nothing, because there was
                      * nothing there. Every other mode still scrolls a score
                      * that really is wider than the window.
+                     *
+                     * `clip`, not `hidden`. `overflow-x: hidden` with a visible
+                     * y computes y to `auto`, which makes this a scroll
+                     * container again — and a scroll container cannot grow to
+                     * its content, which is what rows mode needs so the host
+                     * can size the frame. `clip` is the one value that leaves
+                     * the other axis alone.
                      */
                     className={`relative z-0 flex-1 bg-gray-50 p-8 ${
-                        isSystemRowsMode ? 'overflow-visible' : 'overflow-auto'
+                        isSystemRowsMode ? 'overflow-x-clip overflow-y-visible' : 'overflow-auto'
                     }`}
                 >
                 {loading && (
