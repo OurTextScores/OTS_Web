@@ -331,6 +331,54 @@ export function focusedMeasureIndexes(
     return focused.length > 0 ? focused : [...systemIndexes];
 }
 
+/**
+ * The bars of a line that were actually engraved on one row of it.
+ *
+ * A forced break starts a system; it does not stop the engine adding its own
+ * when the bars do not fit the page. The merged pane is the only one that draws
+ * a whole line, so it is the only one that can overflow, and the row then shows
+ * the spilled bar underneath the line it belongs to — one line of music drawn
+ * as two.
+ *
+ * Neither page width nor staff size fixes it. Measured on Klengel: quartering
+ * the staff left the line split in exactly the same place, which is what says
+ * this is not about how much fits.
+ *
+ * So the pane shows one engraved row rather than pretending the line is whole.
+ * Which row is decided by the bars under review: the reader is here to judge a
+ * difference, and a window that leaves it off screen is no use however tidy it
+ * looks. Without a difference to hold onto, the first row wins, which is the
+ * line as it reads.
+ */
+export function engravedRowWindow(
+    rendered: RenderedSide | null,
+    measureIndexes: readonly number[],
+    contested: readonly number[] = [],
+): number[] {
+    if (!rendered || measureIndexes.length === 0) return [...measureIndexes];
+    const placed = measureIndexes
+        .map((index) => ({ index, box: rendered.measures[index] }))
+        .filter((entry): entry is { index: number; box: MeasureBox } => Boolean(entry.box));
+    if (placed.length === 0) return [...measureIndexes];
+
+    const staff = Math.max(1, Math.min(...placed.map((entry) => entry.box.height)));
+    const rows: Array<{ top: number; indexes: number[] }> = [];
+    for (const entry of [...placed].sort((left, right) => left.box.top - right.box.top)) {
+        const row = rows[rows.length - 1];
+        // Half a staff apart is more than engraving jitter and less than a
+        // system's spacing, so it separates rows without splitting one.
+        if (row && entry.box.top - row.top <= staff / 2) row.indexes.push(entry.index);
+        else rows.push({ top: entry.box.top, indexes: [entry.index] });
+    }
+    if (rows.length <= 1) return [...measureIndexes];
+
+    const wanted = new Set(contested);
+    const holdsAll = rows.find((row) => [...wanted].every((index) => row.indexes.includes(index)));
+    const holdsSome = rows.find((row) => row.indexes.some((index) => wanted.has(index)));
+    const chosen = holdsAll ?? holdsSome ?? rows[0];
+    return [...chosen.indexes].sort((left, right) => left - right);
+}
+
 /** Draw an already-loaded score; used for the merged document, which is live. */
 async function renderScoreSide(score: Score): Promise<RenderedSide | null> {
     const svg = await score.saveSvg(0, true, false);
@@ -1576,6 +1624,17 @@ export function ScannerSystemRows({
                     );
                 const leftFocus = focusIndexes('left');
                 const rightFocus = focusIndexes('right');
+                // What the merged pane can actually show of this line, and the
+                // bars under review decide which part when it cannot show all.
+                const mergedWindow = engravedRowWindow(
+                    mergedRender,
+                    mergedIndexes(system),
+                    focusRegions.flatMap((region) =>
+                        mergeSource === 'left'
+                            ? region.leftMeasureIndexes
+                            : region.rightMeasureIndexes,
+                    ),
+                );
                 // Hovering a take shows both halves of what it would do: the
                 // bars it would copy, in the reading they come from, and the
                 // bars they would land on, in the merged score.
@@ -1598,7 +1657,10 @@ export function ScannerSystemRows({
                 // and they occupy the same column, which is the comparison.
                 const enginePlace = placeUnderMerged(
                     mergedRender,
-                    mergedIndexes(system),
+                    // The bars the merged pane is drawing, not the ones the line
+                    // nominally holds: the engine panes sit over what is on
+                    // screen, and a window that dropped a bar moved everything.
+                    mergedWindow,
                     mergeSource === 'left' ? leftFocus : rightFocus,
                     paneWidth,
                 );
@@ -1612,6 +1674,7 @@ export function ScannerSystemRows({
                         ? previewRegion?.leftMeasureIndexes
                         : previewRegion?.rightMeasureIndexes) || [],
                 );
+                const droppedFromLine = mergedIndexes(system).length - mergedWindow.length;
                 const highlightsFor = (
                     rendered: RenderedSide | null,
                     pick: (difference: ScannerSymbolDifference) => {
@@ -1717,6 +1780,16 @@ export function ScannerSystemRows({
                             <div>
                                 <div className="mb-1 flex items-baseline gap-2 text-[11px] uppercase tracking-wide text-cyan-800">
                                     <span className="font-semibold">Merged</span>
+                                    {droppedFromLine > 0 && (
+                                        <span
+                                            className="normal-case tracking-normal text-gray-500"
+                                            data-testid="merged-line-trimmed"
+                                        >
+                                            not showing {droppedFromLine} bar
+                                            {droppedFromLine === 1 ? '' : 's'} that did not fit on
+                                            one system
+                                        </span>
+                                    )}
                                     <span className="normal-case tracking-normal text-gray-500">
                                         {merged.dirty
                                             ? `started from ${mergedLabel}, edited here`
@@ -1727,12 +1800,12 @@ export function ScannerSystemRows({
                                     rendered={mergedRender}
                                     highlights={mergedHighlights}
                                     preview={mergedPreview}
-                                    measureIndexes={mergedIndexes(system)}
+                                    measureIndexes={mergedWindow}
                                     label="The merged score"
                                     paneWidth={paneWidth}
                                     tone="merged"
                                     onPointMutate={handleMergedPoint}
-                                    {...paneTransport('middle', mergedIndexes(system))}
+                                    {...paneTransport('middle', mergedWindow)}
                                 />
                             </div>
                             <Gutter

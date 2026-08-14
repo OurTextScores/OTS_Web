@@ -10,6 +10,7 @@ vi.mock('../lib/webmscore-loader', async (importOriginal) => ({
 }));
 
 import {
+    engravedRowWindow,
     focusedMeasureIndexes,
     lineStartsInMerge,
     placeUnderMerged,
@@ -198,6 +199,38 @@ describe('choosing the bars a pane draws', () => {
         // to narrow to, and what that side is missing can only be judged
         // against what it has instead.
         expect(focusedMeasureIndexes([0, 1, 2, 3], [])).toEqual([0, 1, 2, 3]);
+    });
+});
+
+describe('a merged line that would not fit on one system', () => {
+    const box = (left: number, top: number) => ({ left, top, width: 100, height: 40 });
+    // Five bars imposed as one line, engraved as four then one.
+    const split = {
+        measures: [box(0, 0), box(100, 0), box(200, 0), box(300, 0), box(0, 120)],
+    } as any;
+
+    it('drops the bars that spilled onto a second system', () => {
+        // Neither page width nor staff size fixes the spill — quartering the
+        // staff left a Klengel line split in exactly the same place — so the
+        // pane shows one engraved row rather than pretending the line is whole.
+        expect(engravedRowWindow(split, [0, 1, 2, 3, 4], [])).toEqual([0, 1, 2, 3]);
+    });
+
+    it('drops from the front instead when the difference is in the spill', () => {
+        // The reader is here to judge a difference; a window that leaves it off
+        // screen is no use however tidy it looks.
+        expect(engravedRowWindow(split, [0, 1, 2, 3, 4], [4])).toEqual([4]);
+    });
+
+    it('keeps the row holding all of the difference when one does', () => {
+        expect(engravedRowWindow(split, [0, 1, 2, 3, 4], [1, 2])).toEqual([0, 1, 2, 3]);
+        // Spanning the break, the row holding the first of them wins.
+        expect(engravedRowWindow(split, [0, 1, 2, 3, 4], [3, 4])).toEqual([0, 1, 2, 3]);
+    });
+
+    it('leaves a line that fits exactly as it is', () => {
+        const whole = { measures: [box(0, 0), box(100, 0), box(200, 0)] } as any;
+        expect(engravedRowWindow(whole, [0, 1, 2], [1])).toEqual([0, 1, 2]);
     });
 });
 
