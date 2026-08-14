@@ -438,8 +438,23 @@ export function withSystemSpacing(xml: string): string {
 }
 
 /** Draw an already-loaded score; used for the merged document, which is live. */
-async function renderScoreSide(score: Score): Promise<RenderedSide | null> {
-    const svg = await score.saveSvg(0, true, false);
+async function renderScoreSide(
+    score: Score,
+    { highlightSelection = false }: { highlightSelection?: boolean } = {},
+): Promise<RenderedSide | null> {
+    /*
+     * `highlightSelection` is how a selection becomes visible.
+     *
+     * MuseScore colours the selected elements itself and the colour comes back
+     * in the SVG — the editor passes `true` here for exactly that reason, with
+     * a note beside it saying the overlays it keeps are for interaction
+     * feedback rather than for showing what is selected. This view passed
+     * `false` and then wondered why clicking a note did nothing: it was
+     * selecting correctly and drawing the score without the selection in it.
+     *
+     * Off for the engine panes, which are evidence and cannot be selected.
+     */
+    const svg = await score.saveSvg(0, true, highlightSelection);
     const positions = await score.measurePositions();
     // Rhythmic positions, for pointing at a note rather than at the bar around
     // it. Optional: a build without it loses symbol highlighting and nothing
@@ -504,7 +519,6 @@ function SystemPane({
     onStop,
     highlights,
     preview,
-    selection,
     noteInput,
     place,
 }: {
@@ -521,14 +535,6 @@ function SystemPane({
     highlights?: MeasureBox[];
     /** Whole bars a hovered control is pointing at, in the same pixels. */
     preview?: MeasureBox[];
-    /**
-     * What the last click selected, in the same pixels.
-     *
-     * The editor draws selection as an overlay it computes from the engine, not
-     * as something the engraving carries, so a pane that only redraws the SVG
-     * shows a click doing nothing at all.
-     */
-    selection?: MeasureBox[];
     /** Placing notes, so the pointer says so. Selecting is an ordinary click. */
     noteInput?: boolean;
     /**
@@ -733,29 +739,6 @@ function SystemPane({
                                 top: box.top - 4,
                                 width: box.width,
                                 height: box.height + 8,
-                            }}
-                        />
-                    ))}
-                </div>
-            )}
-            {(selection || []).length > 0 && (
-                <div
-                    className="pointer-events-none absolute left-0 top-0 origin-top-left"
-                    style={{
-                        width: rendered.width,
-                        transform: `translate(${offsetX}px, 0) scale(${scale}) translate(${-left}px, ${-top}px)`,
-                    }}
-                >
-                    {(selection || []).map((box, index) => (
-                        <div
-                            key={`selection-${box.left}-${index}`}
-                            data-testid="merged-selection"
-                            className="absolute rounded-sm bg-blue-500/25 ring-1 ring-blue-600"
-                            style={{
-                                left: box.left,
-                                top: box.top,
-                                width: Math.max(3, box.width),
-                                height: Math.max(3, box.height),
                             }}
                         />
                     ))}
@@ -1231,7 +1214,9 @@ export function ScannerSystemRows({
         let cancelled = false;
         void (async () => {
             try {
-                const rendered = await renderScoreSide(mergedScore);
+                const rendered = await renderScoreSide(mergedScore, {
+                    highlightSelection: true,
+                });
                 if (!cancelled) setMergedRender(rendered);
             } catch (err) {
                 if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -1285,10 +1270,6 @@ export function ScannerSystemRows({
     const [previewRegion, setPreviewRegion] = useState<ScannerRowRegion | null>(null);
     // A take the reviewer may repeat deliberately, after being told why it
     // refused. Cleared as soon as anything else happens.
-    // Where the last click landed, in score coordinates, as the engine reports it.
-    const [selectionBoxes, setSelectionBoxes] = useState<
-        Array<{ page: number; x: number; y: number; width: number; height: number }>
-    >([]);
     const [takeOutcome, setTakeOutcome] = useState<{
         blockIndex: number;
         engineId: string;
@@ -1368,7 +1349,6 @@ export function ScannerSystemRows({
                 async (target) => {
                     if (noteInput && target.putNote) {
                         await target.putNote(point.page, point.x, point.y, false, false);
-                        setSelectionBoxes([]);
                         return;
                     }
                     if (target.selectElementAtPoint) {
@@ -1377,18 +1357,6 @@ export function ScannerSystemRows({
                         await target.selectMeasureAtPoint(point.page, point.x, point.y);
                     }
                     setHasSelection(true);
-                    /*
-                     * Ask the engine where the selection is, and draw it.
-                     *
-                     * A selection is not part of the engraving — the editor
-                     * draws it as an overlay it computes the same way — so a
-                     * pane that only redraws the SVG shows a click doing
-                     * nothing. Optional, because a build without the export
-                     * should lose the highlight and nothing else.
-                     */
-                    const read = target.getSelectionBoundingBoxes;
-                    const boxes = read ? await read.call(target) : [];
-                    setSelectionBoxes(Array.isArray(boxes) ? boxes : []);
                 },
                 // Selecting changes nothing about the document, so it must not
                 // mark the merge edited — an untouched merge saved after a stray
@@ -1404,6 +1372,20 @@ export function ScannerSystemRows({
         void mutateMerged(
             next ? 'start note input' : 'stop note input',
             async (target) => {
+                /*
+                 * The selection is where note input starts.
+                 *
+                 * `setInputStateFromSelection` is what puts the engine's input
+                 * position on the selected note, and it is why the editor's
+                 * cursor appears where you were looking rather than at the top
+                 * of the score. Entering note-entry mode without it leaves the
+                 * input state wherever it was, so the cursor is somewhere else
+                 * or nowhere at all. The editor calls it first for the same
+                 * reason; this did not call it.
+                 */
+                if (next && target.setInputStateFromSelection) {
+                    await target.setInputStateFromSelection();
+                }
                 await target.setNoteEntryMode?.(next);
                 setNoteInput(next);
             },
@@ -1862,17 +1844,6 @@ export function ScannerSystemRows({
                         : previewRegion?.rightMeasureIndexes) || [],
                 );
                 const droppedFromLine = mergedIndexes(system).length - mergedWindow.length;
-                // Score coordinates into the drawing's own, the same conversion
-                // `measureBounds` does — the page a box names decides how far
-                // down the stacked pages it sits.
-                const mergedSelection = mergedRender
-                    ? selectionBoxes.map((box) => ({
-                          left: box.x * mergedRender.renderScale,
-                          top: box.y * mergedRender.renderScale + box.page * mergedRender.pageHeight,
-                          width: box.width * mergedRender.renderScale,
-                          height: box.height * mergedRender.renderScale,
-                      }))
-                    : [];
                 const highlightsFor = (
                     rendered: RenderedSide | null,
                     pick: (difference: ScannerSymbolDifference) => {
@@ -1999,7 +1970,6 @@ export function ScannerSystemRows({
                                     rendered={mergedRender}
                                     highlights={mergedHighlights}
                                     preview={mergedPreview}
-                                    selection={mergedSelection}
                                     noteInput={noteInput}
                                     measureIndexes={mergedWindow}
                                     label="The merged score"

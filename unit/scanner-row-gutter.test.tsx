@@ -210,18 +210,16 @@ describe('clicking the merged pane', () => {
         vi.unstubAllGlobals();
     });
 
-    it('shows what the click selected, and reserves the crosshair for note input', async () => {
-        // A selection is not part of the engraving — the editor draws it as an
-        // overlay it computes from the engine — so a pane that only redraws the
-        // SVG showed a click doing nothing at all.
+    it('lets the engine paint the selection, and reserves the crosshair for note input', async () => {
+        // MuseScore colours the selected elements itself and the colour comes
+        // back in the SVG — the editor passes `highlightSelection` for exactly
+        // that reason. This view passed `false` and then wondered why clicking
+        // a note did nothing: it was selecting correctly and drawing the score
+        // without the selection in it.
         const calls: any[] = [];
+        const saveSvg = vi.fn(async () => '<svg><g/></svg>');
         const selectElementAtPoint = vi.fn(async () => undefined);
-        const getSelectionBoundingBoxes = vi.fn(async () => [
-            { page: 0, x: 10, y: 12, width: 6, height: 20 },
-        ]);
-        renderRows([grounded], calls, {
-            score: { selectElementAtPoint, getSelectionBoundingBoxes },
-        });
+        renderRows([grounded], calls, { score: { saveSvg, selectElementAtPoint } });
 
         const pane = await screen.findByTestId('merged-system-pane');
         // Selecting is an ordinary click; only placing notes takes a crosshair.
@@ -229,9 +227,29 @@ describe('clicking the merged pane', () => {
 
         fireEvent.click(pane);
         await waitFor(() => expect(selectElementAtPoint).toHaveBeenCalled());
+        // The merged pane is drawn with the selection in it; the readings are
+        // evidence and cannot be selected, so they are not.
         await waitFor(() =>
-            expect(screen.getAllByTestId('merged-selection').length).toBeGreaterThan(0),
+            expect(saveSvg.mock.calls.some((call) => call[2] === true)).toBe(true),
         );
+        expect(saveSvg.mock.calls.some((call) => call[2] === false)).toBe(true);
+    });
+
+    it('starts note input from the selection, so the engine puts its cursor there', async () => {
+        // `setInputStateFromSelection` is what puts the engine's input position
+        // on the selected note. Entering note-entry mode without it leaves the
+        // input state wherever it was, so the cursor is somewhere else entirely.
+        const calls: any[] = [];
+        const order: string[] = [];
+        renderRows([grounded], calls, {
+            score: {
+                setInputStateFromSelection: vi.fn(async () => order.push('from-selection')),
+                setNoteEntryMode: vi.fn(async () => order.push('note-entry')),
+            },
+        });
+
+        await userEvent.click(await screen.findByTestId('btn-merged-note-input'));
+        await waitFor(() => expect(order).toEqual(['from-selection', 'note-entry']));
     });
 });
 
