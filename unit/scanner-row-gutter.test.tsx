@@ -630,6 +630,91 @@ describe('the row gutter', () => {
         expect(screen.queryByTestId('btn-take-up-lyrics-0')).not.toBeInTheDocument();
     });
 
+    it('offers to take the notes anyway when the lengths are what refused it', async () => {
+        // "These readings are different lengths" is a fact about arithmetic;
+        // whether the notes are better is a judgement only someone looking at
+        // the scan can make. So the refusal is stated, and beside it the offer
+        // to do it anyway — a different act from pressing take, recorded as one.
+        const calls: any[] = [];
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: any, init?: RequestInit) => {
+                calls.push({ url: String(input), method: init?.method || 'GET', body: init?.body });
+                if (init?.method !== 'POST') return new Response(XML, { status: 200 });
+                const sent = JSON.parse(String(init.body));
+                return sent.acceptDurationChange
+                    ? new Response(JSON.stringify({ present: true, revision: 3, repairs: [] }), {
+                          status: 200,
+                      })
+                    : new Response(
+                          JSON.stringify({
+                              message:
+                                  'This passage cannot be taken from that reading: The two readings of this passage are different lengths.',
+                          }),
+                          { status: 409 },
+                      );
+            }),
+        );
+        const score = {
+            saveSvg: vi.fn(async () => '<svg><g/></svg>'),
+            measurePositions: vi.fn(async () => ({
+                elements: [{ id: 0, x: 0, y: 0, sx: 100, sy: 40, page: 0 }],
+                events: [],
+                pageSize: { width: 100, height: 40 },
+            })),
+            segmentPositions: vi.fn(async () => ({ elements: [], events: [], pageSize: { width: 100, height: 40 } })),
+            saveXml: vi.fn(async () => new TextEncoder().encode(XML)),
+            relayout: vi.fn(async () => undefined),
+            destroy: vi.fn(),
+        };
+        mocked.loadWebMscore.mockResolvedValue({ load: vi.fn(async () => score) } as any);
+        render(
+            <ScannerSystemRows
+                systems={systems}
+                onlyBlockIndex={0}
+                regions={[grounded]}
+                leftXml={XML}
+                rightXml={XML}
+                leftLabel="HOMR"
+                rightLabel="Transcoda"
+                leftEngineId="homr"
+                rightEngineId="transcoda"
+                merged={{
+                    present: true,
+                    sourceEngineId: 'homr',
+                    revision: 1,
+                    edited: false,
+                    basisSignature: 'basis',
+                    stale: false,
+                    url: '../merged',
+                    musicXmlUrl: '../merged/musicxml?revision=1',
+                }}
+                resolveUrl={(relative) => new URL(relative, REGIONS_URL).toString()}
+            />,
+        );
+
+        await userEvent.click(await screen.findByTestId('btn-take-up-0'));
+        await waitFor(() => expect(screen.getByTestId('btn-take-anyway')).toBeInTheDocument());
+
+        await userEvent.click(screen.getByTestId('btn-take-anyway'));
+        await waitFor(() =>
+            expect(
+                calls.some(
+                    (call) =>
+                        call.method === 'POST' &&
+                        JSON.parse(String(call.body)).acceptDurationChange === true,
+                ),
+            ).toBe(true),
+        );
+    });
+
+    it('does not offer it for a refusal that is not about length', async () => {
+        const calls: any[] = [];
+        renderRows([grounded], calls, { sourceEngineId: 'homr' });
+        await screen.findByTestId('btn-take-up-0');
+        expect(screen.queryByTestId('btn-take-anyway')).toBeNull();
+    });
+
     it('sends a marking take to its own route, naming the kind', async () => {
         const calls: any[] = [];
         renderRows(

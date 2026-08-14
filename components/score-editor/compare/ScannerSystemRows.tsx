@@ -1143,6 +1143,12 @@ export function ScannerSystemRows({
     // The difference the pointer is over, if any. Hover is a question — "which
     // bars is this one?" — and this is what answers it.
     const [previewRegion, setPreviewRegion] = useState<ScannerRowRegion | null>(null);
+    // A take the reviewer may repeat deliberately, after being told why it
+    // refused. Cleared as soon as anything else happens.
+    const [overrulable, setOverrulable] = useState<{
+        region: ScannerRowRegion;
+        engineId: string;
+    } | null>(null);
     useEffect(() => setSelectedBlockIndex(onlyBlockIndex), [onlyBlockIndex]);
     const selectedPosition = navigableBlocks.findIndex(
         (entry) => entry.blockIndex === selectedBlockIndex,
@@ -1292,7 +1298,12 @@ export function ScannerSystemRows({
     }, [hasSelection, mergedScore, mutateMerged, noteInput, toggleNoteInput]);
 
     const takeBlock = useCallback(
-        (region: ScannerRowRegion, engineId: string, kind?: 'dynamics' | 'lyrics') => {
+        (
+            region: ScannerRowRegion,
+            engineId: string,
+            kind?: 'dynamics' | 'lyrics',
+            acceptDurationChange = false,
+        ) => {
             if (!region.contentSignature || !leftEngineId || !rightEngineId) return;
             void merged
                 .take({
@@ -1302,12 +1313,29 @@ export function ScannerSystemRows({
                     baseEngineId: leftEngineId,
                     candidateEngineId: rightEngineId,
                     kind,
+                    acceptDurationChange,
                 })
                 .then((outcome) => {
                     if (!outcome.ok) {
                         setNotice(outcome.error);
+                        /*
+                         * One refusal is the reviewer's to overrule.
+                         *
+                         * "These readings are different lengths" is a fact
+                         * about arithmetic; whether the notes are better is a
+                         * judgement only someone looking at the scan can make.
+                         * So the refusal is stated, and beside it the offer to
+                         * do it anyway — which is a different act from pressing
+                         * take, and is recorded as one.
+                         */
+                        setOverrulable(
+                            /different lengths/i.test(outcome.error) && !kind
+                                ? { region, engineId }
+                                : null,
+                        );
                         return;
                     }
+                    setOverrulable(null);
                     const repaired = outcome.repairs.length
                         ? ` ${outcome.repairs.map((repair) => repair.detail).join(' ')}`
                         : '';
@@ -1578,7 +1606,23 @@ export function ScannerSystemRows({
                     </div>
                 )}
 
-                {notice && <div className="text-gray-700">{notice}</div>}
+                {notice && (
+                    <div className="flex flex-wrap items-center gap-2 text-gray-700">
+                        <span>{notice}</span>
+                        {overrulable && (
+                            <button
+                                type="button"
+                                data-testid="btn-take-anyway"
+                                onClick={() =>
+                                    takeBlock(overrulable.region, overrulable.engineId, undefined, true)
+                                }
+                                className="rounded border border-amber-500 bg-white px-2 py-0.5 font-medium text-amber-900 hover:bg-amber-50"
+                            >
+                                Take the notes anyway
+                            </button>
+                        )}
+                    </div>
+                )}
             </div>
 
             {onlyBlockIndex !== undefined && visibleRows.length === 0 && (

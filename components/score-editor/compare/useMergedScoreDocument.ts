@@ -329,6 +329,12 @@ export function useMergedScoreDocument({
             candidateEngineId: string;
             /** Absent takes the bars; present takes only that marking. */
             kind?: 'dynamics' | 'lyrics';
+            /**
+             * Take the notes even though the readings disagree about the bar's
+             * length. Only ever set by a reviewer who has been told why it
+             * refused and asked for it anyway.
+             */
+            acceptDurationChange?: boolean;
         }): Promise<MergedTakeOutcome> => {
             if (!current) return { ok: false, error: 'This page cannot carry a merged score.' };
             setSaving(true);
@@ -347,6 +353,7 @@ export function useMergedScoreDocument({
                         baseEngine: input.baseEngineId,
                         candidateEngine: input.candidateEngineId,
                         revision: current.revision,
+                        ...(input.acceptDurationChange ? { acceptDurationChange: true } : {}),
                         ...(input.kind ? { kind: input.kind } : {}),
                     }),
                 });
