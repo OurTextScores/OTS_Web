@@ -1380,19 +1380,35 @@ export default function ScoreEditor() {
             bodyOverflow: document.body.style.overflow,
             wrapperMinHeight: wrapper instanceof HTMLElement ? wrapper.style.minHeight : '',
         };
-        root.style.overflow = 'clip';
-        document.body.style.overflow = 'clip';
         if (wrapper instanceof HTMLElement) wrapper.style.minHeight = '0';
 
         const post = () => {
             const height = Math.ceil(document.body.scrollHeight);
+            /*
+             * Clip only once the frame is actually tall enough.
+             *
+             * A host that ignores the message — or has not resized yet — leaves
+             * this document in a short frame, and clipping there would hide
+             * everything below the fold with no way to reach it: a window on a
+             * score, and no scrollbar in either direction. So the clip is
+             * conditional on the frame having grown, and until it does this
+             * scrolls itself, which is the behaviour it had before any of this.
+             */
+            const fits = window.innerHeight >= height;
+            root.style.overflow = fits ? 'clip' : '';
+            document.body.style.overflow = fits ? 'clip' : '';
             window.parent.postMessage({ type: 'ots-compare-height', height }, '*');
         };
         const observer = new ResizeObserver(post);
         observer.observe(document.body);
+        // The frame's own size is what decides whether clipping is safe, and it
+        // changes when the host acts on the message rather than when the
+        // content does.
+        window.addEventListener('resize', post);
         post();
         return () => {
             observer.disconnect();
+            window.removeEventListener('resize', post);
             root.style.overflow = restore.rootOverflow;
             document.body.style.overflow = restore.bodyOverflow;
             if (wrapper instanceof HTMLElement) wrapper.style.minHeight = restore.wrapperMinHeight;
