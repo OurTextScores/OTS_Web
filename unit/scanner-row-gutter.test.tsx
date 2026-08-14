@@ -67,6 +67,7 @@ function renderRows(
         sourceEngineId?: string;
         decisions?: Array<{ blockIndex?: number; engineId?: string; markingsOnly?: 'dynamics' | 'lyrics' }>;
         measureMap?: number[];
+        score?: Record<string, unknown>;
     } = {},
 ) {
     const score = {
@@ -101,6 +102,7 @@ function renderRows(
         saveXml: vi.fn(async () => new TextEncoder().encode(XML)),
         relayout: vi.fn(async () => undefined),
         destroy: vi.fn(),
+        ...(options.score || {}),
     };
     mocked.loadWebMscore.mockResolvedValue({ load: vi.fn(async () => score) } as any);
     vi.stubGlobal(
@@ -199,6 +201,37 @@ describe('choosing the bars a pane draws', () => {
         // to narrow to, and what that side is missing can only be judged
         // against what it has instead.
         expect(focusedMeasureIndexes([0, 1, 2, 3], [])).toEqual([0, 1, 2, 3]);
+    });
+});
+
+describe('clicking the merged pane', () => {
+    beforeEach(() => {
+        mocked.loadWebMscore.mockReset();
+        vi.unstubAllGlobals();
+    });
+
+    it('shows what the click selected, and reserves the crosshair for note input', async () => {
+        // A selection is not part of the engraving — the editor draws it as an
+        // overlay it computes from the engine — so a pane that only redraws the
+        // SVG showed a click doing nothing at all.
+        const calls: any[] = [];
+        const selectElementAtPoint = vi.fn(async () => undefined);
+        const getSelectionBoundingBoxes = vi.fn(async () => [
+            { page: 0, x: 10, y: 12, width: 6, height: 20 },
+        ]);
+        renderRows([grounded], calls, {
+            score: { selectElementAtPoint, getSelectionBoundingBoxes },
+        });
+
+        const pane = await screen.findByTestId('merged-system-pane');
+        // Selecting is an ordinary click; only placing notes takes a crosshair.
+        expect(pane.className).not.toContain('cursor-crosshair');
+
+        fireEvent.click(pane);
+        await waitFor(() => expect(selectElementAtPoint).toHaveBeenCalled());
+        await waitFor(() =>
+            expect(screen.getAllByTestId('merged-selection').length).toBeGreaterThan(0),
+        );
     });
 });
 

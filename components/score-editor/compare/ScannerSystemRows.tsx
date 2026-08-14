@@ -504,6 +504,8 @@ function SystemPane({
     onStop,
     highlights,
     preview,
+    selection,
+    noteInput,
     place,
 }: {
     rendered: RenderedSide | null;
@@ -519,6 +521,16 @@ function SystemPane({
     highlights?: MeasureBox[];
     /** Whole bars a hovered control is pointing at, in the same pixels. */
     preview?: MeasureBox[];
+    /**
+     * What the last click selected, in the same pixels.
+     *
+     * The editor draws selection as an overlay it computes from the engine, not
+     * as something the engraving carries, so a pane that only redraws the SVG
+     * shows a click doing nothing at all.
+     */
+    selection?: MeasureBox[];
+    /** Placing notes, so the pointer says so. Selecting is an ordinary click. */
+    noteInput?: boolean;
     /**
      * Where in the pane this reading's bars should be drawn, in pane pixels.
      *
@@ -665,7 +677,7 @@ function SystemPane({
              */
             className={`relative w-full overflow-clip rounded border bg-white ${
                 tone === 'merged' ? 'border-cyan-300 ring-1 ring-cyan-200' : 'border-gray-200'
-            } ${onPointMutate ? 'cursor-crosshair' : ''}`}
+            } ${onPointMutate && noteInput ? 'cursor-crosshair' : ''}`}
             style={{ height: Math.max(1, (bottom - top) * scale) }}
             onClick={
                 onPointMutate
@@ -721,6 +733,29 @@ function SystemPane({
                                 top: box.top - 4,
                                 width: box.width,
                                 height: box.height + 8,
+                            }}
+                        />
+                    ))}
+                </div>
+            )}
+            {(selection || []).length > 0 && (
+                <div
+                    className="pointer-events-none absolute left-0 top-0 origin-top-left"
+                    style={{
+                        width: rendered.width,
+                        transform: `translate(${offsetX}px, 0) scale(${scale}) translate(${-left}px, ${-top}px)`,
+                    }}
+                >
+                    {(selection || []).map((box, index) => (
+                        <div
+                            key={`selection-${box.left}-${index}`}
+                            data-testid="merged-selection"
+                            className="absolute rounded-sm bg-blue-500/25 ring-1 ring-blue-600"
+                            style={{
+                                left: box.left,
+                                top: box.top,
+                                width: Math.max(3, box.width),
+                                height: Math.max(3, box.height),
                             }}
                         />
                     ))}
@@ -1250,6 +1285,10 @@ export function ScannerSystemRows({
     const [previewRegion, setPreviewRegion] = useState<ScannerRowRegion | null>(null);
     // A take the reviewer may repeat deliberately, after being told why it
     // refused. Cleared as soon as anything else happens.
+    // Where the last click landed, in score coordinates, as the engine reports it.
+    const [selectionBoxes, setSelectionBoxes] = useState<
+        Array<{ page: number; x: number; y: number; width: number; height: number }>
+    >([]);
     const [takeOutcome, setTakeOutcome] = useState<{
         blockIndex: number;
         engineId: string;
@@ -1329,6 +1368,7 @@ export function ScannerSystemRows({
                 async (target) => {
                     if (noteInput && target.putNote) {
                         await target.putNote(point.page, point.x, point.y, false, false);
+                        setSelectionBoxes([]);
                         return;
                     }
                     if (target.selectElementAtPoint) {
@@ -1337,6 +1377,18 @@ export function ScannerSystemRows({
                         await target.selectMeasureAtPoint(point.page, point.x, point.y);
                     }
                     setHasSelection(true);
+                    /*
+                     * Ask the engine where the selection is, and draw it.
+                     *
+                     * A selection is not part of the engraving — the editor
+                     * draws it as an overlay it computes the same way — so a
+                     * pane that only redraws the SVG shows a click doing
+                     * nothing. Optional, because a build without the export
+                     * should lose the highlight and nothing else.
+                     */
+                    const read = target.getSelectionBoundingBoxes;
+                    const boxes = read ? await read.call(target) : [];
+                    setSelectionBoxes(Array.isArray(boxes) ? boxes : []);
                 },
                 // Selecting changes nothing about the document, so it must not
                 // mark the merge edited — an untouched merge saved after a stray
@@ -1810,6 +1862,17 @@ export function ScannerSystemRows({
                         : previewRegion?.rightMeasureIndexes) || [],
                 );
                 const droppedFromLine = mergedIndexes(system).length - mergedWindow.length;
+                // Score coordinates into the drawing's own, the same conversion
+                // `measureBounds` does — the page a box names decides how far
+                // down the stacked pages it sits.
+                const mergedSelection = mergedRender
+                    ? selectionBoxes.map((box) => ({
+                          left: box.x * mergedRender.renderScale,
+                          top: box.y * mergedRender.renderScale + box.page * mergedRender.pageHeight,
+                          width: box.width * mergedRender.renderScale,
+                          height: box.height * mergedRender.renderScale,
+                      }))
+                    : [];
                 const highlightsFor = (
                     rendered: RenderedSide | null,
                     pick: (difference: ScannerSymbolDifference) => {
@@ -1936,6 +1999,8 @@ export function ScannerSystemRows({
                                     rendered={mergedRender}
                                     highlights={mergedHighlights}
                                     preview={mergedPreview}
+                                    selection={mergedSelection}
+                                    noteInput={noteInput}
                                     measureIndexes={mergedWindow}
                                     label="The merged score"
                                     paneWidth={paneWidth}
