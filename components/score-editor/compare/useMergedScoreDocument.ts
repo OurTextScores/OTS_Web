@@ -146,7 +146,10 @@ export function useMergedScoreDocument({
      * score when there is one, and with null when the reviewer is starting
      * from an engine, because both need the same treatment.
      */
-    prepare: (persistedXml: string | null) => LoadInput | null;
+    prepare: (
+        persistedXml: string | null,
+        state: MergedScoreState | null,
+    ) => LoadInput | null;
     sourceEngineId: string;
 }) {
     const [score, setScore] = useState<Score | null>(null);
@@ -178,8 +181,8 @@ export function useMergedScoreDocument({
      * Load the merged document: the persisted one if the reviewer has saved,
      * otherwise a fresh copy of the engine they chose to start from.
      */
-    const load = useCallback(async () => {
-        const persisted = current?.present ? current : null;
+    const loadState = useCallback(async (target: MergedScoreState | null) => {
+        const persisted = target?.present ? target : null;
         setLoading(true);
         setError(null);
         try {
@@ -193,7 +196,7 @@ export function useMergedScoreDocument({
                 }
                 persistedXml = await response.text();
             }
-            const input = prepare(persistedXml);
+            const input = prepare(persistedXml, target);
             if (!input) {
                 destroy();
                 setScore(null);
@@ -216,7 +219,9 @@ export function useMergedScoreDocument({
         } finally {
             setLoading(false);
         }
-    }, [current, destroy, prepare, resolveUrl]);
+    }, [destroy, prepare, resolveUrl]);
+
+    const load = useCallback(() => loadState(current), [current, loadState]);
 
     /**
      * Run one edit against the merged score.
@@ -329,12 +334,6 @@ export function useMergedScoreDocument({
             candidateEngineId: string;
             /** Absent takes the bars; present takes only that marking. */
             kind?: 'dynamics' | 'lyrics';
-            /**
-             * Take the notes even though the readings disagree about the bar's
-             * length. Only ever set by a reviewer who has been told why it
-             * refused and asked for it anyway.
-             */
-            acceptDurationChange?: boolean;
         }): Promise<MergedTakeOutcome> => {
             if (!current) return { ok: false, error: 'This page cannot carry a merged score.' };
             setSaving(true);
@@ -353,7 +352,6 @@ export function useMergedScoreDocument({
                         baseEngine: input.baseEngineId,
                         candidateEngine: input.candidateEngineId,
                         revision: current.revision,
-                        ...(input.acceptDurationChange ? { acceptDurationChange: true } : {}),
                         ...(input.kind ? { kind: input.kind } : {}),
                     }),
                 });
@@ -372,6 +370,17 @@ export function useMergedScoreDocument({
                 const next = { ...current, ...body } as MergedScoreState;
                 setSaved(next);
                 setDirty(false);
+                /*
+                 * Show what was taken.
+                 *
+                 * The decision is applied to the stored document by the server,
+                 * so the score held here is now a revision behind: without this
+                 * the take was recorded, the controls swapped over, and the
+                 * merged pane went on drawing the bar the reviewer had just
+                 * replaced. Loaded from `next` rather than from state, because
+                 * the state set above does not reach this closure.
+                 */
+                await loadState(next);
                 return { ok: true, state: next, repairs: body?.repairs || [] };
             } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);

@@ -920,14 +920,8 @@ function Gutter({
      * thousands of pixels tall now, and a refusal announced above the fold from
      * a button below it reads as a button that does nothing.
      */
-    outcome: { blockIndex: number; engineId: string; message: string; overrulable: boolean } | null;
-    onTake: (
-        region: ScannerRowRegion,
-        engineId: string,
-        kind?: 'dynamics' | 'lyrics',
-        /** Overrule the length refusal, having been told what it was. */
-        acceptDurationChange?: boolean,
-    ) => void;
+    outcome: { blockIndex: number; engineId: string; message: string } | null;
+    onTake: (region: ScannerRowRegion, engineId: string, kind?: 'dynamics' | 'lyrics') => void;
     busy: boolean;
 }) {
     if (regions.length === 0 || !engineId) return null;
@@ -1038,16 +1032,7 @@ function Gutter({
                                     role="status"
                                 >
                                     {outcome.message}
-                                    {outcome.overrulable && (
-                                        <button
-                                            type="button"
-                                            data-testid="btn-take-anyway"
-                                            onClick={() => onTake(region, engineId, undefined, true)}
-                                            className="rounded border border-amber-500 bg-white px-1.5 py-0.5 font-medium text-amber-900 hover:bg-amber-50"
-                                        >
-                                            take the notes anyway
-                                        </button>
-                                    )}
+                                    
                                 </span>
                             )}
                     </span>
@@ -1158,7 +1143,7 @@ export function ScannerSystemRows({
      * the page, not a property of any of the three documents.
      */
     const prepare = useCallback(
-        (persistedXml: string | null) => {
+        (persistedXml: string | null, state: MergedScoreState | null) => {
             const source = persistedXml ?? mergeSourceXml;
             if (!source) return null;
             /*
@@ -1174,14 +1159,14 @@ export function ScannerSystemRows({
              */
             const starts = lineStartsInMerge(
                 mergeStarts as number[],
-                persistedXml ? mergedState?.measureMap : undefined,
+                persistedXml ? state?.measureMap : undefined,
             );
             return {
                 xml: withSystemSpacing(withForcedSystemBreaks(source, starts)),
                 baselineMeasures: measureCount(source),
             };
         },
-        [mergeSourceXml, mergeStarts, mergedState?.measureMap],
+        [mergeSourceXml, mergeStarts],
     );
 
     const merged = useMergedScoreDocument({
@@ -1365,7 +1350,6 @@ export function ScannerSystemRows({
         blockIndex: number;
         engineId: string;
         message: string;
-        overrulable: boolean;
     } | null>(null);
     useEffect(() => setSelectedBlockIndex(onlyBlockIndex), [onlyBlockIndex]);
     const selectedPosition = navigableBlocks.findIndex(
@@ -1530,12 +1514,7 @@ export function ScannerSystemRows({
     }, [hasSelection, mergedScore, mutateMerged, noteInput, toggleNoteInput]);
 
     const takeBlock = useCallback(
-        (
-            region: ScannerRowRegion,
-            engineId: string,
-            kind?: 'dynamics' | 'lyrics',
-            acceptDurationChange = false,
-        ) => {
+        (region: ScannerRowRegion, engineId: string, kind?: 'dynamics' | 'lyrics') => {
             if (!region.contentSignature || !leftEngineId || !rightEngineId) return;
             void merged
                 .take({
@@ -1545,25 +1524,13 @@ export function ScannerSystemRows({
                     baseEngineId: leftEngineId,
                     candidateEngineId: rightEngineId,
                     kind,
-                    acceptDurationChange,
                 })
                 .then((outcome) => {
                     if (!outcome.ok) {
-                        /*
-                         * One refusal is the reviewer's to overrule.
-                         *
-                         * "These readings are different lengths" is a fact
-                         * about arithmetic; whether the notes are better is a
-                         * judgement only someone looking at the scan can make.
-                         * So the refusal is stated, and beside it the offer to
-                         * do it anyway — which is a different act from pressing
-                         * take, and is recorded as one.
-                         */
                         setTakeOutcome({
                             blockIndex: region.blockIndex,
                             engineId,
                             message: outcome.error,
-                            overrulable: /different lengths/i.test(outcome.error) && !kind,
                         });
                         return;
                     }
@@ -1574,14 +1541,21 @@ export function ScannerSystemRows({
                         blockIndex: region.blockIndex,
                         engineId,
                         message: `Taken.${repaired}`,
-                        overrulable: false,
                     });
-                    // The merge may have changed length, so it is reloaded
-                    // rather than patched.
-                    void loadMerged();
+                    /*
+                     * No reload here.
+                     *
+                     * `take` has already loaded the document it produced. This
+                     * used to call `loadMerged()`, which closes over the state
+                     * as it was before the take — and the merged score's URL is
+                     * pinned to the revision the caller holds, so it fetched the
+                     * revision that had just been superseded and drew the bar
+                     * the reviewer had replaced. Every take looked like it did
+                     * nothing.
+                     */
                 });
         },
-        [leftEngineId, leftLabel, loadMerged, merged, rightEngineId, rightLabel],
+        [leftEngineId, rightEngineId, merged],
     );
 
     const save = useCallback(
