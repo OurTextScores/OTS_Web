@@ -379,6 +379,64 @@ export function engravedRowWindow(
     return [...chosen.indexes].sort((left, right) => left - right);
 }
 
+/**
+ * Space the engraved systems apart, so a row has somewhere to breathe.
+ *
+ * A row clips a band around its staff and pads it, but the padding stops at the
+ * halfway point to whatever is engraved next — otherwise a row would show a
+ * slice of its neighbour, which is worse than a tight crop. On a page of ten
+ * systems that halfway point is very close, so notes on high ledger lines lost
+ * their heads and slurs and articulations were cut off entirely.
+ *
+ * The engraving is not for reading as a page — every system is clipped out of it
+ * one at a time — so it can afford to be generous. More distance between systems
+ * is more room for the band to grow into before it reaches its neighbour, and it
+ * costs nothing else: unlike page width it does not touch justification, and
+ * unlike staff size it does not change how much fits on a line.
+ */
+const SCANNER_SYSTEM_DISTANCE_TENTHS = 240;
+
+export function withSystemSpacing(xml: string): string {
+    if (typeof DOMParser === 'undefined') return xml;
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length > 0) return xml;
+    const root = doc.documentElement;
+    if (!root) return xml;
+
+    let defaults = Array.from(root.children).find((child) => child.tagName === 'defaults');
+    if (!defaults) {
+        defaults = doc.createElement('defaults');
+        // `<defaults>` follows the header blocks and precedes `<part-list>`.
+        const partList = Array.from(root.children).find((child) => child.tagName === 'part-list');
+        root.insertBefore(defaults, partList ?? root.firstChild);
+    }
+    const container = defaults;
+    Array.from(container.getElementsByTagName('system-layout')).forEach((node) =>
+        node.parentElement === container ? container.removeChild(node) : undefined,
+    );
+    // A `<print>` carrying its own system layout would override the default.
+    Array.from(doc.getElementsByTagName('system-layout')).forEach((node) =>
+        node.parentElement?.tagName === 'print' ? node.parentElement.removeChild(node) : undefined,
+    );
+
+    const layout = doc.createElement('system-layout');
+    for (const [name, value] of [
+        ['system-distance', SCANNER_SYSTEM_DISTANCE_TENTHS],
+        ['top-system-distance', SCANNER_SYSTEM_DISTANCE_TENTHS / 2],
+    ] as const) {
+        const node = doc.createElement(name);
+        node.textContent = String(value);
+        layout.appendChild(node);
+    }
+    // Inside `<defaults>`, `<system-layout>` follows `<scaling>` and `<page-layout>`.
+    const after = Array.from(container.children).filter((child) =>
+        ['scaling', 'page-layout'].includes(child.tagName),
+    );
+    const anchor = after[after.length - 1];
+    container.insertBefore(layout, anchor ? anchor.nextSibling : container.firstChild);
+    return new XMLSerializer().serializeToString(doc);
+}
+
 /** Draw an already-loaded score; used for the merged document, which is live. */
 async function renderScoreSide(score: Score): Promise<RenderedSide | null> {
     const svg = await score.saveSvg(0, true, false);
@@ -410,7 +468,7 @@ async function renderScoreSide(score: Score): Promise<RenderedSide | null> {
 /** Draw an engine reading. Its score is transient: engine panes are evidence. */
 async function renderSide(xml: string, startIndexes: number[]): Promise<RenderedSide | null> {
     const WebMscore = await loadWebMscore();
-    const reflowed = withForcedSystemBreaks(xml, startIndexes);
+    const reflowed = withSystemSpacing(withForcedSystemBreaks(xml, startIndexes));
     let score: Score | null = null;
     try {
         score = await (WebMscore as any).load('xml', new TextEncoder().encode(reflowed));
@@ -539,7 +597,10 @@ function SystemPane({
     const nearestBelow = others
         .filter((box) => box.top >= rawBottom)
         .reduce((closest, box) => Math.min(closest, box.top), Infinity);
-    const wanted = (rawBottom - rawTop) * 0.7;
+    // Enough for four or five ledger lines and the slur above them. It used to
+    // be 0.7, which was all the space there was between systems; the engraving
+    // now leaves room, so the band can ask for what the music needs.
+    const wanted = (rawBottom - rawTop) * 1.6;
     const top = Math.max(
         0,
         rawTop - (Number.isFinite(nearestAbove) ? Math.min(wanted, (rawTop - nearestAbove) / 2) : wanted),
@@ -1068,7 +1129,7 @@ export function ScannerSystemRows({
                 persistedXml ? mergedState?.measureMap : undefined,
             );
             return {
-                xml: withForcedSystemBreaks(source, starts),
+                xml: withSystemSpacing(withForcedSystemBreaks(source, starts)),
                 baselineMeasures: measureCount(source),
             };
         },
