@@ -489,19 +489,13 @@ describe('the row gutter', () => {
         expect(screen.queryAllByTestId('symbol-highlight')).toHaveLength(0);
     });
 
-    it('points the arrow at the merged score, from the side that would change it', async () => {
-        // Only one side can change anything at a time: the merged score starts
-        // as a copy of one reading, so taking that reading again is a no-op.
+    it('points each arrow at the merged score between them', async () => {
         const calls: any[] = [];
         renderRows([grounded], calls, { sourceEngineId: 'transcoda' });
 
-        // Down from the reading above, into the merged score below it.
+        // Down from the reading above, up from the reading below.
         expect((await screen.findByTestId('btn-take-down-0')).textContent).toContain('↓');
-        expect(screen.queryByTestId('btn-take-up-0')).toBeNull();
-
-        // And the other way round when the merge started from the other side.
-        renderRows([grounded], calls, { sourceEngineId: 'homr' });
-        expect((await screen.findByTestId('btn-take-up-0')).textContent).toContain('↑');
+        expect(screen.getByTestId('btn-take-up-0').textContent).toContain('↑');
     });
 
     it('offers nothing for a difference with no proven place on the scan', async () => {
@@ -516,29 +510,32 @@ describe('the row gutter', () => {
         expect(screen.queryByTestId('btn-take-down-1')).toBeNull();
     });
 
-    it('offers nothing from the reading the merged score already follows', async () => {
-        // The server refuses it with "the merged score already reads this
-        // passage the way that engine does", so the only outcome of pressing it
-        // is that message.
+    it('says which reading the merged bar already follows, and leaves it there', async () => {
+        // Removing it made the pair asymmetric: after taking a bar from one
+        // reading there was no control to take it back, so a decision could not
+        // be undone from where it was made. Left in and disabled, it is also
+        // the only thing on screen saying what the merged bar currently reads.
         const calls: any[] = [];
         renderRows([grounded], calls, { sourceEngineId: 'homr' });
 
-        await screen.findByTestId('btn-take-up-0');
-        expect(screen.queryByTestId('btn-take-down-0')).toBeNull();
+        const already = await screen.findByTestId('btn-take-down-0');
+        expect(already).toBeDisabled();
+        expect(already).toHaveAttribute('title', expect.stringContaining('already reads'));
+        // The other side is the one that would change something.
+        expect(screen.getByTestId('btn-take-up-0')).toBeEnabled();
     });
 
-    it('offers it again once a decision has moved that bar away', async () => {
+    it('turns the pair around once a decision has moved that bar', async () => {
         const calls: any[] = [];
         renderRows([grounded], calls, {
             sourceEngineId: 'homr',
             decisions: [{ blockIndex: 0, engineId: 'transcoda' }],
         });
 
-        // Now the merged score reads this block from Transcoda, so taking it
-        // back from HOMR would change something — and taking it from Transcoda
-        // again would not.
-        expect(await screen.findByTestId('btn-take-down-0')).toBeInTheDocument();
-        expect(screen.queryByTestId('btn-take-up-0')).toBeNull();
+        // The merged score now reads this block from Transcoda, so taking it
+        // back from HOMR is the undo — and it is enabled.
+        expect(await screen.findByTestId('btn-take-down-0')).toBeEnabled();
+        expect(screen.getByTestId('btn-take-up-0')).toBeDisabled();
     });
 
     it('does not count a marking take as moving the notes', async () => {
@@ -549,7 +546,7 @@ describe('the row gutter', () => {
         });
 
         await screen.findByTestId('btn-take-up-0');
-        expect(screen.queryByTestId('btn-take-down-0')).toBeNull();
+        expect(screen.getByTestId('btn-take-down-0')).toBeDisabled();
     });
 
     it('shows what a take would replace while the pointer is on it', async () => {
@@ -694,7 +691,11 @@ describe('the row gutter', () => {
         );
 
         await userEvent.click(await screen.findByTestId('btn-take-up-0'));
-        await waitFor(() => expect(screen.getByTestId('btn-take-anyway')).toBeInTheDocument());
+        // Said beside the button that was pressed, not at the top of a view
+        // thousands of pixels tall, where a refusal reads as a dead button.
+        await waitFor(() => expect(screen.getByTestId('take-outcome')).toBeInTheDocument());
+        expect(screen.getByTestId('take-outcome').textContent).toContain('different lengths');
+        expect(screen.getByTestId('btn-take-anyway')).toBeInTheDocument();
 
         await userEvent.click(screen.getByTestId('btn-take-anyway'));
         await waitFor(() =>

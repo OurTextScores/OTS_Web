@@ -786,6 +786,7 @@ function Gutter({
     readsFrom,
     onPreview,
     onTake,
+    outcome,
     busy,
 }: {
     direction: 'down' | 'up';
@@ -803,10 +804,20 @@ function Gutter({
      * said without words.
      */
     onPreview: (region: ScannerRowRegion | null) => void;
+    /**
+     * What the last take from this side did, if it was from this side.
+     *
+     * Reported here rather than only at the top of the view: the editor is
+     * thousands of pixels tall now, and a refusal announced above the fold from
+     * a button below it reads as a button that does nothing.
+     */
+    outcome: { blockIndex: number; engineId: string; message: string; overrulable: boolean } | null;
     onTake: (
         region: ScannerRowRegion,
         engineId: string,
         kind?: 'dynamics' | 'lyrics',
+        /** Overrule the length refusal, having been told what it was. */
+        acceptDurationChange?: boolean,
     ) => void;
     busy: boolean;
 }) {
@@ -831,8 +842,18 @@ function Gutter({
                     tell it from one that is merely unavailable.
                 */
                 if (!region.contentSignature) return null;
-                if (readsFrom(region.blockIndex) === engineId) return null;
-                const decidable = true;
+                /*
+                    Both sides are always here, and the one the merged score
+                    already reads says so rather than vanishing.
+                    
+                    Removing it made the pair asymmetric: after taking a bar
+                    from one reading there was no control to take it back, so a
+                    decision could not be undone from where it was made. Left in
+                    and disabled, it is also the only thing on screen that says
+                    which reading the merged bar currently follows.
+                */
+                const alreadyRead = readsFrom(region.blockIndex) === engineId;
+                const decidable = !alreadyRead;
                 const from = direction === 'down' ? region.leftMarkings : region.rightMarkings;
                 const bars =
                     (direction === 'down' ? region.leftMeasureIndexes : region.rightMeasureIndexes)
@@ -847,7 +868,9 @@ function Gutter({
                             title={
                                 decidable
                                     ? `Take difference ${region.blockIndex + 1} from ${label}`
-                                    : 'This difference has no verified place on the scan, so it cannot be decided'
+                                    : `The merged score already reads difference ${
+                                          region.blockIndex + 1
+                                      } from ${label}. Take it from the other reading to change it.`
                             }
                             onClick={() => onTake(region, engineId)}
                             onMouseEnter={() => onPreview(region)}
@@ -865,7 +888,7 @@ function Gutter({
                             engine's dynamics and the other's words — and an
                             engine that read neither offers neither.
                         */}
-                        {decidable && from?.dynamics && (
+                        {from?.dynamics && (
                             <button
                                 type="button"
                                 data-testid={`btn-take-${direction}-dynamics-${region.blockIndex}`}
@@ -881,7 +904,7 @@ function Gutter({
                                 {arrow} dynamics
                             </button>
                         )}
-                        {decidable && from?.lyrics && (
+                        {from?.lyrics && (
                             <button
                                 type="button"
                                 data-testid={`btn-take-${direction}-lyrics-${region.blockIndex}`}
@@ -897,6 +920,27 @@ function Gutter({
                                 {arrow} lyrics
                             </button>
                         )}
+                        {outcome &&
+                            outcome.blockIndex === region.blockIndex &&
+                            outcome.engineId === engineId && (
+                                <span
+                                    className="ml-1 inline-flex flex-wrap items-center gap-1 text-gray-700"
+                                    data-testid="take-outcome"
+                                    role="status"
+                                >
+                                    {outcome.message}
+                                    {outcome.overrulable && (
+                                        <button
+                                            type="button"
+                                            data-testid="btn-take-anyway"
+                                            onClick={() => onTake(region, engineId, undefined, true)}
+                                            className="rounded border border-amber-500 bg-white px-1.5 py-0.5 font-medium text-amber-900 hover:bg-amber-50"
+                                        >
+                                            take the notes anyway
+                                        </button>
+                                    )}
+                                </span>
+                            )}
                     </span>
                 );
             })}
@@ -1145,9 +1189,11 @@ export function ScannerSystemRows({
     const [previewRegion, setPreviewRegion] = useState<ScannerRowRegion | null>(null);
     // A take the reviewer may repeat deliberately, after being told why it
     // refused. Cleared as soon as anything else happens.
-    const [overrulable, setOverrulable] = useState<{
-        region: ScannerRowRegion;
+    const [takeOutcome, setTakeOutcome] = useState<{
+        blockIndex: number;
         engineId: string;
+        message: string;
+        overrulable: boolean;
     } | null>(null);
     useEffect(() => setSelectedBlockIndex(onlyBlockIndex), [onlyBlockIndex]);
     const selectedPosition = navigableBlocks.findIndex(
@@ -1317,7 +1363,6 @@ export function ScannerSystemRows({
                 })
                 .then((outcome) => {
                     if (!outcome.ok) {
-                        setNotice(outcome.error);
                         /*
                          * One refusal is the reviewer's to overrule.
                          *
@@ -1328,22 +1373,23 @@ export function ScannerSystemRows({
                          * do it anyway — which is a different act from pressing
                          * take, and is recorded as one.
                          */
-                        setOverrulable(
-                            /different lengths/i.test(outcome.error) && !kind
-                                ? { region, engineId }
-                                : null,
-                        );
+                        setTakeOutcome({
+                            blockIndex: region.blockIndex,
+                            engineId,
+                            message: outcome.error,
+                            overrulable: /different lengths/i.test(outcome.error) && !kind,
+                        });
                         return;
                     }
-                    setOverrulable(null);
                     const repaired = outcome.repairs.length
                         ? ` ${outcome.repairs.map((repair) => repair.detail).join(' ')}`
                         : '';
-                    setNotice(
-                        `Took ${kind ? `the ${kind} of ` : ''}difference ${
-                            region.blockIndex + 1
-                        } from ${engineId === leftEngineId ? leftLabel : rightLabel}.${repaired}`,
-                    );
+                    setTakeOutcome({
+                        blockIndex: region.blockIndex,
+                        engineId,
+                        message: `Taken.${repaired}`,
+                        overrulable: false,
+                    });
                     // The merge may have changed length, so it is reloaded
                     // rather than patched.
                     void loadMerged();
@@ -1606,23 +1652,7 @@ export function ScannerSystemRows({
                     </div>
                 )}
 
-                {notice && (
-                    <div className="flex flex-wrap items-center gap-2 text-gray-700">
-                        <span>{notice}</span>
-                        {overrulable && (
-                            <button
-                                type="button"
-                                data-testid="btn-take-anyway"
-                                onClick={() =>
-                                    takeBlock(overrulable.region, overrulable.engineId, undefined, true)
-                                }
-                                className="rounded border border-amber-500 bg-white px-2 py-0.5 font-medium text-amber-900 hover:bg-amber-50"
-                            >
-                                Take the notes anyway
-                            </button>
-                        )}
-                    </div>
-                )}
+                {notice && <div className="text-gray-700">{notice}</div>}
             </div>
 
             {onlyBlockIndex !== undefined && visibleRows.length === 0 && (
@@ -1814,6 +1844,7 @@ export function ScannerSystemRows({
                             <Gutter
                                 readsFrom={readsFrom}
                                 onPreview={setPreviewRegion}
+                                outcome={takeOutcome}
                                 direction="down"
                                 label={leftLabel}
                                 regions={differences}
@@ -1855,6 +1886,7 @@ export function ScannerSystemRows({
                             <Gutter
                                 readsFrom={readsFrom}
                                 onPreview={setPreviewRegion}
+                                outcome={takeOutcome}
                                 direction="up"
                                 label={rightLabel}
                                 regions={differences}
