@@ -33,6 +33,15 @@ export type MergedScoreState = {
         engineId?: string;
         markingsOnly?: 'dynamics' | 'lyrics';
     }>;
+    /**
+     * Where each merged bar came from, by position.
+     *
+     * `map[mergedPosition] = sourceMeasureIndex`. A take that inserts or
+     * removes bars renumbers everything after it, so any position computed from
+     * the engine reading has to be followed through this to stay on the bar it
+     * meant.
+     */
+    measureMap?: number[];
     url: string;
     musicXmlUrl: string;
 };

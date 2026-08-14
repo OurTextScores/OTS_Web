@@ -95,6 +95,23 @@ const RENDER_WIDTH = 1400;
  * engines, and forcing fewer measures per line than an engine would choose
  * stretches rather than crowds. See the design's §2.1.
  */
+/**
+ * Where a line starts in the merged document, given where it started in the
+ * reading the merge was built from.
+ *
+ * `map[mergedPosition] = sourceMeasureIndex`, so following a start is a lookup
+ * by value. A start whose bar is gone — removed by an earlier decision — drops
+ * out rather than breaking at whatever now sits at that number: one line too
+ * few is a smaller lie than a line that begins in the wrong place.
+ */
+export function lineStartsInMerge(
+    starts: readonly number[],
+    map: readonly number[] | undefined,
+): number[] {
+    if (!map) return [...starts];
+    return starts.map((start) => map.indexOf(start)).filter((position) => position >= 0);
+}
+
 export function withForcedSystemBreaks(xml: string, startMeasureIndexes: number[]): string {
     if (typeof DOMParser === 'undefined' || startMeasureIndexes.length === 0) return xml;
     const starts = new Set(startMeasureIndexes.filter((index) => index > 0));
@@ -943,12 +960,27 @@ export function ScannerSystemRows({
         (persistedXml: string | null) => {
             const source = persistedXml ?? mergeSourceXml;
             if (!source) return null;
+            /*
+             * Follow the line starts through the merge before imposing them.
+             *
+             * They are positions in the engine reading, and a take that inserts
+             * or removes bars renumbers everything after it — so bar 8 of the
+             * reading may be bar 9 of the merge. Breaking at the old number
+             * puts a different bar at the head of the line, which is the line
+             * reflowing under a reader who did not ask it to. Only the
+             * persisted document needs this; before there is one, the merged
+             * score *is* the reading.
+             */
+            const starts = lineStartsInMerge(
+                mergeStarts as number[],
+                persistedXml ? mergedState?.measureMap : undefined,
+            );
             return {
-                xml: withForcedSystemBreaks(source, mergeStarts as number[]),
+                xml: withForcedSystemBreaks(source, starts),
                 baselineMeasures: measureCount(source),
             };
         },
-        [mergeSourceXml, mergeStarts],
+        [mergeSourceXml, mergeStarts, mergedState?.measureMap],
     );
 
     const merged = useMergedScoreDocument({
@@ -1261,6 +1293,69 @@ export function ScannerSystemRows({
             mergedReadsBlockFrom(blockIndex, mergedEngineId, merged.state?.decisions),
         [mergedEngineId, merged.state?.decisions],
     );
+
+
+    /**
+     * The scan of one system, with the difference under review boxed on it.
+     *
+     * Rendered twice per row — above the first reading and below the second —
+     * so each reading has the page it was read from next to it.
+     */
+    const scanCrop = (system: ScannerSystem, rowIndex: number, position: 'above' | 'below' = 'above') => {
+        if (!system.cropUrl) return null;
+        if (staleCrops.has(system.systemIndex)) {
+            return (
+                /*
+                    A crop is signature-bound and the server refuses it once the
+                    job moves on. An `<img>` cannot read that refusal, so it has
+                    to be said here — a broken image would look like a bug in the
+                    page rather than a scan that has been superseded.
+                */
+                <p
+                    role="alert"
+                    className={`rounded border border-amber-400 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 ${
+                        position === 'above' ? 'mb-2' : 'mt-2'
+                    }`}
+                >
+                    This scan crop is no longer current. Reload the page to compare against the
+                    readings as they stand now.
+                </p>
+            );
+        }
+        return (
+            <div className={`relative ${position === 'above' ? 'mb-2' : 'mt-2'}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                    src={resolveUrl(system.cropUrl)}
+                    alt={`Scan of system ${rowIndex + 1}${position === 'below' ? ', repeated' : ''}`}
+                    onError={() =>
+                        setStaleCrops((current) => new Set(current).add(system.systemIndex))
+                    }
+                    className="w-full rounded border border-gray-200 bg-white object-contain"
+                />
+                {/*
+                    The bars in question, boxed on the scan they came from.
+                    Fractions of this crop, so the box holds wherever the image
+                    is scaled to — the scan's own pixel size never reaches here.
+                */}
+                {(selectedRegion?.cropBoxes || [])
+                    .filter((box) => box.systemIndex === system.systemIndex)
+                    .map((box, boxIndex) => (
+                        <div
+                            key={`${box.left}-${boxIndex}`}
+                            data-testid="scan-difference-box"
+                            className="pointer-events-none absolute rounded-sm border-2 border-amber-500 bg-amber-300/15"
+                            style={{
+                                left: `${box.left * 100}%`,
+                                top: `${box.top * 100}%`,
+                                width: `${box.width * 100}%`,
+                                height: `${box.height * 100}%`,
+                            }}
+                        />
+                    ))}
+            </div>
+        );
+    };
 
     const canSave = Boolean(merged.state && mergedEngineId);
 
@@ -1585,58 +1680,7 @@ export function ScannerSystemRows({
 
                         </div>
 
-                        {system.cropUrl && staleCrops.has(system.systemIndex) && (
-                            /*
-                                A crop is signature-bound and the server refuses
-                                it once the job moves on. An `<img>` cannot read
-                                that refusal, so it has to be said here — a
-                                broken image would look like a bug in the page
-                                rather than a scan that has been superseded.
-                            */
-                            <p
-                                role="alert"
-                                className="mb-2 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"
-                            >
-                                This scan crop is no longer current. Reload the page to compare
-                                against the readings as they stand now.
-                            </p>
-                        )}
-                        {system.cropUrl && !staleCrops.has(system.systemIndex) && (
-                            <div className="relative mb-2">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                    src={resolveUrl(system.cropUrl)}
-                                    alt={`Scan of system ${rowIndex + 1}`}
-                                    onError={() =>
-                                        setStaleCrops((current) =>
-                                            new Set(current).add(system.systemIndex),
-                                        )
-                                    }
-                                    className="w-full rounded border border-gray-200 bg-white object-contain"
-                                />
-                                {/*
-                                    The bars in question, boxed on the scan they
-                                    came from. Fractions of this crop, so the box
-                                    holds wherever the image is scaled to — the
-                                    scan's own pixel size never reaches here.
-                                */}
-                                {(selectedRegion?.cropBoxes || [])
-                                    .filter((box) => box.systemIndex === system.systemIndex)
-                                    .map((box, boxIndex) => (
-                                        <div
-                                            key={`${box.left}-${boxIndex}`}
-                                            data-testid="scan-difference-box"
-                                            className="pointer-events-none absolute rounded-sm border-2 border-amber-500 bg-amber-300/15"
-                                            style={{
-                                                left: `${box.left * 100}%`,
-                                                top: `${box.top * 100}%`,
-                                                width: `${box.width * 100}%`,
-                                                height: `${box.height * 100}%`,
-                                            }}
-                                        />
-                                    ))}
-                            </div>
-                        )}
+                        {scanCrop(system, rowIndex)}
 
                         {/*
                             Reading, merge, reading, with a gutter between each
@@ -1716,6 +1760,17 @@ export function ScannerSystemRows({
                                     {...paneTransport('right', rightFocus)}
                                 />
                             </div>
+                            {/*
+                                The scan again, under the second reading.
+
+                                One copy at the top of the row put the scan
+                                beside the first reading and three panes away
+                                from the second, so comparing the lower reading
+                                against the page meant carrying a line of music
+                                in your head past two other staves. It is the
+                                same image, and images are cheap next to that.
+                            */}
+                            {scanCrop(system, rowIndex, 'below')}
                         </div>
                     </div>
                 );

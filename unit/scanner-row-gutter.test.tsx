@@ -11,6 +11,7 @@ vi.mock('../lib/webmscore-loader', async (importOriginal) => ({
 
 import {
     focusedMeasureIndexes,
+    lineStartsInMerge,
     placeUnderMerged,
     ScannerSystemRows,
     type ScannerRowRegion,
@@ -64,6 +65,7 @@ function renderRows(
         onlyBlockIndex?: number;
         sourceEngineId?: string;
         decisions?: Array<{ blockIndex?: number; engineId?: string; markingsOnly?: 'dynamics' | 'lyrics' }>;
+        measureMap?: number[];
     } = {},
 ) {
     const score = {
@@ -127,6 +129,7 @@ function renderRows(
                 present: true,
                 sourceEngineId: options.sourceEngineId ?? 'transcoda',
                 decisions: options.decisions,
+                measureMap: options.measureMap,
                 revision: 1,
                 edited: false,
                 basisSignature: 'basis',
@@ -195,6 +198,31 @@ describe('choosing the bars a pane draws', () => {
         // to narrow to, and what that side is missing can only be judged
         // against what it has instead.
         expect(focusedMeasureIndexes([0, 1, 2, 3], [])).toEqual([0, 1, 2, 3]);
+    });
+});
+
+describe('holding the merged line still', () => {
+    it('follows a line start through a take that changed the bar count', () => {
+        // The starts are positions in the engine reading. A take that inserts
+        // or removes bars renumbers everything after it, so breaking at the old
+        // number puts a different bar at the head of the line — the line
+        // reflowing under a reader who did not ask it to.
+        //
+        // One bar inserted before the reading's bar 2, so that bar is now the
+        // merge's bar 3.
+        expect(lineStartsInMerge([0, 2, 4], [0, 1, -1, 2, 3, 4])).toEqual([0, 3, 5]);
+    });
+
+    it('drops a line whose first bar a decision removed', () => {
+        // Breaking at whatever now sits at that number would begin the line in
+        // the wrong place; one line too few is the smaller lie.
+        expect(lineStartsInMerge([0, 2, 4], [0, 1, 4])).toEqual([0, 2]);
+    });
+
+    it('leaves the starts alone before there is a merged document', () => {
+        // Until one is saved the merged score *is* the reading, so its bars are
+        // already numbered the way the starts expect.
+        expect(lineStartsInMerge([0, 2, 4], undefined)).toEqual([0, 2, 4]);
     });
 });
 
@@ -337,8 +365,11 @@ describe('the difference navigator', () => {
             onlyBlockIndex: 0,
         });
 
-        const box = await screen.findByTestId('scan-difference-box');
-        expect(box).toHaveStyle({ left: '25%', width: '50%' });
+        // Once above the first reading and once below the second, so each
+        // reading has the page it was read from next to it.
+        const boxes = await screen.findAllByTestId('scan-difference-box');
+        expect(boxes).toHaveLength(2);
+        expect(boxes[0]).toHaveStyle({ left: '25%', width: '50%' });
     });
 
     it('says a scan crop is stale rather than showing a broken image', async () => {
@@ -353,10 +384,11 @@ describe('the difference navigator', () => {
         const crop = await screen.findByAltText('Scan of system 1');
         fireEvent.error(crop);
 
-        expect(await screen.findByRole('alert')).toHaveTextContent(
-            /This scan crop is no longer current/,
-        );
+        // Both copies go: it is one crop, shown twice.
+        const alerts = await screen.findAllByRole('alert');
+        expect(alerts[0]).toHaveTextContent(/This scan crop is no longer current/);
         expect(screen.queryByAltText('Scan of system 1')).toBeNull();
+        expect(screen.queryByAltText('Scan of system 1, repeated')).toBeNull();
     });
 });
 
