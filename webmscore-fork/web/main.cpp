@@ -1591,6 +1591,79 @@ WasmRes _measureSignatures(uintptr_t score_ptr, int partIndex, int excerptId)
     return WasmRes(doc.toJson(QJsonDocument::Compact));
 }
 
+/**
+ * Every measure whose actual length differs from its time signature.
+ *
+ * MuseScore marks these with a small plus in the corner, and a recognition
+ * engine produces a great many of them: on one Klengel page eighteen of
+ * fifty-one bars held something other than the 2/4 they were written in, three
+ * beats being the commonest. The mark tells a reader that something is wrong
+ * but not what, and only the engine knows both numbers, so it reports them.
+ *
+ * `actual` and `nominal` are strings in the same `n/d` form `measureSignature`
+ * uses, so a caller can show them without knowing how ticks work.
+ */
+WasmRes _irregularMeasures(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    QJsonArray irregular;
+    int index = 0;
+    for (auto* measure = score->firstMeasureMM(); measure; measure = measure->nextMeasureMM()) {
+        const engraving::Fraction actual = measure->ticks();
+        const engraving::Fraction nominal = measure->timesig();
+        if (actual != nominal) {
+            QJsonObject entry;
+            entry["index"] = index;
+            entry["number"] = QString::fromStdString(measure->no() >= 0
+                ? std::to_string(measure->no() + 1)
+                : std::string("?"));
+            entry["actual"] = QString::fromStdString(fractionToString(actual));
+            entry["nominal"] = QString::fromStdString(fractionToString(nominal));
+            entry["irregular"] = measure->irregular();
+            irregular.append(entry);
+        }
+        ++index;
+    }
+    const QJsonDocument doc(irregular);
+    return WasmRes(doc.toJson(QJsonDocument::Compact));
+}
+
+/**
+ * Make a measure as long as its time signature says it is.
+ *
+ * The same thing Measure Properties does when its actual duration is set back
+ * to the nominal one: `adjustToLen` is what that dialog calls. A bar the engine
+ * read as three beats of a two-beat piece is not a judgement anyone can make
+ * from the notes alone — it is the reviewer looking at the scan who knows —
+ * which is why this is a button rather than something applied on import.
+ *
+ * The pickup flag goes with it. A measure that is now exactly its time
+ * signature is not irregular, and leaving the flag set would keep it out of the
+ * bar numbering for no reason.
+ */
+bool _setMeasureLengthToTimeSignature(uintptr_t score_ptr, int measureIndex, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    auto* measure = measureAtIndex(score, measureIndex);
+    if (!measure) {
+        LOGW() << "setMeasureLengthToTimeSignature: invalid measure index " << measureIndex;
+        return false;
+    }
+
+    const engraving::Fraction nominal = measure->timesig();
+    if (measure->ticks() == nominal && !measure->irregular()) {
+        return true;
+    }
+
+    score->startCmd();
+    measure->adjustToLen(nominal);
+    if (measure->irregular()) {
+        measure->undoChangeProperty(engraving::Pid::IRREGULAR, false);
+    }
+    score->endCmd();
+    return true;
+}
+
 WasmRes _measureLineBreaks(uintptr_t score_ptr, int excerptId)
 {
     MainScore score(score_ptr, excerptId);
@@ -7903,6 +7976,16 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     bool setMeasureSpacer(uintptr_t score_ptr, int measureIndex, int staffIdx, double gapSpatium, int excerptId = -1) {
         return _setMeasureSpacer(score_ptr, measureIndex, staffIdx, gapSpatium, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    WasmResBytes irregularMeasures(uintptr_t score_ptr, int excerptId = -1) {
+        return _irregularMeasures(score_ptr, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    bool setMeasureLengthToTimeSignature(uintptr_t score_ptr, int measureIndex, int excerptId = -1) {
+        return _setMeasureLengthToTimeSignature(score_ptr, measureIndex, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

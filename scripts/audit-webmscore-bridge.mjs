@@ -36,6 +36,27 @@ const parseNativeExports = (source) => {
 };
 
 /**
+ * Exports that return the `WasmRes` struct by value instead of `WasmResBytes`.
+ *
+ * `WasmRes` is a non-trivial struct with an implicit conversion to a pointer.
+ * Returning it by value from an `extern "C"` export gives the function a hidden
+ * struct-return parameter in slot 0, so every argument the caller passes lands
+ * one slot late: `irregularMeasures` was built on a score pointer of -1 and
+ * spun forever inside the worker. Nothing reports it — the promise simply never
+ * settles, the pane stays empty, and every layer above it looks healthy.
+ *
+ * All 35 sibling exports return `WasmResBytes` and the conversion happens on
+ * the way out, which is what this enforces.
+ */
+const parseStructReturningExports = (source) => {
+    const blockStart = source.indexOf('extern "C" {');
+    if (blockStart < 0) return [];
+    return [...source.slice(blockStart).matchAll(
+        /EMSCRIPTEN_KEEPALIVE\s*\n\s*WasmRes\s+(\w+)\s*\(/g,
+    )].map((match) => match[1]);
+};
+
+/**
  * Literal RPC target names the worker helper actually dispatches. Matches any
  * receiver, not just `this`: the module-level handshake calls `instance.rpc('ready')`,
  * `instance.rpc('load', ...)` and `instance.rpc('setLogLevel', ...)`.
@@ -85,6 +106,14 @@ export function analyzeBridge(sources, manifest) {
     const workerMethods = parseClassMethods(sources.worker);
     const rpcTargets = parseRpcTargets(sources.worker);
     const scoreMembers = parseScoreInterface(sources.typescript);
+
+    for (const name of parseStructReturningExports(sources.native)) {
+        fail(
+            'native-struct-return',
+            `${name} returns WasmRes by value; declare it WasmResBytes or its `
+            + 'arguments arrive one slot late and the call never returns',
+        );
+    }
 
     if (!native) fail('layer-unparseable', 'no extern "C" block found in the native layer');
     if (!scoreMembers) fail('layer-unparseable', 'no exported Score interface found in the TypeScript layer');

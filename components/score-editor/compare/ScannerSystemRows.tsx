@@ -1,7 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { loadWebMscore, type Positions, type Score } from '@/lib/webmscore-loader';
+import {
+    loadWebMscore,
+    type IrregularMeasure,
+    type Positions,
+    type Score,
+} from '@/lib/webmscore-loader';
 import { routeCompareKeyboardShortcut } from './compare-keyboard-policy';
 import type { CompareSide, CompareTransportState } from './compare-types';
 import type { CompareTransport } from './useCompareTransport';
@@ -435,6 +440,31 @@ export function withSystemSpacing(xml: string): string {
     const anchor = after[after.length - 1];
     container.insertBefore(layout, anchor ? anchor.nextSibling : container.firstChild);
     return new XMLSerializer().serializeToString(doc);
+}
+
+/** `n/d` as a number, for comparing a bar's length against its time signature. */
+export function fractionValue(value: string): number {
+    const [numerator, denominator] = String(value).split('/');
+    const top = Number(numerator);
+    const bottom = Number(denominator);
+    return Number.isFinite(top) && Number.isFinite(bottom) && bottom !== 0 ? top / bottom : NaN;
+}
+
+/**
+ * Bars holding more than their time signature allows.
+ *
+ * Only the over-full ones. A bar holding *less* is very often right: a pickup
+ * is short by definition, and so is the last bar of a piece that answers one.
+ * Padding those out would be inventing rests where the music ends. A bar
+ * holding more has no such reading — the engine put more into it than the time
+ * signature has room for, which is a mistake every time.
+ */
+export function overfullMeasures(measures: readonly IrregularMeasure[]): IrregularMeasure[] {
+    return measures.filter((measure) => {
+        const actual = fractionValue(measure.actual);
+        const nominal = fractionValue(measure.nominal);
+        return Number.isFinite(actual) && Number.isFinite(nominal) && actual > nominal;
+    });
 }
 
 /** Draw an already-loaded score; used for the merged document, which is live. */
@@ -1205,6 +1235,67 @@ export function ScannerSystemRows({
         onMergedScoreChange?.(mergedScore);
     }, [mergedScore, onMergedScoreChange]);
 
+    /*
+     * Which merged bars hold something other than their time signature.
+     *
+     * MuseScore marks them with a small plus in the corner, which says that
+     * something is wrong but not what. On one Klengel page eighteen of
+     * fifty-one bars held something other than the 2/4 they were written in —
+     * three beats being the commonest — and a reviewer had no way to find them
+     * except by hunting for the mark. The engine knows both lengths, so it is
+     * asked for them, after every edit because an edit can create or resolve
+     * one.
+     */
+    const [irregular, setIrregular] = useState<IrregularMeasure[]>([]);
+    useEffect(() => {
+        if (!mergedScore?.irregularMeasures) {
+            setIrregular([]);
+            return;
+        }
+        let cancelled = false;
+        void (async () => {
+            try {
+                const found = await mergedScore.irregularMeasures!();
+                if (!cancelled) setIrregular(Array.isArray(found) ? found : []);
+            } catch {
+                // A build without the export loses the warning and nothing else.
+                if (!cancelled) setIrregular([]);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [mergedScore, mergedRevision]);
+
+    const fixMeasureLength = useCallback(
+        (measureIndex: number) => {
+            void mutateMerged(`set bar ${measureIndex + 1} to its time signature`, async (target) => {
+                await target.setMeasureLengthToTimeSignature?.(measureIndex);
+            });
+        },
+        [mutateMerged],
+    );
+
+    /*
+     * Every over-full bar at once, because they are never right.
+     *
+     * A page of them is common — eighteen of fifty-one on one Klengel page —
+     * and fixing them one at a time is a chore with no judgement in it. The
+     * under-full ones are excluded on purpose: a pickup is short by definition,
+     * and padding it out would invent rests where the music does not start yet.
+     * Those keep their own button, for a reviewer who has looked.
+     */
+    const overfull = useMemo(() => overfullMeasures(irregular), [irregular]);
+    const fixAllOverfull = useCallback(() => {
+        if (overfull.length === 0) return;
+        void mutateMerged(`set ${overfull.length} over-full bars to their time signature`, async (target) => {
+            // Descending, so an earlier fix cannot renumber a later target.
+            for (const bar of [...overfull].sort((left, right) => right.index - left.index)) {
+                await target.setMeasureLengthToTimeSignature?.(bar.index);
+            }
+        });
+    }, [mutateMerged, overfull]);
+
     // Re-render the merged rows after every edit.
     useEffect(() => {
         if (!mergedScore) {
@@ -1674,6 +1765,19 @@ export function ScannerSystemRows({
                         Neither engine is the score. Only the merged pane can be edited; the engine
                         panes are the evidence it is judged against.
                     </span>
+                    {overfull.length > 0 && (
+                        <button
+                            type="button"
+                            data-testid="btn-fix-all-overfull"
+                            disabled={merged.busy}
+                            onClick={fixAllOverfull}
+                            title="Set every bar holding more than its time signature back to it, as Measure Properties would. Short bars are left alone: a pickup is short on purpose."
+                            className="rounded border border-amber-500 bg-white px-2 py-1 font-medium text-amber-900 hover:bg-amber-50 disabled:opacity-50"
+                        >
+                            correct {overfull.length} over-full bar
+                            {overfull.length === 1 ? '' : 's'}
+                        </button>
+                    )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -1844,6 +1948,9 @@ export function ScannerSystemRows({
                         : previewRegion?.rightMeasureIndexes) || [],
                 );
                 const droppedFromLine = mergedIndexes(system).length - mergedWindow.length;
+                // Only the bars this row is showing; the rest belong to other rows.
+                const onThisRow = new Set(mergedWindow);
+                const rowIrregular = irregular.filter((bar) => onThisRow.has(bar.index));
                 const highlightsFor = (
                     rendered: RenderedSide | null,
                     pick: (difference: ScannerSymbolDifference) => {
@@ -1950,6 +2057,36 @@ export function ScannerSystemRows({
                             <div>
                                 <div className="mb-1 flex items-baseline gap-2 text-[11px] uppercase tracking-wide text-cyan-800">
                                     <span className="font-semibold">Merged</span>
+                                    {rowIrregular.length > 0 && (
+                                        /*
+                                            Said on the row that holds the bar,
+                                            not in a list somewhere else: the
+                                            reviewer is looking at this line,
+                                            and the fix is for one bar of it.
+                                        */
+                                        <span className="flex flex-wrap items-center gap-1 normal-case tracking-normal">
+                                            {rowIrregular.map((bar) => (
+                                                <span
+                                                    key={bar.index}
+                                                    className="flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-1.5 py-0.5 text-amber-900"
+                                                    data-testid="irregular-bar"
+                                                >
+                                                    bar {bar.number} holds {bar.actual}, not{' '}
+                                                    {bar.nominal}
+                                                    <button
+                                                        type="button"
+                                                        data-testid={`btn-fix-bar-${bar.index}`}
+                                                        disabled={merged.busy}
+                                                        onClick={() => fixMeasureLength(bar.index)}
+                                                        title={`Set bar ${bar.number} to ${bar.nominal}, as Measure Properties would`}
+                                                        className="rounded border border-amber-500 bg-white px-1 py-0.5 font-medium hover:bg-amber-100 disabled:opacity-50"
+                                                    >
+                                                        make it {bar.nominal}
+                                                    </button>
+                                                </span>
+                                            ))}
+                                        </span>
+                                    )}
                                     {droppedFromLine > 0 && (
                                         <span
                                             className="normal-case tracking-normal text-gray-500"

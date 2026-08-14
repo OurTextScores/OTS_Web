@@ -474,6 +474,38 @@ class WebMscore {
      * Get line break flags for each measure in the score.
      * @returns {Promise<boolean[]>}
      */
+    /**
+     * Measures whose actual length differs from their time signature.
+     *
+     * MuseScore marks these with a small plus in the corner; this says what the
+     * two lengths are, which the mark alone does not.
+     * @returns {Promise<Array<{ index: number; number: string; actual: string; nominal: string; irregular: boolean }>>}
+     */
+    async irregularMeasures() {
+        const dataptr = Module.ccall('irregularMeasures',
+            'number',
+            ['number', 'number'],
+            [this.scoreptr, this.excerptId]
+        )
+        return JSON.parse(WasmRes.readText(dataptr))
+    }
+
+    /**
+     * Make one measure as long as its time signature says it is.
+     *
+     * The same operation as setting the actual duration back to the nominal one
+     * in Measure Properties.
+     * @param {number} measureIndex
+     * @returns {Promise<boolean>}
+     */
+    async setMeasureLengthToTimeSignature(measureIndex) {
+        return !!Module.ccall('setMeasureLengthToTimeSignature',
+            'boolean',
+            ['number', 'number', 'number'],
+            [this.scoreptr, measureIndex, this.excerptId]
+        )
+    }
+
     async measureLineBreaks() {
         const dataptr = Module.ccall('measureLineBreaks', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
         return JSON.parse(WasmRes.readText(dataptr))

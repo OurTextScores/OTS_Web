@@ -23,6 +23,17 @@ export interface StaffSystemBand {
     height: number;
 }
 
+/** A measure MuseScore considers irregular, and by how much. */
+export interface IrregularMeasure {
+    index: number;
+    number: string;
+    /** `n/d`, the length the measure actually holds. */
+    actual: string;
+    /** `n/d`, the time signature in force there. */
+    nominal: string;
+    irregular: boolean;
+}
+
 export interface Positions {
     elements: Array<{
         id: number;
@@ -121,6 +132,13 @@ export interface Score {
     measureSignatureAt?: (partIndex: number, measureIndex: number) => Promise<string> | string;
     measureSignatures?: (partIndex: number) => Promise<string[]> | string[];
     measureLineBreaks?: () => Promise<boolean[]> | boolean[];
+    /**
+     * Measures whose actual length differs from their time signature — what
+     * MuseScore marks with a small plus, with both lengths named.
+     */
+    irregularMeasures?: () => Promise<IrregularMeasure[]> | IrregularMeasure[];
+    /** Set one measure's actual length back to its time signature. */
+    setMeasureLengthToTimeSignature?: (measureIndex: number) => Promise<boolean> | boolean;
     setMeasureLineBreaks?: (breaks: boolean[]) => Promise<boolean> | boolean;
     /**
      * Optional mutation/undo surface exposed by custom webmscore builds.

@@ -11,6 +11,7 @@ vi.mock('../lib/webmscore-loader', async (importOriginal) => ({
 
 import {
     engravedRowWindow,
+    overfullMeasures,
     focusedMeasureIndexes,
     lineStartsInMerge,
     placeUnderMerged,
@@ -250,6 +251,83 @@ describe('clicking the merged pane', () => {
 
         await userEvent.click(await screen.findByTestId('btn-merged-note-input'));
         await waitFor(() => expect(order).toEqual(['from-selection', 'note-entry']));
+    });
+});
+
+describe('a bar that holds the wrong amount of music', () => {
+    beforeEach(() => {
+        mocked.loadWebMscore.mockReset();
+        vi.unstubAllGlobals();
+    });
+
+    it('says what the bar holds, and offers to make it the time signature', async () => {
+        // MuseScore marks these with a small plus in the corner, which says
+        // something is wrong but not what. On one Klengel page eighteen of
+        // fifty-one bars held something other than the 2/4 they were written
+        // in, and a reviewer had no way to find them except hunting for marks.
+        const calls: any[] = [];
+        const setMeasureLengthToTimeSignature = vi.fn(async () => true);
+        renderRows([grounded], calls, {
+            score: {
+                irregularMeasures: vi.fn(async () => [
+                    { index: 0, number: '1', actual: '1/8', nominal: '2/4', irregular: false },
+                ]),
+                setMeasureLengthToTimeSignature,
+            },
+        });
+
+        const warning = await screen.findByTestId('irregular-bar');
+        expect(warning.textContent).toContain('bar 1 holds 1/8, not 2/4');
+
+        await userEvent.click(screen.getByTestId('btn-fix-bar-0'));
+        await waitFor(() => expect(setMeasureLengthToTimeSignature).toHaveBeenCalledWith(0));
+    });
+
+    it('corrects every over-full bar at once, and leaves short ones alone', async () => {
+        // A pickup is short by definition, and so is the last bar of a piece
+        // that answers one; padding those out would invent rests where the
+        // music does not start yet. A bar holding *more* than its time
+        // signature has no such reading.
+        expect(
+            overfullMeasures([
+                { index: 0, number: '1', actual: '1/8', nominal: '2/4', irregular: false },
+                { index: 4, number: '5', actual: '3/4', nominal: '2/4', irregular: false },
+                { index: 9, number: '10', actual: '2/4', nominal: '2/4', irregular: true },
+            ]).map((bar) => bar.number),
+        ).toEqual(['5']);
+
+        const calls: any[] = [];
+        const setMeasureLengthToTimeSignature = vi.fn(async () => true);
+        renderRows([grounded], calls, {
+            score: {
+                irregularMeasures: vi.fn(async () => [
+                    { index: 0, number: '1', actual: '1/8', nominal: '2/4', irregular: false },
+                    { index: 2, number: '3', actual: '3/4', nominal: '2/4', irregular: false },
+                    { index: 5, number: '6', actual: '4/4', nominal: '2/4', irregular: false },
+                ]),
+                setMeasureLengthToTimeSignature,
+            },
+        });
+
+        const all = await screen.findByTestId('btn-fix-all-overfull');
+        expect(all.textContent).toContain('2 over-full bars');
+
+        await userEvent.click(all);
+        // Descending, so an earlier fix cannot renumber a later target, and the
+        // short bar 1 is not touched.
+        await waitFor(() =>
+            expect(setMeasureLengthToTimeSignature.mock.calls.map((call) => call[0])).toEqual([5, 2]),
+        );
+    });
+
+    it('says nothing about bars that hold what they should', async () => {
+        const calls: any[] = [];
+        renderRows([grounded], calls, {
+            score: { irregularMeasures: vi.fn(async () => []) },
+        });
+
+        await screen.findByTestId('merged-system-pane');
+        expect(screen.queryByTestId('irregular-bar')).toBeNull();
     });
 });
 

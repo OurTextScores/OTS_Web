@@ -386,6 +386,19 @@ class WebMscoreW {
      * Get line break flags for each measure in the score.
      * @returns {Promise<boolean[]>}
      */
+    /** @returns {Promise<Array<{ index: number; number: string; actual: string; nominal: string; irregular: boolean }>>} */
+    irregularMeasures() {
+        return this.rpc('irregularMeasures')
+    }
+
+    /**
+     * @param {number} measureIndex
+     * @returns {Promise<boolean>}
+     */
+    setMeasureLengthToTimeSignature(measureIndex) {
+        return this.rpc('setMeasureLengthToTimeSignature', [measureIndex])
+    }
+
     measureLineBreaks() {
         return this.rpc('measureLineBreaks')
     }
