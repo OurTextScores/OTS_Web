@@ -30,9 +30,13 @@ export type MergedScoreState = {
      */
     decisions?: Array<{
         blockIndex?: number;
+        stablePartKey?: string;
         engineId?: string;
         markingsOnly?: 'dynamics' | 'lyrics';
+        flagged?: boolean;
+        measureIndexes?: number[];
     }>;
+    editedMeasures?: Array<{ measureIndex: number; stablePartKey?: string }>;
     /**
      * Where each merged bar came from, by position.
      *
@@ -41,10 +45,19 @@ export type MergedScoreState = {
      * the engine reading has to be followed through this to stay on the bar it
      * meant.
      */
-    measureMap?: number[];
+    measureMap?: Array<number | null>;
+    measureMaps?: Record<string, Array<number | null>>;
     url: string;
     musicXmlUrl: string;
 };
+
+/**
+ * How long to wait for the reviewer to stop before writing the document.
+ *
+ * Long enough that a run of edits is one save, short enough that stepping away
+ * from the keyboard has already kept the work.
+ */
+const AUTOSAVE_QUIET_MS = 900;
 
 /** What the scanner's merged-score route parses; see its controller. */
 const MUSICXML_CONTENT_TYPE = 'application/vnd.recordare.musicxml+xml';
@@ -162,8 +175,33 @@ export function useMergedScoreDocument({
     const [revision, setRevision] = useState(0);
     const [baselineMeasures, setBaselineMeasures] = useState(0);
     const scoreRef = useRef<Score | null>(null);
+    const resolveUrlRef = useRef(resolveUrl);
+    resolveUrlRef.current = resolveUrl;
+    const prepareRef = useRef(prepare);
+    prepareRef.current = prepare;
+    const [editedMeasures, setEditedMeasures] = useState(
+        state?.editedMeasures || [],
+    );
+    const editedMeasuresRef = useRef(state?.editedMeasures || []);
 
     const current = saved ?? state;
+    const currentRef = useRef(current);
+    currentRef.current = current;
+
+    const acceptEditedMeasures = useCallback(
+        (entries: Array<{ measureIndex: number; stablePartKey?: string }>) => {
+            editedMeasuresRef.current = entries;
+            setEditedMeasures(entries);
+        },
+        [],
+    );
+
+    // The regions document commonly arrives after this hook's first render.
+    // Keep persisted exact-bar provenance in step with it unless the reviewer
+    // currently has unsaved local additions.
+    useEffect(() => {
+        if (!dirty) acceptEditedMeasures(current?.editedMeasures || []);
+    }, [acceptEditedMeasures, current?.editedMeasures, current?.revision, dirty]);
 
     const destroy = useCallback(() => {
         const existing = scoreRef.current;
@@ -188,7 +226,7 @@ export function useMergedScoreDocument({
         try {
             let persistedXml: string | null = null;
             if (persisted) {
-                const response = await fetch(resolveUrl(persisted.musicXmlUrl), {
+                const response = await fetch(resolveUrlRef.current(persisted.musicXmlUrl), {
                     cache: 'no-store',
                 });
                 if (!response.ok) {
@@ -196,17 +234,14 @@ export function useMergedScoreDocument({
                 }
                 persistedXml = await response.text();
             }
-            const input = prepare(persistedXml, target);
+            const input = prepareRef.current(persistedXml, target);
             if (!input) {
                 destroy();
                 setScore(null);
                 return;
             }
             const WebMscore = await loadWebMscore();
-            const loaded = await (WebMscore as any).load(
-                'xml',
-                new TextEncoder().encode(input.xml),
-            );
+            const loaded = await WebMscore.load('xml', new TextEncoder().encode(input.xml));
             if (!loaded) throw new Error('The merged score could not be laid out.');
             destroy();
             scoreRef.current = loaded;
@@ -219,9 +254,19 @@ export function useMergedScoreDocument({
         } finally {
             setLoading(false);
         }
-    }, [destroy, prepare, resolveUrl]);
+    }, [destroy]);
 
-    const load = useCallback(() => loadState(current), [current, loadState]);
+    /**
+     * Load whatever revision is current when the caller acts.
+     *
+     * Keeping `current` in this callback's dependency list made the row view's
+     * initial-load effect run again after every Take: `setSaved(next)` changed
+     * the callback identity, the effect fetched the merged document again, and
+     * a slower prior load could overwrite the revision the Take had just
+     * installed. The ref keeps the operation current without turning a state
+     * transition into another initial load.
+     */
+    const load = useCallback(() => loadState(currentRef.current), [loadState]);
 
     /**
      * Run one edit against the merged score.
@@ -234,17 +279,54 @@ export function useMergedScoreDocument({
         async (
             label: string,
             action: (target: Score) => Promise<unknown> | unknown,
-            options?: { skipRelayout?: boolean; mutates?: boolean },
+            options?: {
+                skipRelayout?: boolean;
+                mutates?: boolean;
+                stablePartKey?: string;
+                measureIndexes?: number[];
+            },
         ): Promise<boolean> => {
             const target = scoreRef.current;
             if (!target || busy || saving) return false;
             setBusy(true);
             try {
+                const before =
+                    options?.mutates === false || options?.measureIndexes
+                        ? null
+                        : await Promise.resolve(target.selectionMeasureRange?.()).catch(() => null);
                 await action(target);
                 if (!options?.skipRelayout && target.relayout) {
                     await target.relayout();
                 }
-                if (options?.mutates !== false) setDirty(true);
+                if (options?.mutates !== false) {
+                    const after = await Promise.resolve(target.selectionMeasureRange?.()).catch(
+                        () => null,
+                    );
+                    const indexes = new Set(options?.measureIndexes || []);
+                    for (const range of options?.measureIndexes ? [] : [before, after]) {
+                        if (!range) continue;
+                        for (
+                            let index = range.startMeasureIndex;
+                            index <= range.endMeasureIndex;
+                            index += 1
+                        ) {
+                            indexes.add(index);
+                        }
+                    }
+                    const next = new Map(
+                        editedMeasuresRef.current.map((entry) => [
+                            `${entry.stablePartKey || ''}:${entry.measureIndex}`,
+                            entry,
+                        ]),
+                    );
+                    for (const measureIndex of indexes) {
+                        if (!Number.isInteger(measureIndex) || measureIndex < 0) continue;
+                        const entry = { measureIndex, stablePartKey: options?.stablePartKey };
+                        next.set(`${entry.stablePartKey || ''}:${measureIndex}`, entry);
+                    }
+                    acceptEditedMeasures([...next.values()]);
+                    setDirty(true);
+                }
                 setRevision((value) => value + 1);
                 return true;
             } catch (err) {
@@ -254,7 +336,7 @@ export function useMergedScoreDocument({
                 setBusy(false);
             }
         },
-        [busy, saving],
+        [acceptEditedMeasures, busy, saving],
     );
 
     /** Export what the reviewer sees, minus the row view's imposed breaks. */
@@ -285,6 +367,7 @@ export function useMergedScoreDocument({
                     // bar means *both* engines were wrong there, and phase E
                     // must never file that as an engine win.
                     edited: String(dirty || current.edited),
+                    editedMeasures: JSON.stringify(editedMeasuresRef.current),
                     acceptStale: String(Boolean(options?.acceptStale)),
                 });
                 const response = await fetch(`${resolveUrl(current.url)}?${query}`, {
@@ -303,6 +386,7 @@ export function useMergedScoreDocument({
                 }
                 const next = { ...current, ...body } as MergedScoreState;
                 setSaved(next);
+                acceptEditedMeasures(next.editedMeasures || editedMeasuresRef.current);
                 setDirty(false);
                 return { ok: true, state: next };
             } catch (err) {
@@ -313,7 +397,7 @@ export function useMergedScoreDocument({
                 setSaving(false);
             }
         },
-        [current, dirty, exportXml, resolveUrl, sourceEngineId],
+        [acceptEditedMeasures, current, dirty, exportXml, resolveUrl, sourceEngineId],
     );
 
     /**
@@ -336,12 +420,27 @@ export function useMergedScoreDocument({
             kind?: 'dynamics' | 'lyrics';
         }): Promise<MergedTakeOutcome> => {
             if (!current) return { ok: false, error: 'This page cannot carry a merged score.' };
+            // A decision is applied by the scanner to its persisted document.
+            // Flush the live editor first or the response reload below replaces
+            // an edit made during the debounce window with the older server
+            // revision, silently losing the reviewer's hand work.
+            let decisionState = current;
+            if (dirty) {
+                // Cancel the debounce immediately; otherwise a click at the end
+                // of its quiet window can start two saves against one revision.
+                setSaving(true);
+                const savedEdit = await save();
+                if (!savedEdit.ok) {
+                    return { ok: false, error: savedEdit.error };
+                }
+                decisionState = savedEdit.state;
+            }
             setSaving(true);
             setError(null);
             try {
                 const path = input.kind
-                    ? `${current.url}/decisions/markings`
-                    : `${current.url}/decisions`;
+                    ? `${decisionState.url}/decisions/markings`
+                    : `${decisionState.url}/decisions`;
                 const response = await fetch(resolveUrl(path), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -351,7 +450,7 @@ export function useMergedScoreDocument({
                         engineId: input.engineId,
                         baseEngine: input.baseEngineId,
                         candidateEngine: input.candidateEngineId,
-                        revision: current.revision,
+                        revision: decisionState.revision,
                         ...(input.kind ? { kind: input.kind } : {}),
                     }),
                 });
@@ -367,8 +466,9 @@ export function useMergedScoreDocument({
                     setError(message);
                     return { ok: false, error: message, refusals: body?.refusals };
                 }
-                const next = { ...current, ...body } as MergedScoreState;
+                const next = { ...decisionState, ...body } as MergedScoreState;
                 setSaved(next);
+                acceptEditedMeasures(next.editedMeasures || []);
                 setDirty(false);
                 /*
                  * Show what was taken.
@@ -390,7 +490,209 @@ export function useMergedScoreDocument({
                 setSaving(false);
             }
         },
-        [current, resolveUrl],
+        [acceptEditedMeasures, current, dirty, loadState, resolveUrl, save],
+    );
+
+    /** Apply a page/part bulk choice as ordered block decisions, reloading once. */
+    const takeMany = useCallback(
+        async (
+            inputs: Array<{
+                blockIndex: number;
+                contentSignature: string;
+                engineId: string;
+                baseEngineId: string;
+                candidateEngineId: string;
+            }>,
+        ): Promise<MergedTakeOutcome> => {
+            if (!current) return { ok: false, error: 'This page cannot carry a merged score.' };
+            if (inputs.length === 0) {
+                return { ok: true, state: current, repairs: [] };
+            }
+            let decisionState = current;
+            if (dirty) {
+                setSaving(true);
+                const savedEdit = await save();
+                if (!savedEdit.ok) return { ok: false, error: savedEdit.error };
+                decisionState = savedEdit.state;
+            }
+            setSaving(true);
+            setError(null);
+            const repairs: Array<{ code: string; detail: string }> = [];
+            let completed = 0;
+            try {
+                for (const input of inputs) {
+                    const response = await fetch(resolveUrl(`${decisionState.url}/decisions`), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            blockIndex: input.blockIndex,
+                            contentSignature: input.contentSignature,
+                            engineId: input.engineId,
+                            baseEngine: input.baseEngineId,
+                            candidateEngine: input.candidateEngineId,
+                            revision: decisionState.revision,
+                        }),
+                    });
+                    const body = await response.json().catch(() => null);
+                    if (!response.ok) {
+                        const reason =
+                            typeof body?.message === 'string'
+                                ? body.message
+                                : `A bulk take stopped at difference ${input.blockIndex + 1}`;
+                        const message =
+                            completed > 0
+                                ? `${completed} difference${completed === 1 ? '' : 's'} taken; then stopped: ${reason}`
+                                : reason;
+                        setError(message);
+                        setSaved(decisionState);
+                        acceptEditedMeasures(decisionState.editedMeasures || []);
+                        await loadState(decisionState);
+                        return { ok: false, error: message, refusals: body?.refusals };
+                    }
+                    decisionState = { ...decisionState, ...body } as MergedScoreState;
+                    repairs.push(...(body?.repairs || []));
+                    completed += 1;
+                }
+                setSaved(decisionState);
+                acceptEditedMeasures(decisionState.editedMeasures || []);
+                setDirty(false);
+                await loadState(decisionState);
+                return { ok: true, state: decisionState, repairs };
+            } catch (err) {
+                const reason = err instanceof Error ? err.message : String(err);
+                const message =
+                    completed > 0
+                        ? `${completed} difference${completed === 1 ? '' : 's'} taken; then stopped: ${reason}`
+                        : reason;
+                setError(message);
+                if (completed > 0) {
+                    setSaved(decisionState);
+                    acceptEditedMeasures(decisionState.editedMeasures || []);
+                    setDirty(false);
+                    await loadState(decisionState);
+                }
+                return { ok: false, error: message };
+            } finally {
+                setSaving(false);
+            }
+        },
+        [acceptEditedMeasures, current, dirty, loadState, resolveUrl, save],
+    );
+
+    /** Flag or clear one grounded block without changing its MusicXML. */
+    const flag = useCallback(
+        async (input: {
+            blockIndex: number;
+            contentSignature: string;
+            baseEngineId: string;
+            candidateEngineId: string;
+            flagged: boolean;
+        }): Promise<MergedTakeOutcome> => {
+            if (!current) return { ok: false, error: 'This page cannot carry a merged score.' };
+            let decisionState = current;
+            if (dirty) {
+                setSaving(true);
+                const savedEdit = await save();
+                if (!savedEdit.ok) return { ok: false, error: savedEdit.error };
+                decisionState = savedEdit.state;
+            }
+            setSaving(true);
+            setError(null);
+            try {
+                const response = await fetch(resolveUrl(`${decisionState.url}/decisions/flag`), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        blockIndex: input.blockIndex,
+                        contentSignature: input.contentSignature,
+                        baseEngine: input.baseEngineId,
+                        candidateEngine: input.candidateEngineId,
+                        revision: decisionState.revision,
+                        flagged: input.flagged,
+                    }),
+                });
+                const body = await response.json().catch(() => null);
+                if (!response.ok) {
+                    const message =
+                        typeof body?.message === 'string'
+                            ? body.message
+                            : `That difference could not be ${input.flagged ? 'flagged' : 'cleared'}`;
+                    setError(message);
+                    return { ok: false, error: message };
+                }
+                const next = { ...decisionState, ...body } as MergedScoreState;
+                setSaved(next);
+                acceptEditedMeasures(next.editedMeasures || []);
+                setDirty(false);
+                await loadState(next);
+                return { ok: true, state: next, repairs: [] };
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                setError(message);
+                return { ok: false, error: message };
+            } finally {
+                setSaving(false);
+            }
+        },
+        [acceptEditedMeasures, current, dirty, loadState, resolveUrl, save],
+    );
+
+    /** Persist the wholesale starting reading before any edit or block take. */
+    const chooseSource = useCallback(
+        async (input: {
+            engineId: string;
+            baseEngineId: string;
+            candidateEngineId: string;
+        }): Promise<MergedSaveOutcome> => {
+            if (!current) return { ok: false, error: 'This page cannot carry a merged score.' };
+            if (dirty) {
+                return {
+                    ok: false,
+                    error: 'Save the current hand edit before changing the starting reading.',
+                };
+            }
+            if (current.present) {
+                return {
+                    ok: false,
+                    error: 'This merged score already contains review work; its starting reading cannot be changed.',
+                };
+            }
+            setSaving(true);
+            setError(null);
+            try {
+                const response = await fetch(resolveUrl(`${current.url}/source`), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        engineId: input.engineId,
+                        baseEngine: input.baseEngineId,
+                        candidateEngine: input.candidateEngineId,
+                        revision: current.revision,
+                    }),
+                });
+                const body = await response.json().catch(() => null);
+                if (!response.ok) {
+                    const message =
+                        typeof body?.message === 'string'
+                            ? body.message
+                            : `The starting reading could not be saved (${response.status})`;
+                    setError(message);
+                    return { ok: false, error: message };
+                }
+                const next = { ...current, ...body } as MergedScoreState;
+                setSaved(next);
+                acceptEditedMeasures(next.editedMeasures || []);
+                setDirty(false);
+                return { ok: true, state: next };
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                setError(message);
+                return { ok: false, error: message };
+            } finally {
+                setSaving(false);
+            }
+        },
+        [acceptEditedMeasures, current, dirty, resolveUrl],
     );
 
     const discard = useCallback(async (): Promise<MergedSaveOutcome> => {
@@ -412,12 +714,54 @@ export function useMergedScoreDocument({
             }
             const next = { ...current, ...body } as MergedScoreState;
             setSaved(next);
+            acceptEditedMeasures([]);
             setDirty(false);
             return { ok: true, state: next };
         } finally {
             setSaving(false);
         }
-    }, [current, resolveUrl]);
+    }, [acceptEditedMeasures, current, resolveUrl]);
+
+    /*
+     * Every change is kept, without being asked to keep it.
+     *
+     * A take was already written to the page the moment it was made, so the
+     * "save" button only ever governed hand edits — which meant the two halves
+     * of the same review were persisted by different rules, and the half that
+     * needed a button was the half a reviewer was most likely to lose. There is
+     * nothing a reviewer would want to do to this document that they would not
+     * want kept.
+     *
+     * Debounced, because note input produces a mutation per note and each save
+     * is a whole document. It waits for a pause rather than saving per
+     * keystroke; the window is short enough that a reviewer moving on to the
+     * next bar has already had it written.
+     *
+     * Staleness is not resolved here. When the readings have moved under a
+     * merge the server refuses, and it stays refused until the reviewer says
+     * which readings they mean — that is a judgement, and the point of saving
+     * without being asked is to remove the clerical work, not the judgement.
+     */
+    useEffect(() => {
+        if (!dirty || saving || busy || !current) return;
+        const timer = setTimeout(() => {
+            void save();
+        }, AUTOSAVE_QUIET_MS);
+        return () => clearTimeout(timer);
+    }, [dirty, saving, busy, current, save]);
+
+    // The debounce removes clerical saves; it must not turn a quick close into
+    // silent data loss. Browsers may ignore custom text, but setting returnValue
+    // still gives the reviewer the standard unsaved-work guard.
+    useEffect(() => {
+        if (!dirty) return;
+        const warn = (event: BeforeUnloadEvent) => {
+            event.preventDefault();
+            event.returnValue = '';
+        };
+        window.addEventListener('beforeunload', warn);
+        return () => window.removeEventListener('beforeunload', warn);
+    }, [dirty]);
 
     return {
         score,
@@ -426,6 +770,7 @@ export function useMergedScoreDocument({
         busy,
         saving,
         dirty,
+        editedMeasures,
         error,
         /** Rises on every render-affecting change; row views key off it. */
         revision,
@@ -434,7 +779,10 @@ export function useMergedScoreDocument({
         mutate,
         exportXml,
         save,
+        chooseSource,
         take,
+        takeMany,
+        flag,
         discard,
         setError,
     };

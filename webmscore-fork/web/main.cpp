@@ -1612,14 +1612,18 @@ WasmRes _irregularMeasures(uintptr_t score_ptr, int excerptId)
         const engraving::Fraction actual = measure->ticks();
         const engraving::Fraction nominal = measure->timesig();
         if (actual != nominal) {
+            const bool pickup = index == 0 && actual < nominal;
             QJsonObject entry;
             entry["index"] = index;
-            entry["number"] = QString::fromStdString(measure->no() >= 0
+            entry["number"] = QString::fromStdString(pickup
+                ? std::string("0")
+                : measure->no() >= 0
                 ? std::to_string(measure->no() + 1)
                 : std::string("?"));
             entry["actual"] = QString::fromStdString(fractionToString(actual));
             entry["nominal"] = QString::fromStdString(fractionToString(nominal));
             entry["irregular"] = measure->irregular();
+            entry["pickup"] = pickup;
             irregular.append(entry);
         }
         ++index;

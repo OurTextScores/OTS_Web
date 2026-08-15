@@ -3,9 +3,9 @@ import {
     buildPartLocalizedChangeReviewBarHighlights,
     buildPartLocalizedChangeReviewHighlights,
     buildPartLocalizedSuppliedHighlights,
-    scoreLoadErrorMessage,
     sortChangeReviewRegionsByMeasure,
-} from '../../components/ScoreEditor';
+} from '../../lib/compare-highlights';
+import { scoreLoadErrorMessage } from '../../components/ScoreEditor';
 
 // Pure exports of ScoreEditor: no component render, no mocks, no globals. Kept apart
 // from the component suites so they stay fast and readable.

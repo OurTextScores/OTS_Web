@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WebMscoreInstance } from '../lib/webmscore-loader';
 
 const mocked = vi.hoisted(() => ({ loadWebMscore: vi.fn() }));
 
@@ -67,12 +68,19 @@ function fakeScore(xml = EXPORTED) {
 }
 
 describe('the merged score contract', () => {
-    let calls: Array<{ url: string; method: string; body?: unknown; headers?: any }>;
+    let calls: Array<{
+        url: string;
+        method: string;
+        body?: BodyInit | null;
+        headers?: HeadersInit;
+    }>;
 
     beforeEach(() => {
         calls = [];
         mocked.loadWebMscore.mockReset();
-        mocked.loadWebMscore.mockResolvedValue({ load: vi.fn(async () => fakeScore()) } as any);
+        mocked.loadWebMscore.mockResolvedValue({
+            load: vi.fn(async () => fakeScore()),
+        } as unknown as WebMscoreInstance);
     });
 
     afterEach(() => vi.unstubAllGlobals());
@@ -80,7 +88,7 @@ describe('the merged score contract', () => {
     const stubFetch = (responder: (url: string, init?: RequestInit) => Response) => {
         vi.stubGlobal(
             'fetch',
-            vi.fn(async (input: any, init?: RequestInit) => {
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
                 const url = String(input);
                 calls.push({ url, method: init?.method || 'GET', body: init?.body, headers: init?.headers });
                 return responder(url, init);
@@ -133,7 +141,7 @@ describe('the merged score contract', () => {
 
         const put = calls.find((call) => call.method === 'PUT');
         expect(put).toBeDefined();
-        expect((put!.headers as any)['Content-Type']).toBe(
+        expect(new Headers(put!.headers).get('Content-Type')).toBe(
             'application/vnd.recordare.musicxml+xml',
         );
         expect(typeof put!.body).toBe('string');
@@ -149,6 +157,43 @@ describe('the merged score contract', () => {
         expect(query.get('sourceEngineId')).toBe('homr');
         expect(query.get('basisSignature')).toBe('scanner-merged-basis-v1:abc');
         expect(query.get('revision')).toBe('0');
+    });
+
+    it('saves the exact matched part and bar touched by hand', async () => {
+        const score = {
+            ...fakeScore(),
+            selectionMeasureRange: vi.fn(async () => ({
+                startMeasureIndex: 0,
+                endMeasureIndex: 0,
+            })),
+        };
+        mocked.loadWebMscore.mockResolvedValue({
+            load: vi.fn(async () => score),
+        } as unknown as WebMscoreInstance);
+        stubFetch(() =>
+            new Response(
+                JSON.stringify({
+                    present: true,
+                    revision: 1,
+                    edited: true,
+                    editedMeasures: [{ stablePartKey: 'part-cello', measureIndex: 0 }],
+                }),
+                { status: 200 },
+            ),
+        );
+        const { result } = render(state());
+        await act(async () => result.current.load());
+        await act(async () => {
+            await result.current.mutate('edit cello', async () => undefined, {
+                stablePartKey: 'part-cello',
+            });
+            await result.current.save();
+        });
+
+        const put = calls.find((call) => call.method === 'PUT')!;
+        expect(JSON.parse(new URL(put.url).searchParams.get('editedMeasures') || '[]')).toEqual([
+            { stablePartKey: 'part-cello', measureIndex: 0 },
+        ]);
     });
 
     it('decodes what the engine returns across a realm boundary', async () => {
@@ -228,6 +273,46 @@ describe('the merged score contract', () => {
         );
         expect(result.current.dirty).toBe(false);
         expect(result.current.state?.edited).toBe(true);
+    });
+
+    it('keeps an edit without being asked to', async () => {
+        // A take is written to the page the moment it is made, so a button that
+        // governed only hand edits persisted the two halves of the same review
+        // by different rules — and the half needing a button was the half a
+        // reviewer was most likely to lose.
+        stubFetch(() =>
+            new Response(JSON.stringify({ present: true, revision: 2, edited: true }), {
+                status: 200,
+            }),
+        );
+        const { result } = render(state());
+        await act(async () => {
+            await result.current.load();
+        });
+        await act(async () => {
+            await result.current.mutate('edit', async () => undefined);
+        });
+        expect(result.current.dirty).toBe(true);
+        expect(calls.some((call) => call.method === 'PUT')).toBe(false);
+
+        // No save() call anywhere: the pause after the edit is what saves it.
+        await waitFor(() => expect(calls.some((call) => call.method === 'PUT')).toBe(true), {
+            timeout: 4000,
+        });
+        await waitFor(() => expect(result.current.dirty).toBe(false));
+    });
+
+    it('does not save a selection, which changed nothing', async () => {
+        stubFetch(() => new Response(XML, { status: 200 }));
+        const { result } = render(state());
+        await act(async () => {
+            await result.current.load();
+        });
+        await act(async () => {
+            await result.current.mutate('select', async () => undefined, { mutates: false });
+        });
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        expect(calls.some((call) => call.method === 'PUT')).toBe(false);
     });
 
     it('does not call a selection an edit', async () => {
@@ -313,6 +398,216 @@ describe('the merged score contract', () => {
             revision: 4,
         });
         expect(result.current.state?.revision).toBe(5);
+    });
+
+    it('flags a grounded block without changing the score in the browser', async () => {
+        stubFetch((_url, init) =>
+            init?.method === 'POST'
+                ? new Response(
+                      JSON.stringify({
+                          present: true,
+                          revision: 5,
+                          decisions: [{ blockIndex: 2, flagged: true, measureIndexes: [0] }],
+                      }),
+                      { status: 200 },
+                  )
+                : new Response(XML, { status: 200 }),
+        );
+        const { result } = render(state({ present: true, revision: 4 }));
+
+        await act(async () => {
+            const outcome = await result.current.flag({
+                blockIndex: 2,
+                contentSignature: 'sig',
+                baseEngineId: 'homr',
+                candidateEngineId: 'transcoda',
+                flagged: true,
+            });
+            expect(outcome.ok).toBe(true);
+        });
+
+        const post = calls.find((call) => call.method === 'POST')!;
+        expect(new URL(post.url).pathname).toBe(
+            '/api/proxy/scanner/jobs/job-1/pages/1/merged/decisions/flag',
+        );
+        expect(JSON.parse(String(post.body))).toMatchObject({ flagged: true, revision: 4 });
+        expect(result.current.state?.decisions?.[0].flagged).toBe(true);
+    });
+
+    it('takes a bulk scope in order and advances the revision for every block', async () => {
+        let revision = 4;
+        stubFetch((_url, init) => {
+            if (init?.method === 'POST') {
+                revision += 1;
+                return new Response(
+                    JSON.stringify({
+                        present: true,
+                        revision,
+                        musicXmlUrl: `../merged/musicxml?revision=${revision}`,
+                        repairs: [],
+                    }),
+                    { status: 200 },
+                );
+            }
+            return new Response(XML, { status: 200 });
+        });
+        const { result } = render(state({ present: true, revision: 4 }));
+
+        await act(async () => {
+            const outcome = await result.current.takeMany(
+                [2, 5].map((blockIndex) => ({
+                    blockIndex,
+                    contentSignature: `sig-${blockIndex}`,
+                    engineId: 'transcoda',
+                    baseEngineId: 'homr',
+                    candidateEngineId: 'transcoda',
+                })),
+            );
+            expect(outcome.ok).toBe(true);
+        });
+
+        const posts = calls.filter((call) => call.method === 'POST');
+        expect(posts.map((call) => JSON.parse(String(call.body)).revision)).toEqual([4, 5]);
+        expect(result.current.state?.revision).toBe(6);
+    });
+
+    it('keeps and reports a successful bulk prefix when the next request fails', async () => {
+        let posts = 0;
+        stubFetch((_url, init) => {
+            if (init?.method === 'POST') {
+                posts += 1;
+                if (posts === 2) throw new Error('connection lost');
+                return new Response(
+                    JSON.stringify({
+                        present: true,
+                        revision: 5,
+                        musicXmlUrl: '../merged/musicxml?revision=5',
+                        repairs: [],
+                    }),
+                    { status: 200 },
+                );
+            }
+            return new Response(XML, { status: 200 });
+        });
+        const { result } = render(state({ present: true, revision: 4 }));
+
+        await act(async () => {
+            const outcome = await result.current.takeMany(
+                [2, 5].map((blockIndex) => ({
+                    blockIndex,
+                    contentSignature: `sig-${blockIndex}`,
+                    engineId: 'transcoda',
+                    baseEngineId: 'homr',
+                    candidateEngineId: 'transcoda',
+                })),
+            );
+            expect(outcome).toMatchObject({
+                ok: false,
+                error: '1 difference taken; then stopped: connection lost',
+            });
+        });
+
+        expect(result.current.state?.revision).toBe(5);
+    });
+
+    it('persists a non-default starting reading before the first decision', async () => {
+        stubFetch((_url, init) =>
+            init?.method === 'POST'
+                ? new Response(
+                      JSON.stringify({
+                          present: true,
+                          revision: 1,
+                          sourceEngineId: 'transcoda',
+                          musicXmlUrl: '../merged/musicxml?revision=1',
+                      }),
+                      { status: 200 },
+                  )
+                : new Response(XML, { status: 200 }),
+        );
+        const { result } = render(state());
+
+        await act(async () => {
+            const outcome = await result.current.chooseSource({
+                engineId: 'transcoda',
+                baseEngineId: 'homr',
+                candidateEngineId: 'transcoda',
+            });
+            expect(outcome.ok).toBe(true);
+        });
+
+        const post = calls.find((call) => call.method === 'POST')!;
+        expect(new URL(post.url).pathname).toBe(
+            '/api/proxy/scanner/jobs/job-1/pages/1/merged/source',
+        );
+        expect(JSON.parse(String(post.body))).toMatchObject({
+            engineId: 'transcoda',
+            baseEngine: 'homr',
+            candidateEngine: 'transcoda',
+            revision: 0,
+        });
+        expect(result.current.state).toMatchObject({
+            present: true,
+            revision: 1,
+            sourceEngineId: 'transcoda',
+        });
+    });
+
+    it('saves a live hand edit before a server-side take reloads the document', async () => {
+        stubFetch((_url, init) => {
+            if (init?.method === 'PUT') {
+                return new Response(
+                    JSON.stringify({
+                        present: true,
+                        revision: 5,
+                        edited: true,
+                        musicXmlUrl: '../merged/musicxml?revision=5',
+                    }),
+                    { status: 200 },
+                );
+            }
+            if (init?.method === 'POST') {
+                return new Response(
+                    JSON.stringify({
+                        present: true,
+                        revision: 6,
+                        repairs: [],
+                        musicXmlUrl: '../merged/musicxml?revision=6',
+                    }),
+                    { status: 200 },
+                );
+            }
+            return new Response(XML, { status: 200 });
+        });
+        const { result } = render(
+            state({
+                present: true,
+                revision: 4,
+                sourceEngineId: 'homr',
+                musicXmlUrl: '../merged/musicxml?revision=4',
+            }),
+        );
+        await act(async () => {
+            await result.current.load();
+        });
+        await act(async () => {
+            await result.current.mutate('edit', async () => undefined);
+        });
+        await act(async () => {
+            const outcome = await result.current.take({
+                blockIndex: 2,
+                contentSignature: 'sig',
+                engineId: 'transcoda',
+                baseEngineId: 'homr',
+                candidateEngineId: 'transcoda',
+            });
+            expect(outcome.ok).toBe(true);
+        });
+
+        const writes = calls.filter((call) => call.method === 'PUT' || call.method === 'POST');
+        expect(writes.map((call) => call.method)).toEqual(['PUT', 'POST']);
+        expect(JSON.parse(String(writes[1].body)).revision).toBe(5);
+        expect(result.current.state).toMatchObject({ revision: 6, edited: true });
+        expect(result.current.dirty).toBe(false);
     });
 
     it('surfaces a refusal with its reasons instead of a bare failure', async () => {

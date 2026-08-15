@@ -27,6 +27,8 @@ export interface StaffSystemBand {
 export interface IrregularMeasure {
     index: number;
     number: string;
+    /** First short measure: displayed as pickup measure 0, not a one-based bar. */
+    pickup?: boolean;
     /** `n/d`, the length the measure actually holds. */
     actual: string;
     /** `n/d`, the time signature in force there. */

@@ -81,6 +81,53 @@ export type ScorePaletteItem = {
     elementType?: 0 | 1 | 2;
 };
 
+export type ScorePaletteMutation = {
+    methodName: string;
+    args: unknown[];
+};
+
+/** The editor command represented by a palette tile. */
+export const scorePaletteMutation = (item: ScorePaletteItem): ScorePaletteMutation | null => {
+    const simple: Partial<Record<PaletteKind, string>> = {
+        clef: 'setClef',
+        dynamic: 'addDynamic',
+        ottava: 'addOttava',
+        trill: 'addTrill',
+        glissando: 'addGlissando',
+        arpeggio: 'addArpeggio',
+        fermata: 'addFermata',
+        breath: 'addBreath',
+        tremolo: 'addTremolo',
+        marker: 'addMarker',
+        jump: 'addJump',
+        notehead: 'setNoteheadGroup',
+        beam: 'setBeamMode',
+        accidental: 'setAccidental',
+        gracenote: 'addGraceNote',
+        hairpin: 'addHairpin',
+        pedal: 'addPedal',
+        keysig: 'setKeySignature',
+        barline: 'setBarLineType',
+        volta: 'addVolta',
+        'repeat-count': 'setRepeatCount',
+    };
+    if (item.kind === 'articulation') {
+        const articulation = articulationOptions[item.subtype];
+        return articulation ? { methodName: 'addArticulation', args: [articulation.symbol] } : null;
+    }
+    if (item.kind === 'timesig') {
+        const [numerator, denominator, timeSigType] = item.args ?? [];
+        if (!numerator || !denominator) return null;
+        return typeof timeSigType === 'number'
+            ? { methodName: 'setTimeSignatureWithType', args: [numerator, denominator, timeSigType] }
+            : { methodName: 'setTimeSignature', args: [numerator, denominator] };
+    }
+    if (item.kind === 'repeat-start') return { methodName: 'toggleRepeatStart', args: [] };
+    if (item.kind === 'repeat-end') return { methodName: 'toggleRepeatEnd', args: [] };
+    const methodName = simple[item.kind];
+    return methodName ? { methodName, args: [item.subtype] } : null;
+};
+
 type OptionInput = { label: string; value: number; symbol?: string; args?: number[] };
 
 const makePaletteItems = (category: PaletteCategory, kind: PaletteKind, options: ReadonlyArray<OptionInput>): ScorePaletteItem[] =>

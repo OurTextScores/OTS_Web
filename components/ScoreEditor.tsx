@@ -17,7 +17,16 @@ import {
     type SynthAudioBatchIterator,
     type WebMscoreInstance,
 } from '../lib/webmscore-loader';
-import { EMPTY_STAFF_BANDS, loadStaffBands, resolvePartBand, type StaffBands } from '../lib/compare-staff-bands';
+import { EMPTY_STAFF_BANDS, loadStaffBands, type StaffBands } from '../lib/compare-staff-bands';
+import {
+    buildPartLocalizedAlignmentHighlights,
+    buildPartLocalizedChangeReviewBarHighlights,
+    buildPartLocalizedChangeReviewHighlights,
+    buildPartLocalizedSuppliedHighlights,
+    localizeMeasureToPart,
+    sortChangeReviewRegionsByMeasure,
+    type SuppliedCompareRegion,
+} from '../lib/compare-highlights';
 import {
     deleteCheckpoint,
     renameCheckpoint,
@@ -31,11 +40,13 @@ import {
 } from '../lib/checkpoints';
 import { type CodeEditorThemeMode } from './CodeMirrorEditor';
 import { asRecord } from '../lib/as-record';
+import { findAiEditProposal, type AiEditProposal } from '../lib/ai-edit-proposal';
+import { fetchJsonOrThrow } from '../lib/fetch-json';
 import { copySelectionToClipboard, pasteClipboardPayload } from '../lib/selection-clipboard';
 import { Toolbar, type MeasureInsertTarget, type HeaderTextTarget } from './Toolbar';
 import { InspectorPanel } from './InspectorPanel';
 import { FloatingPalettes } from './FloatingPalettes';
-import { SCORE_PALETTE_DRAG_MIME, parseScorePaletteItem, type PaletteCategory, type ScorePaletteItem } from './toolbar/palette';
+import { SCORE_PALETTE_DRAG_MIME, parseScorePaletteItem, scorePaletteMutation, type PaletteCategory, type ScorePaletteItem } from './toolbar/palette';
 import { articulationOptions } from './toolbar/constants';
 import { LeftSidebar, type LeftSidebarTab } from './score-editor/LeftSidebar';
 import {
@@ -145,7 +156,7 @@ import { resolveComparePaneStatus } from './score-editor/compare/compare-pane-st
 import { CompareScorePane } from './score-editor/compare/CompareScorePane';
 import {
     ScannerSystemRows,
-    type ScannerSymbolDifference
+    type ScannerSystem,
 } from './score-editor/compare/ScannerSystemRows';
 import type { MergedScoreState } from './score-editor/compare/useMergedScoreDocument';
 import { XmlDiffView } from './score-editor/XmlDiffView';
@@ -166,10 +177,8 @@ import type {
     AiDiffBlockRef,
     BlockReview,
     BlockReviewStatus,
-    ChangeReviewBar,
     ChangeReviewDetail,
     ChangeReviewDiff,
-    ChangeReviewScoreRegion,
     ChangeReviewScoreView,
     ChangeReviewThread,
     CompareBlockComment,
@@ -241,275 +250,6 @@ type CompareViewState = {
     checkpointLabel?: string;
 };
 
-type AiEditProposal = {
-    sourceTool: string;
-    baseXml: string;
-    proposedXml: string;
-    baseScoreSessionId: string | null;
-    baseRevision: number | null;
-    baseContentHash: string;
-    expectedCurrentContentHash: string;
-    baseIdentityHash?: string;
-    expectedCurrentIdentityHash?: string;
-    proposedContentHash?: string;
-    proposedIdentityHash?: string;
-    verification: {
-        level: 'patch_apply' | 'tool_execution' | 'engine_load' | 'render';
-    };
-};
-
-const AI_PROPOSAL_VERIFICATION_LEVELS = new Set(['patch_apply', 'tool_execution', 'engine_load', 'render']);
-
-export function sortChangeReviewRegionsByMeasure(regions: ChangeReviewScoreRegion[]) {
-    return [...regions].sort((a, b) => {
-        const aIndex = a.headMeasureIndex ?? a.baseMeasureIndex ?? Number.MAX_SAFE_INTEGER;
-        const bIndex = b.headMeasureIndex ?? b.baseMeasureIndex ?? Number.MAX_SAFE_INTEGER;
-        return aIndex - bIndex || a.partIndex - b.partIndex;
-    });
-}
-
-/**
- * Locate one part's measure within a system.
- *
- * `staffBands` carries the engine's real per-part vertical bands for this score.
- * The even split is the fallback for older engine builds only: it assumes every staff in
- * a system is the same height, which stops being true as soon as dynamics or text stretch
- * one of them, and the two compare panes stretch differently from each other.
- */
-function localizeMeasureToPart(
-    element: { x: number; y: number; sx?: number; sy?: number; width?: number; height?: number; page: number },
-    partIndex: number,
-    partCount: number,
-    pageHeight: number,
-    zoomValue: number,
-    staffBands: StaffBands,
-) {
-    const rawWidth = typeof element.sx === 'number'
-        ? element.sx
-        : typeof element.width === 'number'
-            ? element.width
-            : 0;
-    const rawHeight = typeof element.sy === 'number'
-        ? element.sy
-        : typeof element.height === 'number'
-            ? element.height
-            : 0;
-    const withPageOffset = (y: number, height: number, page: number) => {
-        const needsPageOffset = pageHeight > 0 && page > 0 && (y + height) <= (pageHeight * 1.2);
-        return y + (needsPageOffset ? page * pageHeight : 0);
-    };
-
-    // Horizontal extent always comes from the measure box: it was already correct per
-    // pane. Only the vertical placement needed the engine's staff geometry.
-    const band = resolvePartBand(staffBands, element.page, element.y, rawHeight, partIndex);
-    if (band) {
-        return {
-            left: element.x * zoomValue,
-            top: withPageOffset(band.y, band.height, element.page) * zoomValue,
-            width: rawWidth * zoomValue,
-            height: band.height * zoomValue,
-            geometry: 'staff' as const,
-        };
-    }
-
-    const partHeight = rawHeight / partCount;
-    return {
-        left: element.x * zoomValue,
-        top: (withPageOffset(element.y, rawHeight, element.page) + (partHeight * partIndex)) * zoomValue,
-        width: rawWidth * zoomValue,
-        height: partHeight * zoomValue,
-        geometry: 'even' as const,
-    };
-}
-
-/**
- * Highlights for the alignment-driven compare modes (checkpoint and AI review).
- *
- * These used to draw the whole system for any change, because the part axis was collapsed
- * before geometry saw it. They now localize to the changed part exactly as change review
- * does, through the same `localizeMeasureToPart`.
- */
-export function buildPartLocalizedAlignmentHighlights(
-    positions: Positions | null,
-    entries: Array<{ partIndex: number; measureIndex: number }>,
-    status: 'old-diff' | 'new-diff' | 'commented',
-    zoomValue: number,
-    partCount: number,
-    staffBands: StaffBands = EMPTY_STAFF_BANDS,
-) {
-    if (!positions?.elements.length || partCount <= 0) {
-        return [];
-    }
-    const pageHeight = positions.pageSize?.height ?? 0;
-    const seen = new Set<string>();
-    return entries.flatMap((entry) => {
-        if (entry.partIndex < 0 || entry.partIndex >= partCount) {
-            return [];
-        }
-        const key = `${entry.partIndex}:${entry.measureIndex}`;
-        if (seen.has(key)) {
-            return [];
-        }
-        seen.add(key);
-        const element = positions.elements[entry.measureIndex];
-        if (!element) {
-            return [];
-        }
-        return [{
-            id: `align-${key}`,
-            status,
-            ...localizeMeasureToPart(element, entry.partIndex, partCount, pageHeight, zoomValue, staffBands),
-        }];
-    });
-}
-
-export function buildPartLocalizedChangeReviewHighlights(
-    positions: Positions | null,
-    regions: ChangeReviewScoreRegion[],
-    side: 'base' | 'head',
-    zoomValue: number,
-    partCount: number,
-    staffBands: StaffBands = EMPTY_STAFF_BANDS,
-) {
-    if (!positions?.elements.length || partCount <= 0) {
-        return [];
-    }
-    const pageHeight = positions.pageSize?.height ?? 0;
-    return regions.flatMap((region) => {
-        const measureIndex = side === 'base' ? region.baseMeasureIndex : region.headMeasureIndex;
-        if (measureIndex === undefined || region.partIndex < 0 || region.partIndex >= partCount) {
-            return [];
-        }
-        const element = positions.elements[measureIndex];
-        if (!element) {
-            return [];
-        }
-        const rect = localizeMeasureToPart(
-            element,
-            region.partIndex,
-            partCount,
-            pageHeight,
-            zoomValue,
-            staffBands,
-        );
-        return [{
-            id: `${region.anchorId}-${side}`,
-            status: side === 'base' ? 'old-diff' as const : 'new-diff' as const,
-            ...rect,
-        }];
-    });
-}
-
-export type SuppliedCompareRegion = {
-    blockIndex: number;
-    leftPartIndex?: number;
-    rightPartIndex?: number;
-    leftMeasureIndexes: number[];
-    rightMeasureIndexes: number[];
-    differenceClasses?: string[];
-    grounded?: boolean;
-    /**
-     * Required to decide this difference. The scanner withholds it for any
-     * block whose place on the scan could not be proven, so an ungrounded
-     * decision cannot be expressed rather than merely being discouraged.
-     */
-    contentSignature?: string;
-    /** What each side has to give, per marking kind; gates the take controls. */
-    leftMarkings?: { dynamics: boolean; lyrics: boolean };
-    rightMarkings?: { dynamics: boolean; lyrics: boolean };
-    /**
-     * Which events inside each bar are unmatched, so a reader can be pointed at
-     * the note rather than at the bar around it. Carried through untouched;
-     * only `ScannerSystemRows` knows how to place them in a drawing.
-     */
-    symbolDifferences?: ScannerSymbolDifference[];
-};
-
-/**
- * Highlights from differences a caller already computed.
- *
- * Two shape differences from change review, both load-bearing. A region carries
- * **several** measures per side, because two independent recognitions of one
- * page disagree about barlines and a block can span three measures on one side
- * and none on the other. And each side carries **its own part index**, because
- * a part matched across two documents need not sit at the same ordinal in both;
- * change review can share one index only because both its sides are revisions
- * of a single score.
- */
-export function buildPartLocalizedSuppliedHighlights(
-    positions: Positions | null,
-    regions: SuppliedCompareRegion[],
-    side: 'left' | 'right',
-    zoomValue: number,
-    partCount: number,
-    staffBands: StaffBands = EMPTY_STAFF_BANDS,
-) {
-    if (!positions?.elements.length || partCount <= 0) {
-        return [];
-    }
-    const pageHeight = positions.pageSize?.height ?? 0;
-    return regions.flatMap((region) => {
-        const partIndex = side === 'left' ? region.leftPartIndex : region.rightPartIndex;
-        const measureIndexes = side === 'left' ? region.leftMeasureIndexes : region.rightMeasureIndexes;
-        if (partIndex === undefined || partIndex < 0 || partIndex >= partCount) {
-            return [];
-        }
-        return (measureIndexes || []).flatMap((measureIndex) => {
-            const element = positions.elements[measureIndex];
-            if (!element) {
-                return [];
-            }
-            const rect = localizeMeasureToPart(
-                element,
-                partIndex,
-                partCount,
-                pageHeight,
-                zoomValue,
-                staffBands,
-            );
-            return [{
-                id: `supplied-${region.blockIndex}-${side}-${measureIndex}`,
-                status: side === 'left' ? 'old-diff' as const : 'new-diff' as const,
-                ...rect,
-            }];
-        });
-    });
-}
-
-export function buildPartLocalizedChangeReviewBarHighlights(
-    positions: Positions | null,
-    bars: ChangeReviewBar[],
-    side: 'base' | 'head',
-    zoomValue: number,
-    partCount: number,
-    staffBands: StaffBands = EMPTY_STAFF_BANDS,
-) {
-    if (!positions?.elements.length || partCount <= 0) {
-        return [];
-    }
-    const pageHeight = positions.pageSize?.height ?? 0;
-    return bars.flatMap((bar) => {
-        if (bar.side !== side || bar.partIndex < 0 || bar.partIndex >= partCount) {
-            return [];
-        }
-        const element = positions.elements[bar.measureIndex];
-        if (!element) {
-            return [];
-        }
-        return [{
-            id: `${bar.anchorId}-${side}`,
-            ...localizeMeasureToPart(
-                element,
-                bar.partIndex,
-                partCount,
-                pageHeight,
-                zoomValue,
-                staffBands,
-            ),
-        }];
-    });
-}
-
 type MeasureAlignmentRow = {
     leftIndex: number | null;
     rightIndex: number | null;
@@ -517,60 +257,6 @@ type MeasureAlignmentRow = {
 };
 
 type SynthBatchIterator = SynthAudioBatchIterator;
-
-const findAiEditProposal = (value: unknown): AiEditProposal | null => {
-    const visited = new Set<unknown>();
-    const visit = (candidate: unknown, depth: number): AiEditProposal | null => {
-        if (depth > 5 || visited.has(candidate)) {
-            return null;
-        }
-        visited.add(candidate);
-        const record = asRecord(candidate);
-        if (!record) {
-            return null;
-        }
-        const proposal = asRecord(record.proposal);
-        const verification = asRecord(proposal?.verification);
-        if (
-            proposal
-            && typeof proposal.sourceTool === 'string'
-            && typeof proposal.baseXml === 'string'
-            && typeof proposal.proposedXml === 'string'
-            && typeof proposal.baseContentHash === 'string'
-            && typeof proposal.expectedCurrentContentHash === 'string'
-            && (proposal.baseIdentityHash == null || typeof proposal.baseIdentityHash === 'string')
-            && (proposal.expectedCurrentIdentityHash == null || typeof proposal.expectedCurrentIdentityHash === 'string')
-            && typeof verification?.level === 'string'
-            && AI_PROPOSAL_VERIFICATION_LEVELS.has(verification.level)
-        ) {
-            return proposal as AiEditProposal;
-        }
-        for (const key of ['body', 'execution', 'result']) {
-            const found = visit(record[key], depth + 1);
-            if (found) {
-                return found;
-            }
-        }
-        return null;
-    };
-    return visit(value, 0);
-};
-
-const fetchJsonOrThrow = async <T,>(url: string, init?: RequestInit): Promise<T> => {
-    const response = await fetch(url, {
-        ...init,
-        headers: {
-            Accept: 'application/json',
-            ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-            ...(init?.headers || {}),
-        },
-    });
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `HTTP ${response.status}`);
-    }
-    return response.json() as Promise<T>;
-};
 
 type NotaGenSpaceCombinations = Record<string, Record<string, string[]>>;
 
@@ -1707,7 +1393,7 @@ export default function ScoreEditor() {
     const [compareRightStaffBands, setCompareRightStaffBands] = useState<StaffBands>(EMPTY_STAFF_BANDS);
     const [compareAlignments, setCompareAlignments] = useState<PartAlignment[]>([]);
     const [suppliedRegions, setSuppliedRegions] = useState<SuppliedCompareRegion[] | null>(null);
-    const [suppliedSystems, setSuppliedSystems] = useState<any[]>([]);
+    const [suppliedSystems, setSuppliedSystems] = useState<ScannerSystem[]>([]);
     // The page's merged score, carried by the regions document because this
     // embed reaches the scanner only through the host's proxy.
     const [suppliedMerged, setSuppliedMerged] = useState<MergedScoreState | null>(null);
@@ -1716,7 +1402,7 @@ export default function ScoreEditor() {
     // record where it started from cannot be re-examined later.
     const [suppliedCompareLeftEngineId, setSuppliedCompareLeftEngineId] = useState<string>('');
     const [suppliedCompareRightEngineId, setSuppliedCompareRightEngineId] = useState<string>('');
-    const [suppliedRegionsError, setSuppliedRegionsError] = useState<string | null>(null);
+    const [, setSuppliedRegionsError] = useState<string | null>(null);
     const [compareAlignmentLoading, setCompareAlignmentLoading] = useState(false);
     const [compareAlignmentRevision, setCompareAlignmentRevision] = useState(0);
     const [compareSwapBusy, setCompareSwapBusy] = useState(false);
@@ -7238,8 +6924,7 @@ ${partsBodyXml}
     }, [
         aiDiffFeedbackBusy,
         compareActiveSide,
-        compareLeftScore,
-        compareRightScoreDisplay,
+        compareScoreForSide,
         compareSwapBusy,
         commitCompareNoteInput,
         getCompareScoreRole,
@@ -7263,8 +6948,7 @@ ${partsBodyXml}
         const enabled = !isCompareNoteInputDesired(role);
         void setCompareNoteInputMode(enabled, side);
     }, [
-        compareLeftScore,
-        compareRightScoreDisplay,
+        compareScoreForSide,
         getCompareScoreRole,
         isCompareNoteInputDesired,
         setCompareNoteInputMode,
@@ -7281,56 +6965,16 @@ ${partsBodyXml}
     }, [performCompareMutation]);
 
     const handleCompareApplyFloatingPaletteItem = useCallback((item: ScorePaletteItem) => {
-        const methodAndArgs: Partial<Record<ScorePaletteItem['kind'], [keyof MutationMethods, ...unknown[]]>> = {
-            clef: ['setClef', item.subtype],
-            dynamic: ['addDynamic', item.subtype],
-            ottava: ['addOttava', item.subtype],
-            trill: ['addTrill', item.subtype],
-            glissando: ['addGlissando', item.subtype],
-            arpeggio: ['addArpeggio', item.subtype],
-            fermata: ['addFermata', item.subtype],
-            breath: ['addBreath', item.subtype],
-            tremolo: ['addTremolo', item.subtype],
-            marker: ['addMarker', item.subtype],
-            jump: ['addJump', item.subtype],
-            notehead: ['setNoteheadGroup', item.subtype],
-            beam: ['setBeamMode', item.subtype],
-            accidental: ['setAccidental', item.subtype],
-            gracenote: ['addGraceNote', item.subtype],
-            hairpin: ['addHairpin', item.subtype],
-            pedal: ['addPedal', item.subtype],
-            keysig: ['setKeySignature', item.subtype],
-            barline: ['setBarLineType', item.subtype],
-            volta: ['addVolta', item.subtype],
-            'repeat-count': ['setRepeatCount', item.subtype],
-        };
-        if (item.kind === 'articulation') {
-            const articulation = articulationOptions[item.subtype];
-            if (articulation) {
-                methodAndArgs.articulation = ['addArticulation', articulation.symbol];
-            }
-        } else if (item.kind === 'timesig') {
-            const [numerator, denominator, timeSigType] = item.args ?? [];
-            if (numerator && denominator) {
-                methodAndArgs.timesig = typeof timeSigType === 'number'
-                    ? ['setTimeSignatureWithType', numerator, denominator, timeSigType]
-                    : ['setTimeSignature', numerator, denominator];
-            }
-        } else if (item.kind === 'repeat-start') {
-            methodAndArgs['repeat-start'] = ['toggleRepeatStart'];
-        } else if (item.kind === 'repeat-end') {
-            methodAndArgs['repeat-end'] = ['toggleRepeatEnd'];
-        }
-        const binding = methodAndArgs[item.kind];
+        const binding = scorePaletteMutation(item);
         if (!binding) {
             console.warn(`Palette item "${item.kind}" is not editable in compare mode.`);
             return;
         }
-        const [methodName, ...args] = binding;
+        const { methodName, args } = binding;
         void performCompareMutation(`apply ${item.label}`, (targetScore) => {
-            const fn = (targetScore as MutationMethods)[methodName];
+            const fn = (targetScore as unknown as Record<string, unknown>)[methodName];
             if (typeof fn !== 'function') {
-                alert(`This build of webmscore does not expose "${String(methodName)}".`);
+                alert(`This build of webmscore does not expose "${methodName}".`);
                 return false;
             }
             return (fn as (...values: unknown[]) => unknown).apply(targetScore, args);
