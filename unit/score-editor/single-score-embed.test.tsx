@@ -60,6 +60,9 @@ describe('ScoreEditor: single-score embed mode', () => {
         params.values = values;
         const view = render(<ScoreEditor />);
         await waitFor(() => expect(score.saveSvg).toHaveBeenCalled());
+        await waitFor(() =>
+            expect(screen.queryByText('Loading score...')).not.toBeInTheDocument(),
+        );
         return { ...view, score };
     };
 
