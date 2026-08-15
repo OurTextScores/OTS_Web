@@ -810,9 +810,11 @@ describe('the difference navigator', () => {
         );
 
         await screen.findByTestId('btn-take-down-0');
-        expect(
-            screen.getAllByTestId('pane-measures').map((node) => node.textContent),
-        ).toEqual(['1,2,3', '1,2,3']);
+        await waitFor(() =>
+            expect(
+                screen.getAllByTestId('pane-measures').map((node) => node.textContent),
+            ).toEqual(['1,2,3', '1,2,3']),
+        );
     });
 
     it('boxes the difference on the scan it came from', async () => {
