@@ -22,9 +22,10 @@ test('static editor bundle loads the score without runtime errors', async ({ pag
   expect(pageErrors).toEqual([]);
 });
 
-test('static player bundle loads under the /score-editor base path', async ({ page }) => {
+test('static player bundle loads under the /score-editor base path and reports readiness', async ({ page, request }) => {
   const pageErrors: Error[] = [];
   page.on('pageerror', (error) => pageErrors.push(error));
+  await request.delete(`${BASE}/api/analytics/__test-log`);
 
   await page.goto(`${BASE}/score-editor/index.html?score=/score-editor/test_scores/three_notes_cde.musicxml&embed=player`, {
     waitUntil: 'domcontentloaded',
@@ -34,6 +35,13 @@ test('static player bundle loads under the /score-editor base path', async ({ pa
   await expect(page.getByTestId('player-svg').locator('svg')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('player-seek')).toBeEnabled();
   expect(Number(await page.getByTestId('player-seek').getAttribute('max'))).toBeGreaterThan(0);
+  await expect.poll(async () => {
+    const response = await request.get(`${BASE}/api/analytics/__test-log`);
+    const body = await response.json();
+    return body.events.some((entry: { payload?: { eventName?: string } }) => (
+      entry.payload?.eventName === 'score_player_loaded'
+    ));
+  }).toBe(true);
   expect(pageErrors).toEqual([]);
 });
 
