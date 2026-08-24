@@ -2,20 +2,17 @@
 
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { PanelRightOpen, PanelRightClose, Pause, Play, Square } from 'lucide-react';
+import { PanelRightOpen, PanelRightClose } from 'lucide-react';
 import {
     loadWebMscore,
-    loadWebMscoreInProcess,
     Score,
     type GripEditInfo,
     InputFileFormat,
     Positions,
-    type LayoutProgressState,
     type InspectorPropertyName,
     type SelectedElementProperties,
     type FretDiagramData,
     type SynthAudioBatchIterator,
-    type WebMscoreInstance,
 } from '../lib/webmscore-loader';
 import { EMPTY_STAFF_BANDS, loadStaffBands, type StaffBands } from '../lib/compare-staff-bands';
 import {
@@ -95,6 +92,13 @@ import {
     stopSynthStream as stopSharedSynthStream,
 } from '../lib/playback/stream-scheduler';
 import { SoundFontManager } from '../lib/playback/soundfont-manager';
+import {
+    LARGE_SCORE_THRESHOLD_BYTES,
+    isLargeScoreData,
+    loadScoreWithEngineFallback as loadScoreWithSharedEngineFallback,
+    requestScoreLayoutProgress,
+    shouldSkipCoverPageFirstRender,
+} from '../lib/score-loader';
 import { extractPatchAnnotations, PATCH_ANNOTATIONS_INSTRUCTION, type PatchAnnotation } from '../lib/patch-annotations';
 import {
     extractTraceContextFromHeaders,
@@ -629,7 +633,6 @@ const measureInsertTargetMap: Record<MeasureInsertTarget, number> = {
     end: 3,
 };
 
-const LARGE_SCORE_THRESHOLD_BYTES = 2 * 1024 * 1024;
 const DEFAULT_PAGE_RENDER_TIMEOUT_MS = 45_000;
 const LARGE_PROGRESSIVE_PAGE_RENDER_TIMEOUT_MS = 180_000;
 const PROGRESSIVE_PAGE_LAYOUT_TIMEOUT_MS = 90_000;
@@ -1107,24 +1110,7 @@ export default function ScoreEditor() {
         };
     }, [isSystemRowsMode]);
     const isChangeReviewSingleScoreMode = Boolean(reviewScoreUrl && changeReviewId);
-    /**
-     * One score, no chrome: `?score=<url>&embed=1`.
-     *
-     * The two embed modes above both exist to serve a *review*, and each
-     * requires a second identifier — a right-hand score, or a change review —
-     * so neither can express "just show me this score". A host page that wants
-     * an inline preview had no way to ask for one, which is why the work page
-     * kept a second renderer around to do it instead.
-     *
-     * Opt-in rather than implied by `score`, because `?score=` is also how the
-     * full editor is launched from elsewhere in the product, and that must keep
-     * its chrome.
-     */
-    const isSingleScoreEmbedMode = Boolean(
-        searchParams.get('score') && searchParams.get('embed') === '1',
-    );
-    const isEmbedMode =
-        isCompareEmbedMode || isChangeReviewSingleScoreMode || isSingleScoreEmbedMode;
+    const isEmbedMode = isCompareEmbedMode || isChangeReviewSingleScoreMode;
     const isChangeReviewCompareMode = isCompareEmbedMode && Boolean(changeReviewId);
     const isChangeReviewMode = isChangeReviewCompareMode || isChangeReviewSingleScoreMode;
     const launchContext = useMemo(
@@ -1824,37 +1810,6 @@ export default function ScoreEditor() {
         };
     }, [clearInteractionPrime, emitEditorTelemetry]);
 
-    const isLargeScoreData = (data: Uint8Array) => data.byteLength >= LARGE_SCORE_THRESHOLD_BYTES;
-    const shouldSkipCoverPageFirstRender = (format: InputFileFormat, data: Uint8Array) => (
-        isLargeScoreData(data) && (format === 'mscz' || format === 'mscx' || format === 'mxl')
-    );
-    const resolveWebMscoreEngine = async () => {
-        return { webMscore: await loadWebMscore(), mode: 'worker' as const };
-    };
-
-    const loadScoreWithEngineFallback = async (
-        format: InputFileFormat,
-        data: Uint8Array,
-        logStage?: (stage: string, extra?: unknown) => void,
-    ) => {
-        let resolvedEngine: { webMscore: WebMscoreInstance; mode: 'worker' | 'in_process' } = await resolveWebMscoreEngine();
-        try {
-            const workerData = resolvedEngine.mode === 'worker' ? data.slice() : data;
-            const loadResult = await loadScoreWithInitialLayout(resolvedEngine.webMscore, format, workerData);
-            return { ...loadResult, engineMode: resolvedEngine.mode };
-        } catch (workerErr) {
-            if (resolvedEngine.mode !== 'worker') {
-                throw workerErr;
-            }
-            logStage?.('worker-engine:failed', workerErr);
-            console.warn('Worker webmscore load failed, retrying with in-process engine.', workerErr);
-            resolvedEngine = { webMscore: await loadWebMscoreInProcess(), mode: 'in_process' as const };
-            const fallbackData = data.slice();
-            const loadResult = await loadScoreWithInitialLayout(resolvedEngine.webMscore, format, fallbackData);
-            logStage?.('in-process-engine:done');
-            return { ...loadResult, engineMode: resolvedEngine.mode };
-        }
-    };
     const aiKeyStorageKey = `ots_${aiProvider}_api_key`;
     const aiModelStorageKey = `ots_${aiProvider}_model`;
     const autoFitPendingRef = useRef(true);
@@ -5334,93 +5289,9 @@ ${partsBodyXml}
         searchParams,
     ]);
 
-    const parseLayoutProgressState = (value: unknown): LayoutProgressState | null => {
-        if (!value || typeof value !== 'object') {
-            return null;
-        }
-
-        const state = value as Partial<LayoutProgressState>;
-        if (
-            typeof state.targetPage !== 'number'
-            || typeof state.targetSatisfied !== 'boolean'
-            || typeof state.availablePages !== 'number'
-            || typeof state.totalMeasures !== 'number'
-            || typeof state.laidOutMeasures !== 'number'
-            || typeof state.loadedUntilTick !== 'number'
-            || typeof state.hasMorePages !== 'boolean'
-            || typeof state.isComplete !== 'boolean'
-        ) {
-            return null;
-        }
-
-        return state as LayoutProgressState;
-    };
-
-    const requestLayoutProgress = async (targetScore: Score, targetPage: number): Promise<LayoutProgressState> => {
-        if (targetScore.layoutUntilPageState) {
-            const raw = await runSerializedScoreOperation(
-                () => Promise.resolve(targetScore.layoutUntilPageState!(targetPage)),
-                `layoutUntilPageState(page=${targetPage + 1})`,
-            );
-            const parsed = parseLayoutProgressState(raw);
-            if (parsed) {
-                return parsed;
-            }
-        }
-
-        const targetSatisfied = Boolean(await runSerializedScoreOperation(
-            () => Promise.resolve(targetScore.layoutUntilPage?.(targetPage)),
-            `layoutUntilPage(page=${targetPage + 1})`,
-        ));
-        const availablePages = targetScore.npages
-            ? Math.max(
-                1,
-                await runSerializedScoreOperation(
-                    () => Promise.resolve(targetScore.npages!()),
-                    'npages',
-                ),
-            )
-            : targetPage + (targetSatisfied ? 1 : 0);
-        // Without structured state support, we do not have authoritative completion info.
-        // Keep pagination optimistic to avoid disabling navigation prematurely.
-        return {
-            targetPage,
-            targetSatisfied,
-            availablePages,
-            totalMeasures: -1,
-            laidOutMeasures: -1,
-            loadedUntilTick: -1,
-            hasMorePages: true,
-            isComplete: false,
-        };
-    };
-
-    const shouldUseProgressiveLoad = (format: InputFileFormat, data: Uint8Array) => {
-        if (!progressiveLoadEnabled) {
-            return false;
-        }
-        if (!isLargeScoreData(data)) {
-            return false;
-        }
-        // Progressive path is critical for large native/compressed formats, otherwise
-        // eager full-layout can take minutes before first render.
-        return format === 'musicxml' || format === 'mscz' || format === 'mscx' || format === 'mxl';
-    };
-
-    const progressiveLoadTimeoutMs = (format: InputFileFormat) => {
-        if (format === 'musicxml') {
-            return 12_000;
-        }
-        // Native/compressed formats can take substantially longer to parse in WASM.
-        return 180_000;
-    };
-
-    const progressiveFirstPageTimeoutMs = (format: InputFileFormat) => {
-        if (format === 'musicxml') {
-            return 10_000;
-        }
-        return 90_000;
-    };
+    const requestLayoutProgress = (targetScore: Score, targetPage: number) => (
+        requestScoreLayoutProgress(targetScore, targetPage, runSerializedScoreOperation)
+    );
 
     const runWithTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -5709,17 +5580,16 @@ ${partsBodyXml}
         score,
     ]);
 
-    const loadScoreWithInitialLayout = async (
-        WebMscore: Awaited<ReturnType<typeof loadWebMscore>>,
+    const loadScoreWithEngineFallback = async (
         format: InputFileFormat,
         data: Uint8Array,
-    ): Promise<{ loadedScore: Score; progressivePaging: boolean; progressiveHasMore: boolean; initialAvailablePages: number }> => {
+        logStage?: (stage: string, extra?: unknown) => void,
+    ) => {
         const loadStart = performance.now();
         const largeScore = isLargeScoreData(data);
         const logLargeLoad = (stage: string, extra?: unknown) => {
-            if (!largeScore) {
-                return;
-            }
+            logStage?.(stage, extra);
+            if (!largeScore) return;
             const elapsedMs = Math.round(performance.now() - loadStart);
             if (typeof extra === 'undefined') {
                 console.info(`[large-load] ${format} ${stage} @ ${elapsedMs}ms`);
@@ -5727,65 +5597,11 @@ ${partsBodyXml}
             }
             console.info(`[large-load] ${format} ${stage} @ ${elapsedMs}ms`, extra);
         };
-
-        if (!shouldUseProgressiveLoad(format, data)) {
-            logLargeLoad('eager-load:start');
-            const loadedScore = await WebMscore.load(format, data);
-            logLargeLoad('eager-load:done');
-            return { loadedScore, progressivePaging: false, progressiveHasMore: false, initialAvailablePages: 1 };
-        }
-
-        try {
-            logLargeLoad('progressive-load:start', { timeoutMs: progressiveLoadTimeoutMs(format) });
-            const progressiveData = data.slice();
-            const loadedScore = await runWithTimeout(
-                WebMscore.load(format, progressiveData, [], false),
-                progressiveLoadTimeoutMs(format),
-                `Progressive load for ${format}`,
-            );
-            logLargeLoad('progressive-load:done');
-            if (loadedScore.layoutUntilPage || loadedScore.layoutUntilPageState) {
-                logLargeLoad('initial-layout:start', { timeoutMs: progressiveFirstPageTimeoutMs(format) });
-                const firstPageState = await runWithTimeout(
-                    requestLayoutProgress(loadedScore, 0),
-                    progressiveFirstPageTimeoutMs(format),
-                    'Initial incremental layout',
-                );
-                logLargeLoad('initial-layout:done', firstPageState);
-                if (firstPageState.targetSatisfied) {
-                    return {
-                        loadedScore,
-                        progressivePaging: true,
-                        progressiveHasMore: firstPageState.hasMorePages,
-                        initialAvailablePages: Math.max(1, firstPageState.availablePages || 1),
-                    };
-                }
-            }
-
-            if (loadedScore.relayout) {
-                logLargeLoad('relayout-fallback:start');
-                await runWithTimeout(
-                    runSerializedScoreOperation(
-                        () => Promise.resolve(loadedScore.relayout!()),
-                        'relayout(progressive-fallback)',
-                    ),
-                    20_000,
-                    'Progressive relayout fallback',
-                );
-                logLargeLoad('relayout-fallback:done');
-                return { loadedScore, progressivePaging: false, progressiveHasMore: false, initialAvailablePages: 1 };
-            }
-
-            loadedScore.destroy();
-        } catch (err) {
-            console.warn('Progressive score load failed, retrying with eager layout.', err);
-            logLargeLoad('progressive-load:failed', err);
-        }
-
-        logLargeLoad('eager-fallback:start');
-        const fallbackScore = await WebMscore.load(format, data);
-        logLargeLoad('eager-fallback:done');
-        return { loadedScore: fallbackScore, progressivePaging: false, progressiveHasMore: false, initialAvailablePages: 1 };
+        return loadScoreWithSharedEngineFallback(format, data, {
+            progressiveEnabled: progressiveLoadEnabled,
+            runSerialized: runSerializedScoreOperation,
+            logStage: logLargeLoad,
+        });
     };
 
     const scheduleBackgroundInitTasks = (
@@ -5965,6 +5781,7 @@ ${partsBodyXml}
         setInteractionState({ preparing: false, ready: false });
         soundFontLoadedRef.current = false;
         triedSoundFontRef.current = false;
+        soundFontManagerRef.current?.clear();
         setSoundFontLoaded(false);
         setTriedSoundFont(false);
         setScoreDirtySinceCheckpoint(false);
@@ -5996,12 +5813,6 @@ ${partsBodyXml}
             const inputIsLarge = isLargeScoreData(data);
             largeScoreSessionRef.current = inputIsLarge;
             const format = detectScoreInputFormat(url, data);
-            const resolvedEngine = await resolveWebMscoreEngine();
-            engineMode = resolvedEngine.mode;
-            if (inputIsLarge) {
-                console.info(`[large-load] ${format} engine:${engineMode}`);
-            }
-
             if (score) {
                 score.destroy();
             }
@@ -6021,6 +5832,7 @@ ${partsBodyXml}
                     : undefined,
             );
             engineMode = actualEngineMode;
+            if (inputIsLarge) console.info(`[large-load] ${format} engine:${engineMode}`);
             if (signal?.aborted) {
                 loadedScore.destroy();
                 return false;
@@ -6067,12 +5879,7 @@ ${partsBodyXml}
             } else {
                 setInteractionState({ preparing: false, ready: true });
             }
-            // Fitting the height suits a full-window editor, where a whole page
-            // at a glance is what a reader wants. An inline preview is the
-            // opposite shape — wide and short — and fitting its height there
-            // leaves a postage stamp in a field of white. Fit the width and let
-            // the frame scroll, which is how music is read anyway.
-            const autoFit = isSingleScoreEmbedMode ? handleFitWidth : handleFitHeight;
+            const autoFit = handleFitHeight;
             if (autoFitPendingRef.current && typeof window !== 'undefined') {
                 window.requestAnimationFrame(() => {
                     window.requestAnimationFrame(() => {
@@ -6179,6 +5986,7 @@ ${partsBodyXml}
         setInteractionState({ preparing: false, ready: false });
         soundFontLoadedRef.current = false;
         triedSoundFontRef.current = false;
+        soundFontManagerRef.current?.clear();
         setSoundFontLoaded(false);
         setTriedSoundFont(false);
         setScoreDirtySinceCheckpoint(false);
@@ -6212,10 +6020,6 @@ ${partsBodyXml}
             largeScoreSessionRef.current = isLargeUpload;
             logUploadStage('read-buffer:done', { bytes: inputByteLength });
             format = detectScoreInputFormat(file.name, data);
-            const resolvedEngine = await resolveWebMscoreEngine();
-            engineMode = resolvedEngine.mode;
-            logUploadStage('webmscore-ready', { engineMode });
-
             // But wait, we need to destroy previous score if exists
             if (score) {
                 score.destroy();
@@ -6233,7 +6037,12 @@ ${partsBodyXml}
             engineMode = actualEngineMode;
             progressivePaging = nextProgressivePaging;
             progressiveHasMore = nextProgressiveHasMore;
-            logUploadStage('load-score:done', { progressivePaging, progressiveHasMore, initialAvailablePages });
+            logUploadStage('load-score:done', {
+                engineMode,
+                progressivePaging,
+                progressiveHasMore,
+                initialAvailablePages,
+            });
             setScore(loadedScore);
             scoreRef.current = loadedScore;
             setProgressivePagingActive(progressivePaging);
@@ -8030,7 +7839,7 @@ ${partsBodyXml}
 
     const prefetchSoundFontBytes = useCallback(async (): Promise<{ url: string; buf: Uint8Array } | null> => {
         const source = await soundFontManagerRef.current?.prefetch() ?? null;
-        return source ? { url: source.url, buf: source.bytes } : null;
+        return source ? { url: source.url, buf: source.bytes.slice() } : null;
     }, []);
 
     ensureSoundFontLoadedRef.current = async (targetScore, options) => {
@@ -13930,6 +13739,7 @@ ${partsBodyXml}
             prerollSeconds?: number;
             startupBufferSeconds?: number;
             minStartupBatches?: number;
+            mergeWindowSeconds?: number;
             renderWindow?: RenderWindow | null;
             stateSetters?: { setIsPlaying: (value: boolean) => void; setIsPaused: (value: boolean) => void };
         },
@@ -13946,9 +13756,14 @@ ${partsBodyXml}
             prerollSeconds: options.prerollSeconds,
             startupBufferSeconds: options.startupBufferSeconds,
             minStartupBatches: options.minStartupBatches,
+            mergeWindowSeconds: options.mergeWindowSeconds,
             renderWindow: options.renderWindow,
-            onPlayingChange: options.trackTransportState ? setPlaying : undefined,
-            onPausedChange: options.trackTransportState ? setPaused : undefined,
+            onPlayingChange: options.trackTransportState
+                ? (playing) => {
+                    setPlaying(playing);
+                    if (!playing) setPaused(false);
+                }
+                : undefined,
         });
     };
 
@@ -14014,6 +13829,7 @@ ${partsBodyXml}
                         prerollSeconds: useSelectionStreaming ? SELECTION_SYNTH_START_PREROLL_SECONDS : SYNTH_START_PREROLL_SECONDS,
                         startupBufferSeconds: useSelectionStreaming ? SELECTION_STREAM_STARTUP_BUFFER_SECONDS : 0,
                         minStartupBatches: useSelectionStreaming ? SELECTION_STREAM_MIN_STARTUP_BATCHES : 1,
+                        mergeWindowSeconds: useSelectionStreaming ? 0.5 : 0,
                         // Transport can run the length of the score, so it is the
                         // path that must stay bounded.
                         renderWindow: DEFAULT_RENDER_WINDOW,
@@ -16394,38 +16210,6 @@ ${partsBodyXml}
                             </div>
                         )}
                         <div className="mb-3 flex items-center justify-end gap-2 text-sm text-gray-600">
-                            {/*
-                                A preview embed hides the toolbar, and with it
-                                the only way to hear the score. These are the
-                                same three controls the compare panes carry, in
-                                the same vocabulary: one button that plays,
-                                pauses and resumes, and a stop that is only
-                                enabled while something is running.
-                            */}
-                            {isSingleScoreEmbedMode && (
-                                <div className="mr-auto flex items-center gap-1">
-                                    <button
-                                        type="button"
-                                        data-testid="btn-embed-play"
-                                        onClick={() => void handleTogglePlayPause()}
-                                        disabled={!score || (audioBusy && !(isPlaying || isPaused))}
-                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                                        title={isPlaying && !isPaused ? 'Pause' : isPaused ? 'Resume' : 'Play'}
-                                    >
-                                        {isPlaying && !isPaused ? <Pause size={14} /> : <Play size={14} />}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        data-testid="btn-embed-stop"
-                                        onClick={() => void stopAudio()}
-                                        disabled={!isPlaying && !isPaused}
-                                        className="rounded border border-gray-300 bg-white p-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                                        title="Stop"
-                                    >
-                                        <Square size={14} />
-                                    </button>
-                                </div>
-                            )}
                             <button
                                 type="button"
                                 onClick={() => setProgressiveLoadEnabled((prev) => !prev)}

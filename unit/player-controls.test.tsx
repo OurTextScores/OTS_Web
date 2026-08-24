@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import PlayerControls from '@/components/score-player/PlayerControls';
 
 const props = (overrides: Partial<React.ComponentProps<typeof PlayerControls>> = {}) => ({
@@ -24,6 +24,7 @@ const props = (overrides: Partial<React.ComponentProps<typeof PlayerControls>> =
 });
 
 describe('PlayerControls', () => {
+    afterEach(() => vi.useRealTimers());
     it('commits pointer scrubbing once at the final position', () => {
         const values = props();
         render(<PlayerControls {...values} />);
@@ -46,6 +47,34 @@ describe('PlayerControls', () => {
         expect(retry).toBeEnabled();
         fireEvent.click(retry);
         expect(values.onTogglePlayPause).toHaveBeenCalledOnce();
+    });
+
+    it('debounces keyboard seeks', () => {
+        vi.useFakeTimers();
+        const values = props();
+        render(<PlayerControls {...values} />);
+        const seek = screen.getByTestId('player-seek');
+
+        fireEvent.change(seek, { target: { value: '2000' } });
+        fireEvent.change(seek, { target: { value: '3000' } });
+        expect(values.onSeek).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(180);
+
+        expect(values.onSeek).toHaveBeenCalledOnce();
+        expect(values.onSeek).toHaveBeenCalledWith(3_000);
+    });
+
+    it('commits a scrub when pointer capture is lost', () => {
+        const values = props();
+        render(<PlayerControls {...values} />);
+        const seek = screen.getByTestId('player-seek');
+
+        fireEvent.pointerDown(seek, { pointerId: 4 });
+        fireEvent.change(seek, { target: { value: '5500' } });
+        fireEvent.lostPointerCapture(seek, { target: { value: '5500' } });
+
+        expect(values.onSeek).toHaveBeenCalledOnce();
+        expect(values.onSeek).toHaveBeenCalledWith(5_500);
     });
 
     it('disables transport while the document is unavailable', () => {

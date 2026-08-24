@@ -31,3 +31,38 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.ots-score-player {
+  --player-canvas: #f1f5f9;
+  --player-panel: rgb(255 255 255 / 0.95);
+  --player-control: #ffffff;
+  --player-control-hover: #f8fafc;
+  --player-border: #cbd5e1;
+  --player-text: #0f172a;
+  --player-muted: #475569;
+  color-scheme: light;
+}
+
+.ots-score-player[data-theme="dark"] {
+  --player-canvas: #020617;
+  --player-panel: rgb(15 23 42 / 0.95);
+  --player-control: #1e293b;
+  --player-control-hover: #334155;
+  --player-border: #475569;
+  --player-text: #f1f5f9;
+  --player-muted: #cbd5e1;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ots-score-player:not([data-theme]) {
+    --player-canvas: #020617;
+    --player-panel: rgb(15 23 42 / 0.95);
+    --player-control: #1e293b;
+    --player-control-hover: #334155;
+    --player-border: #475569;
+    --player-text: #f1f5f9;
+    --player-muted: #cbd5e1;
+    color-scheme: dark;
+  }
+}

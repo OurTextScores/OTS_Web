@@ -18,10 +18,11 @@ export type StreamPlaybackOptions = StreamPlaybackTarget & {
     prerollSeconds?: number;
     startupBufferSeconds?: number;
     minStartupBatches?: number;
+    /** Merge adjacent PCM blocks up to this duration. Disabled by default. */
+    mergeWindowSeconds?: number;
     /** Bounds render-ahead. null disables throttling for short one-shot clips. */
     renderWindow?: RenderWindow | null;
     onPlayingChange?: (playing: boolean) => void;
-    onPausedChange?: (paused: boolean) => void;
     /** Called once the Web Audio clock is anchored to the score timeline. */
     onClockAnchor?: (anchor: { contextTime: number; scoreTimeSeconds: number }) => void;
     /** Called after the final scheduled source naturally finishes. */
@@ -95,7 +96,7 @@ export async function scheduleSynthBatchStream(
     let batchCount = 0;
     let bufferedUntilSeconds = 0;
     let pendingChunks: { buffer: AudioBuffer; relativeChunkStart: number }[] = [];
-    const mergeWindowSeconds = options.debugLabel === 'selection-transport' ? 0.5 : 0;
+    const mergeWindowSeconds = options.mergeWindowSeconds ?? 0;
     const mergeTargetFrames = mergeWindowSeconds > 0
         ? Math.max(512, Math.round(audioContext.sampleRate * mergeWindowSeconds))
         : 0;
@@ -109,6 +110,7 @@ export async function scheduleSynthBatchStream(
     } | null = null;
 
     const scheduleChunk = (buffer: AudioBuffer, relativeChunkStart: number) => {
+        if (options.generationRef.current !== generation) return;
         if (baseTime === null) {
             baseTime = audioContext.currentTime + prerollSeconds;
             options.onClockAnchor?.({
@@ -125,8 +127,10 @@ export async function scheduleSynthBatchStream(
         };
         options.sourcesRef.current.push(source);
         lastSource = source;
-        startedAny = true;
-        options.onPlayingChange?.(true);
+        if (!startedAny) {
+            startedAny = true;
+            options.onPlayingChange?.(true);
+        }
     };
 
     const flushPendingChunks = () => {
@@ -170,17 +174,24 @@ export async function scheduleSynthBatchStream(
                 (baseTime + bufferedUntilSeconds) - audioContext.currentTime,
                 options.renderWindow,
             );
+            const lowWaterSeconds = Math.min(
+                Math.max(0, options.renderWindow.lowWaterSeconds),
+                Math.max(0, options.renderWindow.horizonSeconds),
+            );
             while (delayMs > 0 && options.generationRef.current === generation) {
                 await new Promise<void>((resolve) => { setTimeout(resolve, Math.min(delayMs, 1000)); });
-                delayMs = renderWindowDelayMs(
-                    (baseTime + bufferedUntilSeconds) - audioContext.currentTime,
-                    options.renderWindow,
-                );
+                const aheadSeconds = (baseTime + bufferedUntilSeconds) - audioContext.currentTime;
+                delayMs = Number.isFinite(aheadSeconds)
+                    ? Math.max(0, (aheadSeconds - lowWaterSeconds) * 1000)
+                    : 0;
             }
             if (options.generationRef.current !== generation) break;
         }
 
         const batch = await batchFn(false);
+        // Iterator calls cross the cancellation boundary. A superseded run no
+        // longer owns any of the shared refs and must not schedule or clean up.
+        if (options.generationRef.current !== generation) return;
         batchCount += 1;
         if (!Array.isArray(batch) || batch.length === 0) break;
 
@@ -267,13 +278,13 @@ export async function scheduleSynthBatchStream(
         if (hitDone) break;
     }
 
+    if (options.generationRef.current !== generation) return;
     if (mergedChunkState) flushMergedChunk(false);
     if (baseTime === null && pendingChunks.length > 0) flushPendingChunks();
 
-    if (!startedAny || options.generationRef.current !== generation) {
-        void stopSynthStream(options.sourcesRef, options.iteratorRef);
+    if (!startedAny) {
+        if (options.iteratorRef.current === batchFn) options.iteratorRef.current = null;
         options.onPlayingChange?.(false);
-        options.onPausedChange?.(false);
         return;
     }
 
@@ -283,9 +294,8 @@ export async function scheduleSynthBatchStream(
             releaseScheduledSource(options.sourcesRef.current, finalSource);
             if (options.generationRef.current !== generation) return;
             options.sourcesRef.current = [];
-            options.iteratorRef.current = null;
+            if (options.iteratorRef.current === batchFn) options.iteratorRef.current = null;
             options.onPlayingChange?.(false);
-            options.onPausedChange?.(false);
             options.onEnded?.();
         };
     }

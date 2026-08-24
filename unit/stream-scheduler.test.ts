@@ -112,4 +112,142 @@ describe('stream scheduler', () => {
         finishCancellation();
         await stopped;
     });
+
+    it('does not let a superseded iterator tear down the replacement stream', async () => {
+        let resolveOldBatch!: (value: []) => void;
+        const oldBatch = new Promise<[]>((resolve) => {
+            resolveOldBatch = resolve;
+        });
+        const oldIterator = vi.fn(async (cancel?: boolean) => cancel ? [] : oldBatch) as unknown as SynthAudioBatchIterator;
+        const floats = new Float32Array(1_024);
+        const newIterator = vi.fn(async () => [{
+            chunk: new Uint8Array(floats.buffer),
+            startTime: 5,
+            endTime: 5.1,
+            done: true,
+        }]) as SynthAudioBatchIterator;
+        const newSource = {
+            buffer: null,
+            connect: vi.fn(),
+            disconnect: vi.fn(),
+            start: vi.fn(),
+            stop: vi.fn(),
+            onended: null as (() => void) | null,
+        };
+        const audioContext = {
+            currentTime: 2,
+            sampleRate: 44_100,
+            destination: {} as AudioNode,
+            createBuffer: vi.fn(() => ({ copyToChannel: vi.fn() })),
+            createBufferSource: vi.fn(() => newSource),
+        } as unknown as AudioContext;
+        const target = {
+            sourcesRef: ref<AudioBufferSourceNode[]>([]),
+            iteratorRef: ref<SynthAudioBatchIterator | null>(null),
+            generationRef: ref(0),
+        };
+
+        const staleRun = scheduleSynthBatchStream(oldIterator, audioContext, {
+            ...target,
+            debugLabel: 'old',
+        });
+        await Promise.resolve();
+        await cancelSynthStream(target, { awaitCancel: true });
+        await scheduleSynthBatchStream(newIterator, audioContext, {
+            ...target,
+            debugLabel: 'new',
+        });
+
+        expect(target.iteratorRef.current).toBe(newIterator);
+        expect(target.sourcesRef.current).toEqual([newSource]);
+        resolveOldBatch([]);
+        await staleRun;
+
+        expect(newSource.stop).not.toHaveBeenCalled();
+        expect(newSource.disconnect).not.toHaveBeenCalled();
+        expect(target.iteratorRef.current).toBe(newIterator);
+        expect(target.sourcesRef.current).toEqual([newSource]);
+    });
+
+    it('signals playing only when the first chunk starts', async () => {
+        const sources = [0, 1].map(() => ({
+            buffer: null,
+            connect: vi.fn(),
+            disconnect: vi.fn(),
+            start: vi.fn(),
+            stop: vi.fn(),
+            onended: null as (() => void) | null,
+        }));
+        const audioContext = {
+            currentTime: 0,
+            sampleRate: 44_100,
+            destination: {} as AudioNode,
+            createBuffer: vi.fn(() => ({ copyToChannel: vi.fn() })),
+            createBufferSource: vi.fn(() => sources.shift()),
+        } as unknown as AudioContext;
+        const floats = new Float32Array(1_024);
+        const iterator = vi.fn(async () => [
+            { chunk: new Uint8Array(floats.buffer), startTime: 0, endTime: 0.1, done: false },
+            { chunk: new Uint8Array(floats.buffer), startTime: 0.1, endTime: 0.2, done: true },
+        ]) as SynthAudioBatchIterator;
+        const onPlayingChange = vi.fn();
+
+        await scheduleSynthBatchStream(iterator, audioContext, {
+            sourcesRef: ref([]),
+            iteratorRef: ref<SynthAudioBatchIterator | null>(null),
+            generationRef: ref(0),
+            debugLabel: 'test',
+            onPlayingChange,
+        });
+
+        expect(onPlayingChange).toHaveBeenCalledTimes(1);
+        expect(onPlayingChange).toHaveBeenCalledWith(true);
+    });
+
+    it('throttles iterator pulls until buffered audio drains to the low-water mark', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(0);
+        try {
+            const floats = new Float32Array(1_024);
+            let pull = 0;
+            const iterator = vi.fn(async () => {
+                pull += 1;
+                return pull === 1
+                    ? [{ chunk: new Uint8Array(floats.buffer), startTime: 0, endTime: 25, done: false }]
+                    : [{ chunk: new Uint8Array(floats.buffer), startTime: 25, endTime: 25.1, done: true }];
+            }) as SynthAudioBatchIterator;
+            const audioContext = {
+                get currentTime() { return Date.now() / 1000; },
+                sampleRate: 44_100,
+                destination: {} as AudioNode,
+                createBuffer: vi.fn(() => ({ copyToChannel: vi.fn() })),
+                createBufferSource: vi.fn(() => ({
+                    buffer: null,
+                    connect: vi.fn(),
+                    disconnect: vi.fn(),
+                    start: vi.fn(),
+                    stop: vi.fn(),
+                    onended: null as (() => void) | null,
+                })),
+            } as unknown as AudioContext;
+            const run = scheduleSynthBatchStream(iterator, audioContext, {
+                sourcesRef: ref([]),
+                iteratorRef: ref<SynthAudioBatchIterator | null>(null),
+                generationRef: ref(0),
+                debugLabel: 'window-test',
+                prerollSeconds: 0,
+                renderWindow: { horizonSeconds: 20, lowWaterSeconds: 10 },
+            });
+            await vi.advanceTimersByTimeAsync(0);
+            expect(iterator).toHaveBeenCalledTimes(1);
+
+            await vi.advanceTimersByTimeAsync(14_000);
+            expect(iterator).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(1_000);
+            await run;
+            expect(iterator).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });

@@ -40,6 +40,19 @@ describe('Home page', () => {
     }
   });
 
+  it('keeps plain score launches and embed flags without a score in the editor', () => {
+    const searches = [
+      new URLSearchParams({ score: '/bach.mscz' }),
+      new URLSearchParams({ embed: '1' }),
+    ];
+    for (const search of searches) {
+      mocks.search = search;
+      const view = render(<Home />);
+      expect(screen.getByTestId('dynamic-score-editor')).toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
   it('keeps compare and review modes ahead of player routing', () => {
     const searches = [
       new URLSearchParams({ score: '/bach.mscz', embed: 'player', compareLeft: '/a', compareRight: '/b' }),
