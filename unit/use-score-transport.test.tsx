@@ -402,4 +402,79 @@ describe('useScoreTransport', () => {
         expect(synthAudioBatch).toHaveBeenNthCalledWith(2, 4, 2);
         expect(result.current.positionMs).toBe(4_000);
     });
+
+    it('restarts from the stop target when Play supersedes stop cancellation', async () => {
+        let finishCancellation!: () => void;
+        const cancellation = new Promise<void>((resolve) => { finishCancellation = resolve; });
+        const floats = new Float32Array(1_024);
+        const firstIterator = vi.fn(async (cancel?: boolean) => {
+            if (cancel) await cancellation;
+            return cancel ? [] : [{
+                chunk: new Uint8Array(floats.buffer),
+                startTime: 3,
+                endTime: 3.1,
+                done: true,
+            }];
+        }) as SynthAudioBatchIterator;
+        const secondIterator = vi.fn(async () => [{
+            chunk: new Uint8Array(floats.buffer),
+            startTime: 1,
+            endTime: 1.1,
+            done: true,
+        }]) as SynthAudioBatchIterator;
+        const synthAudioBatch = vi.fn()
+            .mockResolvedValueOnce(firstIterator)
+            .mockResolvedValueOnce(secondIterator);
+        const score = { setSoundFont: vi.fn(), synthAudioBatch } as unknown as Score;
+        let contextState: AudioContextState = 'running';
+        const audioContext = {
+            currentTime: 10,
+            sampleRate: 44_100,
+            get state() { return contextState; },
+            destination: {} as AudioNode,
+            createGain: vi.fn(() => ({ gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() })),
+            createBuffer: vi.fn(() => ({ copyToChannel: vi.fn() })),
+            createBufferSource: vi.fn(() => ({
+                buffer: null,
+                connect: vi.fn(),
+                disconnect: vi.fn(),
+                start: vi.fn(),
+                stop: vi.fn(),
+                onended: null as (() => void) | null,
+            })),
+            suspend: vi.fn(async () => { contextState = 'suspended'; }),
+            resume: vi.fn(async () => { contextState = 'running'; }),
+            close: vi.fn(async () => { contextState = 'closed'; }),
+        } as unknown as AudioContext;
+        vi.stubGlobal('AudioContext', function FakeAudioContext() { return audioContext; });
+        const manager = {
+            ensure: vi.fn(async () => true),
+            prefetch: vi.fn(),
+        } as unknown as SoundFontManager<Score>;
+        const { result } = renderHook(() => useScoreTransport({
+            score,
+            durationMs: 10_000,
+            startMs: 1_000,
+            volume: 1,
+            soundFontManager: manager,
+        }));
+
+        await act(async () => { await result.current.togglePlayPause(); });
+        expect(result.current.state).toBe('playing');
+
+        act(() => {
+            void result.current.stopAt(1_000);
+            void result.current.togglePlayPause();
+        });
+        await waitFor(() => expect(synthAudioBatch).toHaveBeenCalledTimes(2));
+        await waitFor(() => expect(result.current.state).toBe('playing'));
+        expect(synthAudioBatch).toHaveBeenNthCalledWith(2, 1, 2);
+
+        await act(async () => {
+            finishCancellation();
+            await cancellation;
+        });
+        expect(result.current.state).toBe('playing');
+        expect(result.current.positionMs).toBe(1_000);
+    });
 });

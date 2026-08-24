@@ -303,7 +303,7 @@ export function useScoreTransport(options: Options) {
             playbackAttemptRef.current += 1;
             pendingStopRef.current = null;
         }
-        if (pendingTargetMs !== null && priorState === 'paused') {
+        if (pendingTargetMs !== null) {
             await playFrom(pendingTargetMs);
             return;
         }

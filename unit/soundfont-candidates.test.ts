@@ -44,6 +44,19 @@ describe('soundfont candidates', () => {
         });
 
         expect(candidates[0]).toBe('https://cdn.example.test/default.sf3');
+        expect(candidates[1]).toBe('https://cdn.example.test/default.sf2');
         expect(new Set(candidates).size).toBe(candidates.length);
+    });
+
+    it('prefers a compressed sibling for a legacy direct SF2 URL', () => {
+        const candidates = buildSoundFontCandidates({
+            cdnUrl: 'https://cdn.example.test/default.sf2',
+            embedBuild: false,
+        });
+
+        expect(candidates.slice(0, 2)).toEqual([
+            'https://cdn.example.test/default.sf3',
+            'https://cdn.example.test/default.sf2',
+        ]);
     });
 });

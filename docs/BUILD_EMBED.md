@@ -25,7 +25,7 @@ If you need to build from source or customize the build:
 mv public/soundfonts ~/soundfonts.backup
 
 # 2. Build embed version with CDN soundfont baked into static JS
-NEXT_PUBLIC_SOUNDFONT_CDN_URL=https://cdn.ourtextscores.com/soundfonts/default.sf2 \
+NEXT_PUBLIC_SOUNDFONT_CDN_URL=https://cdn.ourtextscores.com/soundfonts/default.sf3 \
 npm run build:embed
 
 # 3. Restore soundfonts for local development
@@ -35,7 +35,8 @@ mv ~/soundfonts.backup public/soundfonts
 Important:
 - `NEXT_PUBLIC_SOUNDFONT_CDN_URL` is compile-time for static export builds.
 - If you omit it, the built app will only try local `/soundfonts/*` fallback files.
-- If `public/soundfonts/default.sf2` exists locally and you do not move/remove it before build, it will be copied into `out/` and may break downstream git pushes (GitHub 100MB file limit).
+- If a soundfont remains under `public/soundfonts/`, it will be copied into `out/`; move the
+  directory out before building so the CDN asset is not vendored downstream.
 
 #### Option 2: Full release package (with archives)
 
@@ -44,7 +45,7 @@ Important:
 mv public/soundfonts ~/soundfonts.backup
 
 # 2. Build and package (creates .tar.gz and .zip in release/)
-NEXT_PUBLIC_SOUNDFONT_CDN_URL=https://cdn.ourtextscores.com/soundfonts/default.sf2 \
+NEXT_PUBLIC_SOUNDFONT_CDN_URL=https://cdn.ourtextscores.com/soundfonts/default.sf3 \
 npm run release:prepare
 
 # 3. Restore soundfonts
@@ -162,7 +163,7 @@ run:
 ```bash
 cd ~/workspace/OTS_Web
 
-NEXT_PUBLIC_SOUNDFONT_CDN_URL=https://cdn.ourtextscores.com/soundfonts/default.sf2 \
+NEXT_PUBLIC_SOUNDFONT_CDN_URL=https://cdn.ourtextscores.com/soundfonts/default.sf3 \
 npm run build:embed
 
 ls -la out/soundfonts 2>/dev/null || echo "OK: no out/soundfonts directory"
@@ -394,7 +395,7 @@ If you need to use a different soundfont:
    ```
    You can also set a direct file URL:
    ```bash
-   NEXT_PUBLIC_SOUNDFONT_CDN_URL=https://cdn.example.com/soundfonts/default.sf2 npm run build:embed
+   NEXT_PUBLIC_SOUNDFONT_CDN_URL=https://cdn.example.com/soundfonts/default.sf3 npm run build:embed
    ```
 
 ### Local Soundfonts (Development Only)
@@ -520,20 +521,28 @@ The editor emits client-side analytics events (e.g. `score_editor_runtime_loaded
 
 If soundfonts don't load in production:
 
-1. Verify the CDN URL is correct and accessible:
+1. Publish the compressed file before deploying a bundle that points to it. For the current
+   OurTextScores asset, the expected source is `public/soundfonts/default.sf3`, 39,900,972 bytes,
+   SHA-256 `5b85b6c2c61d10b2b91cddd41efcce7b25cd31c8271d511c73afafbef20b6fa3`.
+   Upload it with `Content-Type: application/octet-stream` and
+   `Cache-Control: public, max-age=31536000, immutable`. Configure the CDN to cache this path;
+   do not release while Cloudflare still reports `DYNAMIC`.
+2. Verify the CDN URL, size and cache policy:
    ```bash
-   curl -I https://cdn.ourtextscores.com/soundfonts/default.sf2
+   curl -I https://cdn.ourtextscores.com/soundfonts/default.sf3
    ```
-2. Verify CORS from the app origin:
+   Expect `200`, `content-length: 39900972`, the immutable `cache-control` value above, and
+   `cf-cache-status: HIT` after warming the URL once.
+3. Verify CORS from the app origin:
    ```bash
-   curl -I -H "Origin: https://www.ourtextscores.com" https://cdn.ourtextscores.com/soundfonts/default.sf2
+   curl -I -H "Origin: https://www.ourtextscores.com" https://cdn.ourtextscores.com/soundfonts/default.sf3
    ```
    Response should include `access-control-allow-origin`.
-3. Verify the URL is baked into the exported JS bundle:
+4. Verify the URL is baked into the exported JS bundle:
    ```bash
-   grep -Rho "https://cdn.ourtextscores.com/soundfonts/default.sf2" out/_next/static/chunks | head -n 1
+   grep -Rho "https://cdn.ourtextscores.com/soundfonts/default.sf3" out/_next/static/chunks | head -n 1
    ```
-4. Verify you did not accidentally ship a local bundled soundfont:
+5. Verify you did not accidentally ship a local bundled soundfont:
    ```bash
    ls -la out/soundfonts 2>/dev/null || echo "OK: no bundled soundfonts"
    ```
@@ -546,7 +555,7 @@ All options are set via environment variables:
 |----------|-------------|---------|
 | `BUILD_MODE` | Enable static export | `embed` |
 | `NEXT_PUBLIC_BUILD_MODE` | Client-side build mode flag | `embed` |
-| `NEXT_PUBLIC_SOUNDFONT_CDN_URL` | CDN URL for soundfonts | `https://cdn.ourtextscores.com/soundfonts/default.sf2` |
+| `NEXT_PUBLIC_SOUNDFONT_CDN_URL` | CDN URL for soundfonts | `https://cdn.ourtextscores.com/soundfonts/default.sf3` |
 | `NEXT_PUBLIC_SCORE_EDITOR_API_BASE` | Same-origin proxy base for editor API routes in embed mode (LLM + music) | `/api/score-editor` |
 | `NEXT_PUBLIC_ANALYTICS_EVENTS_PATH` | Path for analytics event ingestion | `/api/analytics/events` |
 

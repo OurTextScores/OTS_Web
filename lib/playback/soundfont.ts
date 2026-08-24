@@ -15,7 +15,13 @@ export function buildSoundFontCandidates(options?: {
     if (cdnRaw) {
         const cdn = cdnRaw.replace(/\/+$/, '');
         const lower = cdn.toLowerCase();
-        if (lower.endsWith('.sf2') || lower.endsWith('.sf3')) {
+        if (lower.endsWith('.sf3')) {
+            add(cdn);
+            add(`${cdn.slice(0, -4)}.sf2`);
+        } else if (lower.endsWith('.sf2')) {
+            // Prefer the compressed sibling even when a legacy deployment still
+            // configures the much larger SF2 file directly.
+            add(`${cdn.slice(0, -4)}.sf3`);
             add(cdn);
         } else {
             add(`${cdn}.sf3`);
