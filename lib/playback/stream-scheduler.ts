@@ -60,6 +60,19 @@ export async function stopSynthStream(
 }
 
 /**
+ * Invalidates an active/pending stream before cancellation crosses an async
+ * boundary. Consumers should use this for stop, seek, score replacement, and
+ * unmount so a late iterator result cannot schedule audio after cancellation.
+ */
+export async function cancelSynthStream(
+    target: StreamPlaybackTarget,
+    options?: { awaitCancel?: boolean },
+) {
+    target.generationRef.current += 1;
+    await stopSynthStream(target.sourcesRef, target.iteratorRef, options);
+}
+
+/**
  * Pulls de-interleaved Float32 PCM from webmscore and schedules it on one AudioContext.
  *
  * The render window limits production ahead of the playhead; per-source `onended`

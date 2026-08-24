@@ -13,9 +13,9 @@ test('compare panels have independent play/pause/stop with mutual exclusion', as
   await page.getByTestId('input-checkpoint-label').fill(checkpointLabel);
   await page.getByTestId('btn-checkpoint-save').click();
 
-  const checkpointCard = page.locator('div').filter({ hasText: checkpointLabel }).first();
-  await expect(checkpointCard).toBeVisible({ timeout: 15_000 });
-  await checkpointCard.getByRole('button', { name: 'Compare' }).click();
+  const compareCheckpoint = page.locator('[data-testid^="btn-checkpoint-compare-"]').last();
+  await expect(compareCheckpoint).toBeVisible({ timeout: 15_000 });
+  await compareCheckpoint.click();
   await page.getByTestId('checkpoint-compare-modal').waitFor({ timeout: 20_000 });
 
   const playLeft = page.getByTestId('btn-compare-play-left');

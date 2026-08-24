@@ -12,13 +12,21 @@ import { loadWebMscore } from '@/lib/webmscore-loader';
 import { sanitizeEngineSvg } from '@/lib/sanitize-svg';
 import { detectScoreInputFormat, resolvePublicScoreUrl } from '@/lib/public-score-url';
 import { DEFAULT_RENDER_WINDOW } from '@/lib/playback-window';
-import { fetchDefaultSoundFont } from '@/lib/playback/soundfont';
-import { scheduleSynthBatchStream, stopSynthStream } from '@/lib/playback/stream-scheduler';
+import { SoundFontManager } from '@/lib/playback/soundfont-manager';
+import {
+    cancelSynthStream,
+    scheduleSynthBatchStream,
+} from '@/lib/playback/stream-scheduler';
 import {
     occurrenceAtTime,
     occurrenceForMeasure,
     timelineFromPositions,
 } from '@/lib/playback/timeline';
+import {
+    clampScorePosition,
+    scoreTimeAt,
+    type TransportClockAnchor,
+} from '@/lib/playback/transport-clock';
 import PlayerControls from './PlayerControls';
 
 type TransportKind = 'idle' | 'preparing' | 'playing' | 'paused' | 'ended' | 'unavailable';
@@ -60,9 +68,9 @@ export default function EmbeddedScorePlayer() {
     const loadGenerationRef = useRef(0);
     const playbackAttemptRef = useRef(0);
     const streamGenerationRef = useRef(0);
-    const clockRef = useRef<{ contextTime: number; scoreTimeSeconds: number } | null>(null);
-    const soundFontPromiseRef = useRef<ReturnType<typeof fetchDefaultSoundFont> | null>(null);
-    const soundFontReadyRef = useRef(false);
+    const clockRef = useRef<TransportClockAnchor | null>(null);
+    const soundFontManagerRef = useRef<SoundFontManager<Score> | null>(null);
+    if (!soundFontManagerRef.current) soundFontManagerRef.current = new SoundFontManager<Score>();
     const startMsRef = useRef(0);
     const renderGenerationRef = useRef(0);
 
@@ -72,7 +80,7 @@ export default function EmbeddedScorePlayer() {
     }, []);
     const publishPosition = useCallback((next: number) => {
         const duration = timeline?.durationMs ?? 0;
-        const clamped = clamp(next, 0, Math.max(duration, 0));
+        const clamped = clampScorePosition(next, duration);
         positionRef.current = clamped;
         setPositionMs(clamped);
     }, [timeline?.durationMs]);
@@ -96,8 +104,6 @@ export default function EmbeddedScorePlayer() {
         const controller = new AbortController();
         const generation = ++loadGenerationRef.current;
         let loadedScore: Score | null = null;
-        soundFontPromiseRef.current = null;
-        soundFontReadyRef.current = false;
         setScore(null);
         setSvg('');
         setPositions(null);
@@ -155,7 +161,7 @@ export default function EmbeddedScorePlayer() {
                     : 0;
                 setCurrentPage(clamp(initialPage, 0, Math.max(0, Number(pageTotal) - 1)));
 
-                soundFontPromiseRef.current = fetchDefaultSoundFont(controller.signal).catch(() => null);
+                void soundFontManagerRef.current?.prefetch(controller.signal).catch(() => null);
                 setLoading(false);
             } catch (loadError) {
                 if (controller.signal.aborted) return;
@@ -170,13 +176,16 @@ export default function EmbeddedScorePlayer() {
             controller.abort();
             loadGenerationRef.current += 1;
             playbackAttemptRef.current += 1;
-            streamGenerationRef.current += 1;
             const ownedScore = loadedScore;
             const ownedAudioContext = audioContextRef.current;
             const ownedGainNode = gainNodeRef.current;
             audioContextRef.current = null;
             gainNodeRef.current = null;
-            void stopSynthStream(sourcesRef, iteratorRef, { awaitCancel: true }).finally(() => {
+            void cancelSynthStream({
+                sourcesRef,
+                iteratorRef,
+                generationRef: streamGenerationRef,
+            }, { awaitCancel: true }).finally(() => {
                 ownedGainNode?.disconnect();
                 if (ownedAudioContext && ownedAudioContext.state !== 'closed') {
                     void ownedAudioContext.close();
@@ -217,24 +226,22 @@ export default function EmbeddedScorePlayer() {
     const ensureSoundFont = useCallback(async () => {
         const activeScore = scoreRef.current;
         if (!activeScore?.setSoundFont) return false;
-        if (soundFontReadyRef.current) return true;
         setAudioMessage('Preparing audio…');
-        if (!soundFontPromiseRef.current) soundFontPromiseRef.current = fetchDefaultSoundFont();
-        const soundFont = await soundFontPromiseRef.current;
-        if (!soundFont) {
-            soundFontPromiseRef.current = null;
-            return false;
-        }
-        await activeScore.setSoundFont(soundFont.bytes.slice());
-        soundFontReadyRef.current = true;
+        const ready = await soundFontManagerRef.current?.ensure(activeScore, {
+            forceRetry: transportRef.current === 'unavailable',
+        }) ?? false;
+        if (!ready) return false;
         setAudioMessage('');
         return true;
     }, []);
 
     const stopAt = useCallback(async (targetMs: number, nextState: TransportKind = 'idle') => {
         playbackAttemptRef.current += 1;
-        streamGenerationRef.current += 1;
-        await stopSynthStream(sourcesRef, iteratorRef, { awaitCancel: true });
+        await cancelSynthStream({
+            sourcesRef,
+            iteratorRef,
+            generationRef: streamGenerationRef,
+        }, { awaitCancel: true });
         clockRef.current = null;
         publishPosition(targetMs);
         setTransportState(nextState);
@@ -259,8 +266,11 @@ export default function EmbeddedScorePlayer() {
                 }
                 return;
             }
-            streamGenerationRef.current += 1;
-            await stopSynthStream(sourcesRef, iteratorRef, { awaitCancel: true });
+            await cancelSynthStream({
+                sourcesRef,
+                iteratorRef,
+                generationRef: streamGenerationRef,
+            }, { awaitCancel: true });
             if (attempt !== playbackAttemptRef.current) return;
             const audioContext = await ensureAudioContext();
             const iterator = await activeScore.synthAudioBatch(targetMs / 1000, 2) as SynthAudioBatchIterator;
@@ -327,7 +337,8 @@ export default function EmbeddedScorePlayer() {
             const context = audioContextRef.current;
             const anchor = clockRef.current;
             if (context && anchor) {
-                publishPosition((anchor.scoreTimeSeconds + Math.max(0, context.currentTime - anchor.contextTime)) * 1000);
+                const scoreTime = scoreTimeAt(anchor, context.currentTime);
+                if (scoreTime !== null) publishPosition(scoreTime * 1000);
             }
             frame = window.requestAnimationFrame(update);
         };

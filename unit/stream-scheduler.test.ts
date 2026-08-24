@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MutableRefObject } from 'react';
 import type { SynthAudioBatchIterator } from '@/lib/webmscore-loader';
-import { scheduleSynthBatchStream, stopSynthStream } from '@/lib/playback/stream-scheduler';
+import {
+    cancelSynthStream,
+    scheduleSynthBatchStream,
+    stopSynthStream,
+} from '@/lib/playback/stream-scheduler';
 
 const ref = <T,>(current: T) => ({ current }) as MutableRefObject<T>;
 
@@ -86,5 +90,26 @@ describe('stream scheduler', () => {
         finishCancellation();
         await stopped;
         expect(iterator).toHaveBeenCalledWith(true);
+    });
+
+    it('invalidates stream ownership before awaiting cancellation', async () => {
+        let finishCancellation!: () => void;
+        const cancellation = new Promise<void>((resolve) => { finishCancellation = resolve; });
+        const iterator = vi.fn(async (cancel?: boolean) => {
+            if (cancel) await cancellation;
+            return [];
+        }) as SynthAudioBatchIterator;
+        const target = {
+            sourcesRef: ref<AudioBufferSourceNode[]>([]),
+            iteratorRef: ref<SynthAudioBatchIterator | null>(iterator),
+            generationRef: ref(7),
+        };
+
+        const stopped = cancelSynthStream(target, { awaitCancel: true });
+        expect(target.generationRef.current).toBe(8);
+        expect(target.iteratorRef.current).toBeNull();
+
+        finishCancellation();
+        await stopped;
     });
 });

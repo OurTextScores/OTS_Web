@@ -90,10 +90,11 @@ import { appendMusicXmlMeasures, appendMusicXmlParts } from '../lib/musicxml-app
 import { sanitizeEngineSvg } from '../lib/sanitize-svg';
 import { DEFAULT_RENDER_WINDOW, type RenderWindow } from '../lib/playback-window';
 import {
+    cancelSynthStream,
     scheduleSynthBatchStream,
     stopSynthStream as stopSharedSynthStream,
 } from '../lib/playback/stream-scheduler';
-import { buildSoundFontCandidates as resolveSoundFontCandidates } from '../lib/playback/soundfont';
+import { SoundFontManager } from '../lib/playback/soundfont-manager';
 import { extractPatchAnnotations, PATCH_ANNOTATIONS_INSTRUCTION, type PatchAnnotation } from '../lib/patch-annotations';
 import {
     extractTraceContextFromHeaders,
@@ -1302,21 +1303,8 @@ export default function ScoreEditor() {
     const [triedSoundFont, setTriedSoundFont] = useState(false);
     const soundFontLoadedRef = useRef(soundFontLoaded);
     const triedSoundFontRef = useRef(triedSoundFont);
-    const soundFontLoadPromiseRef = useRef<Promise<boolean> | null>(null);
-    // Soundfont-applied state for Score instances other than the main `score` (e.g.
-    // compare-panel checkpoints/proposals loaded into their own WebMscore instance).
-    // Keyed by score identity, distinct from the refs above, which are the main
-    // score's applied/tried/in-flight state -- a single shared boolean would wrongly
-    // report "already loaded" for an instance that never actually got setSoundFont.
-    // Values are the soundfont *version* applied/attempted, so bumping
-    // soundFontVersionRef (e.g. on a user upload) invalidates every previously
-    // recorded application without needing to iterate/clear a WeakMap.
-    const soundFontVersionRef = useRef(0);
-    const soundFontAppliedScoresRef = useRef<WeakMap<Score, number>>(new WeakMap());
-    const soundFontFailedScoresRef = useRef<WeakMap<Score, number>>(new WeakMap());
-    const soundFontLoadPromisesByScoreRef = useRef<WeakMap<Score, Promise<boolean>>>(new WeakMap());
-    const soundFontPrefetchPromiseRef = useRef<Promise<{ url: string; buf: Uint8Array } | null> | null>(null);
-    const soundFontPrefetchResultRef = useRef<{ url: string; buf: Uint8Array } | null>(null);
+    const soundFontManagerRef = useRef<SoundFontManager<Score> | null>(null);
+    if (!soundFontManagerRef.current) soundFontManagerRef.current = new SoundFontManager<Score>();
     const [scoreTitle, setScoreTitle] = useState('');
     const [scoreSubtitle, setScoreSubtitle] = useState('');
     const [scoreComposer, setScoreComposer] = useState('');
@@ -5977,9 +5965,6 @@ ${partsBodyXml}
         setInteractionState({ preparing: false, ready: false });
         soundFontLoadedRef.current = false;
         triedSoundFontRef.current = false;
-        soundFontLoadPromiseRef.current = null;
-        soundFontPrefetchPromiseRef.current = null;
-        soundFontPrefetchResultRef.current = null;
         setSoundFontLoaded(false);
         setTriedSoundFont(false);
         setScoreDirtySinceCheckpoint(false);
@@ -6194,9 +6179,6 @@ ${partsBodyXml}
         setInteractionState({ preparing: false, ready: false });
         soundFontLoadedRef.current = false;
         triedSoundFontRef.current = false;
-        soundFontLoadPromiseRef.current = null;
-        soundFontPrefetchPromiseRef.current = null;
-        soundFontPrefetchResultRef.current = null;
         setSoundFontLoaded(false);
         setTriedSoundFont(false);
         setScoreDirtySinceCheckpoint(false);
@@ -8046,41 +8028,10 @@ ${partsBodyXml}
         score,
     ]);
 
-
-    const buildSoundFontCandidates = useCallback((): string[] => {
-        return resolveSoundFontCandidates();
-    }, []);
-
     const prefetchSoundFontBytes = useCallback(async (): Promise<{ url: string; buf: Uint8Array } | null> => {
-        if (soundFontPrefetchResultRef.current) {
-            return soundFontPrefetchResultRef.current;
-        }
-        if (soundFontPrefetchPromiseRef.current) {
-            return soundFontPrefetchPromiseRef.current;
-        }
-        const prefetchPromise = (async () => {
-            const candidates = buildSoundFontCandidates();
-            console.debug('[AUDIO] soundfont candidates', { candidates });
-            for (const url of candidates) {
-                try {
-                    const res = await fetch(url);
-                    if (!res.ok) {
-                        console.warn('[AUDIO] soundfont candidate not found', { url, status: res.status });
-                        continue;
-                    }
-                    const buf = new Uint8Array(await res.arrayBuffer());
-                    const result = { url, buf };
-                    soundFontPrefetchResultRef.current = result;
-                    return result;
-                } catch (err) {
-                    console.warn('Default soundfont fetch failed for', url, err);
-                }
-            }
-            return null;
-        })();
-        soundFontPrefetchPromiseRef.current = prefetchPromise;
-        return prefetchPromise;
-    }, [buildSoundFontCandidates]);
+        const source = await soundFontManagerRef.current?.prefetch() ?? null;
+        return source ? { url: source.url, buf: source.bytes } : null;
+    }, []);
 
     ensureSoundFontLoadedRef.current = async (targetScore, options) => {
         // scoreRef.current is updated synchronously the moment a newly loaded score
@@ -8095,92 +8046,24 @@ ${partsBodyXml}
             console.warn('[AUDIO] soundfont load skipped: setSoundFont unavailable');
             return false;
         }
-        // The main score's applied/tried/in-flight state lives in the refs above (and
-        // is mirrored into UI state for the soundfont-status indicator). Any other
-        // Score instance -- e.g. a compare-panel checkpoint/proposal loaded into its
-        // own WebMscore instance -- is tracked separately by identity, versioned so a
-        // later soundfont upload (which replaces the shared prefetched bytes)
-        // invalidates every previously recorded application/failure.
         const isMainScore = activeScore === currentMainScore;
-        const soundFontVersion = soundFontVersionRef.current;
-        const alreadyApplied = isMainScore
-            ? soundFontLoadedRef.current
-            : soundFontAppliedScoresRef.current.get(activeScore) === soundFontVersion;
-        if (alreadyApplied) {
-            console.debug('[AUDIO] soundfont already loaded');
-            return true;
-        }
         const forceRetry = Boolean(options?.forceRetry);
-        const previouslyFailed = isMainScore
-            ? triedSoundFontRef.current
-            : soundFontFailedScoresRef.current.get(activeScore) === soundFontVersion;
-        if (previouslyFailed && !forceRetry) {
-            console.warn('[AUDIO] soundfont load skipped: previous attempt already failed');
-            return false;
+        if (isMainScore && !soundFontManagerRef.current?.isApplied(activeScore)) {
+            triedSoundFontRef.current = true;
+            setTriedSoundFont(true);
         }
-        const existingPromise = isMainScore
-            ? soundFontLoadPromiseRef.current
-            : soundFontLoadPromisesByScoreRef.current.get(activeScore);
-        if (existingPromise) {
-            return existingPromise;
+        const loaded = await soundFontManagerRef.current?.ensure(activeScore, {
+            forceRetry,
+            install: (target, bytes) => runSerializedScoreOperation(
+                () => target.setSoundFont(bytes),
+                'setSoundFont',
+            ),
+        }) ?? false;
+        if (loaded && isMainScore) {
+            soundFontLoadedRef.current = true;
+            setSoundFontLoaded(true);
         }
-        if (forceRetry && previouslyFailed) {
-            console.debug('[AUDIO] retrying soundfont load after previous failure');
-        }
-
-        const loadPromise = (async () => {
-            if (isMainScore) {
-                triedSoundFontRef.current = true;
-                setTriedSoundFont(true);
-            } else {
-                soundFontFailedScoresRef.current.set(activeScore, soundFontVersion);
-            }
-            const prefetched = await prefetchSoundFontBytes();
-            if (!prefetched) {
-                return false;
-            }
-            try {
-                // setSoundFont transfers the buffer to the score's worker (detaching
-                // it), so the cached bytes -- shared across every Score instance that
-                // calls ensureSoundFontLoaded -- must be copied per call. Without the
-                // slice, whichever instance applies the soundfont first detaches the
-                // shared ArrayBuffer and every other instance's call fails with
-                // "ArrayBuffer ... is already detached".
-                await runSerializedScoreOperation(
-                    () => activeScore.setSoundFont(prefetched.buf.slice()),
-                    'setSoundFont',
-                );
-                if (isMainScore) {
-                    soundFontLoadedRef.current = true;
-                    setSoundFontLoaded(true);
-                } else {
-                    soundFontAppliedScoresRef.current.set(activeScore, soundFontVersion);
-                    soundFontFailedScoresRef.current.delete(activeScore);
-                }
-                console.debug('[AUDIO] soundfont loaded', { url: prefetched.url, bytes: prefetched.buf.byteLength });
-                return true;
-            } catch (err) {
-                console.warn('Default soundfont apply failed for', prefetched.url, err);
-                return false;
-            }
-        })();
-
-        if (isMainScore) {
-            soundFontLoadPromiseRef.current = loadPromise;
-        } else {
-            soundFontLoadPromisesByScoreRef.current.set(activeScore, loadPromise);
-        }
-        try {
-            return await loadPromise;
-        } finally {
-            if (isMainScore) {
-                if (soundFontLoadPromiseRef.current === loadPromise) {
-                    soundFontLoadPromiseRef.current = null;
-                }
-            } else if (soundFontLoadPromisesByScoreRef.current.get(activeScore) === loadPromise) {
-                soundFontLoadPromisesByScoreRef.current.delete(activeScore);
-            }
-        }
+        return loaded;
     };
 
     const handleSoundFontUpload = async (file: File) => {
@@ -8191,26 +8074,20 @@ ${partsBodyXml}
         try {
             const buffer = await file.arrayBuffer();
             const data = new Uint8Array(buffer);
-            // Cache the pristine bytes so any other Score instance (e.g. a
-            // compare-panel checkpoint/proposal) picks up this same soundfont via
-            // ensureSoundFontLoaded instead of silently falling back to the
-            // default/CDN one -- otherwise the two panels would compare under
-            // different timbres, or checkpoint playback would fail outright when no
-            // default is configured. setSoundFont transfers (detaches) whatever
-            // buffer it's given, so the main score gets its own copy and the cached
-            // bytes stay intact for later reuse. Bumping the version invalidates
-            // every previously recorded per-score application/failure so the next
-            // attempt on any auxiliary score re-applies this upload.
-            soundFontPrefetchResultRef.current = { url: `uploaded:${file.name}`, buf: data };
-            soundFontPrefetchPromiseRef.current = null;
-            soundFontVersionRef.current += 1;
-            await runSerializedScoreOperation(
-                () => score.setSoundFont(data.slice()),
-                'setSoundFont(upload)',
-            );
+            // The manager retains pristine bytes, copies them across the worker
+            // boundary, and invalidates every main/compare score installed from the
+            // previous source version.
+            soundFontManagerRef.current?.replace({ url: `uploaded:${file.name}`, bytes: data });
+            const loaded = await soundFontManagerRef.current?.ensure(score, {
+                forceRetry: true,
+                install: (target, bytes) => runSerializedScoreOperation(
+                    () => target.setSoundFont(bytes),
+                    'setSoundFont(upload)',
+                ),
+            }) ?? false;
+            if (!loaded) throw new Error('The uploaded soundfont could not be installed.');
             soundFontLoadedRef.current = true;
             triedSoundFontRef.current = true;
-            soundFontLoadPromiseRef.current = null;
             setSoundFontLoaded(true);
             setTriedSoundFont(true);
         } catch (err) {
@@ -13976,12 +13853,14 @@ ${partsBodyXml}
 
     const stopSynthStream = stopSharedSynthStream;
     const stopPreviewAudio = async (options?: { awaitCancel?: boolean }) => {
-        previewPlaybackGenerationRef.current += 1;
-        await stopSynthStream(previewAudioSourcesRef, previewStreamIteratorRef, options);
+        await cancelSynthStream({
+            sourcesRef: previewAudioSourcesRef,
+            iteratorRef: previewStreamIteratorRef,
+            generationRef: previewPlaybackGenerationRef,
+        }, options);
     };
 
     const stopAudio = async (options?: { awaitCancel?: boolean }) => {
-        transportPlaybackGenerationRef.current += 1;
         if (audioRef.current) {
             audioRef.current.pause();
             audioRef.current.currentTime = 0;
@@ -13990,7 +13869,11 @@ ${partsBodyXml}
             URL.revokeObjectURL(tempPlaybackAudioUrlRef.current);
             tempPlaybackAudioUrlRef.current = null;
         }
-        await stopSynthStream(audioSourcesRef, streamIteratorRef, options);
+        await cancelSynthStream({
+            sourcesRef: audioSourcesRef,
+            iteratorRef: streamIteratorRef,
+            generationRef: transportPlaybackGenerationRef,
+        }, options);
         await stopPreviewAudio(options);
         setIsPlaying(false);
         setIsPaused(false);

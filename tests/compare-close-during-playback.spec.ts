@@ -35,9 +35,9 @@ test('closing compare while a pane is streaming tears down without a worker erro
     await page.getByTestId('input-checkpoint-label').fill(checkpointLabel);
     await page.getByTestId('btn-checkpoint-save').click();
 
-    const checkpointCard = page.locator('div').filter({ hasText: checkpointLabel }).first();
-    await expect(checkpointCard).toBeVisible({ timeout: 15_000 });
-    await checkpointCard.getByRole('button', { name: 'Compare' }).click();
+    const compareCheckpoint = page.locator('[data-testid^="btn-checkpoint-compare-"]').last();
+    await expect(compareCheckpoint).toBeVisible({ timeout: 15_000 });
+    await compareCheckpoint.click();
     await page.getByTestId('checkpoint-compare-modal').waitFor({ timeout: 20_000 });
 
     // Start playback on the right pane and wait until it is genuinely streaming rather
@@ -57,7 +57,7 @@ test('closing compare while a pane is streaming tears down without a worker erro
     await expect(page.getByTestId('selection-overlay')).toBeVisible({ timeout: 20_000 });
 
     // Re-opening compare must still work, which requires a clean auxiliary score lifecycle.
-    await checkpointCard.getByRole('button', { name: 'Compare' }).click();
+    await compareCheckpoint.click();
     await page.getByTestId('checkpoint-compare-modal').waitFor({ timeout: 20_000 });
     await expect(page.getByTestId('btn-compare-play-right')).toBeVisible();
 
