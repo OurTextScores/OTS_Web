@@ -23,6 +23,7 @@ export function useScoreTransport(options: Options) {
     const stateRef = useRef<ScoreTransportState>('idle');
     const [positionMs, setPositionMs] = useState(options.startMs);
     const [renderWindowIdle, setRenderWindowIdle] = useState(true);
+    const [fallbackMode, setFallbackMode] = useState(false);
     const positionRef = useRef(options.startMs);
     const scoreRef = useRef(options.score);
     const durationRef = useRef(options.durationMs);
@@ -39,6 +40,8 @@ export function useScoreTransport(options: Options) {
     const generationRef = useRef(0);
     const clockRef = useRef<TransportClockAnchor | null>(null);
     const soundFontManagerRef = useRef(options.soundFontManager ?? new SoundFontManager<Score>());
+    const fallbackAudioRef = useRef<HTMLAudioElement | null>(null);
+    const fallbackUrlRef = useRef<string | null>(null);
 
     scoreRef.current = options.score;
     durationRef.current = options.durationMs;
@@ -62,7 +65,26 @@ export function useScoreTransport(options: Options) {
 
     useEffect(() => {
         if (gainNodeRef.current) gainNodeRef.current.gain.value = options.volume;
+        if (fallbackAudioRef.current) fallbackAudioRef.current.volume = options.volume;
     }, [options.volume]);
+
+    const pauseFallbackAudio = useCallback(() => {
+        const audio = fallbackAudioRef.current;
+        if (audio && !audio.paused) audio.pause();
+    }, []);
+
+    const releaseFallbackAudio = useCallback(() => {
+        const audio = fallbackAudioRef.current;
+        const url = fallbackUrlRef.current;
+        fallbackAudioRef.current = null;
+        fallbackUrlRef.current = null;
+        if (audio) {
+            audio.pause();
+            audio.removeAttribute('src');
+            audio.load();
+        }
+        if (url) URL.revokeObjectURL(url);
+    }, []);
 
     const ensureAudioContext = useCallback(async () => {
         const audioContext = audioContextRef.current ?? new AudioContext({ sampleRate: 44_100 });
@@ -81,10 +103,11 @@ export function useScoreTransport(options: Options) {
         const attempt = ++playbackAttemptRef.current;
         clockRef.current = null;
         setRenderWindowIdle(false);
+        pauseFallbackAudio();
         await cancelSynthStream({ sourcesRef, iteratorRef, generationRef }, { awaitCancel });
         if (attempt === playbackAttemptRef.current) setRenderWindowIdle(true);
         return attempt;
-    }, []);
+    }, [pauseFallbackAudio]);
 
     const stopAt = useCallback(async (
         targetMs: number,
@@ -94,6 +117,7 @@ export function useScoreTransport(options: Options) {
         pendingStopAttemptRef.current = attempt;
         clockRef.current = null;
         setRenderWindowIdle(false);
+        pauseFallbackAudio();
         await cancelSynthStream({ sourcesRef, iteratorRef, generationRef }, { awaitCancel: true });
         if (pendingStopAttemptRef.current === attempt) pendingStopAttemptRef.current = null;
         if (attempt !== playbackAttemptRef.current) return false;
@@ -101,13 +125,76 @@ export function useScoreTransport(options: Options) {
         publishPosition(targetMs);
         publishState(nextState);
         return true;
+    }, [pauseFallbackAudio, publishPosition, publishState]);
+
+    const playFallbackFrom = useCallback(async (
+        activeScore: Score,
+        targetMs: number,
+        attempt: number,
+        prepare: boolean,
+    ) => {
+        let audio = fallbackAudioRef.current;
+        if (!audio || prepare) {
+            if (!activeScore.saveAudio) throw new Error('Compatibility audio is unavailable in this build.');
+            messageRef.current?.('Streaming unavailable — preparing compatibility audio…');
+            const wav = await activeScore.saveAudio('wav');
+            if (attempt !== playbackAttemptRef.current) return;
+            if (fallbackUrlRef.current) URL.revokeObjectURL(fallbackUrlRef.current);
+            const url = URL.createObjectURL(new Blob([new Uint8Array(wav)], { type: 'audio/wav' }));
+            fallbackUrlRef.current = url;
+            audio = new Audio(url);
+            fallbackAudioRef.current = audio;
+            await new Promise<void>((resolve, reject) => {
+                if (audio!.readyState >= 1) {
+                    resolve();
+                    return;
+                }
+                audio!.addEventListener('loadedmetadata', () => resolve(), { once: true });
+                audio!.addEventListener('error', () => reject(new Error('Compatibility audio could not be decoded.')), { once: true });
+            });
+        }
+        if (attempt !== playbackAttemptRef.current) return;
+        audio.volume = volumeRef.current;
+        audio.currentTime = Math.max(0, Math.min(targetMs / 1000, Number.isFinite(audio.duration) ? audio.duration : targetMs / 1000));
+        audio.onended = () => {
+            if (attempt !== playbackAttemptRef.current) return;
+            setRenderWindowIdle(true);
+            publishPosition(durationRef.current);
+            publishState('ended');
+        };
+        audio.onerror = () => {
+            if (attempt !== playbackAttemptRef.current) return;
+            setRenderWindowIdle(true);
+            messageRef.current?.('Compatibility audio could not be played.');
+            publishState('unavailable');
+        };
+        try {
+            await audio.play();
+        } catch (error) {
+            if (attempt !== playbackAttemptRef.current) return;
+            setRenderWindowIdle(true);
+            messageRef.current?.(error instanceof DOMException && error.name === 'NotAllowedError'
+                ? 'Playback was blocked. Press Play to try again.'
+                : error instanceof Error ? error.message : 'Compatibility audio could not start.');
+            publishState(error instanceof DOMException && error.name === 'NotAllowedError' ? 'idle' : 'unavailable');
+            return;
+        }
+        if (attempt !== playbackAttemptRef.current) {
+            audio.pause();
+            return;
+        }
+        setFallbackMode(true);
+        setRenderWindowIdle(true);
+        publishPosition(targetMs);
+        messageRef.current?.('Compatibility audio');
+        publishState('playing');
     }, [publishPosition, publishState]);
 
     const playFrom = useCallback(async (targetMs: number, forceRetry = false) => {
         const activeScore = scoreRef.current;
-        if (!activeScore?.synthAudioBatch) {
+        if (!activeScore?.setSoundFont) {
             setRenderWindowIdle(true);
-            messageRef.current?.('Streamed playback is unavailable in this build.');
+            messageRef.current?.('Playback is unavailable in this build.');
             publishState('unavailable');
             return;
         }
@@ -123,6 +210,14 @@ export function useScoreTransport(options: Options) {
                     messageRef.current?.('Playback soundfont is unavailable.');
                     publishState('unavailable');
                 }
+                return;
+            }
+            if (fallbackAudioRef.current) {
+                await playFallbackFrom(activeScore, targetMs, attempt, false);
+                return;
+            }
+            if (!activeScore.synthAudioBatch) {
+                await playFallbackFrom(activeScore, targetMs, attempt, true);
                 return;
             }
             await cancelSynthStream({ sourcesRef, iteratorRef, generationRef }, { awaitCancel: true });
@@ -166,11 +261,27 @@ export function useScoreTransport(options: Options) {
             ) setRenderWindowIdle(true);
         } catch (error) {
             if (attempt !== playbackAttemptRef.current) return;
+            if (!fallbackAudioRef.current) {
+                try {
+                    const fallbackTargetMs = stateRef.current === 'playing'
+                        ? positionRef.current
+                        : targetMs;
+                    clockRef.current = null;
+                    publishState('preparing');
+                    await cancelSynthStream({ sourcesRef, iteratorRef, generationRef }, { awaitCancel: true });
+                    if (attempt !== playbackAttemptRef.current) return;
+                    await playFallbackFrom(activeScore, fallbackTargetMs, attempt, true);
+                    return;
+                } catch (fallbackError) {
+                    if (attempt !== playbackAttemptRef.current) return;
+                    error = fallbackError;
+                }
+            }
             setRenderWindowIdle(true);
             messageRef.current?.(error instanceof Error ? error.message : 'Playback could not start.');
             publishState('unavailable');
         }
-    }, [ensureAudioContext, publishPosition, publishState]);
+    }, [ensureAudioContext, playFallbackFrom, publishPosition, publishState]);
 
     const togglePlayPause = useCallback(async () => {
         const priorState = stateRef.current;
@@ -183,6 +294,11 @@ export function useScoreTransport(options: Options) {
             pendingStopAttemptRef.current = null;
         }
         if (priorState === 'playing') {
+            if (fallbackAudioRef.current) {
+                fallbackAudioRef.current.pause();
+                publishState('paused');
+                return;
+            }
             if (audioContextRef.current?.state === 'running') await audioContextRef.current.suspend();
             publishState('paused');
             return;
@@ -192,12 +308,29 @@ export function useScoreTransport(options: Options) {
             publishState('playing');
             return;
         }
+        if (priorState === 'paused' && fallbackAudioRef.current) {
+            try {
+                await fallbackAudioRef.current.play();
+                publishState('playing');
+            } catch (error) {
+                messageRef.current?.(error instanceof Error ? error.message : 'Compatibility audio could not resume.');
+                publishState('unavailable');
+            }
+            return;
+        }
         const target = priorState === 'ended' ? startRef.current : positionRef.current;
         await playFrom(target, priorState === 'unavailable');
     }, [playFrom, publishState]);
 
     const seek = useCallback((targetMs: number) => {
         const priorState = stateRef.current;
+        const fallbackAudio = fallbackAudioRef.current;
+        if (fallbackAudio && fallbackMode) {
+            fallbackAudio.currentTime = Math.max(0, targetMs / 1000);
+            publishPosition(targetMs);
+            if (priorState === 'ended') publishState('idle');
+            return;
+        }
         if (priorState === 'paused') {
             void stopAt(targetMs, 'paused');
             return;
@@ -206,17 +339,20 @@ export function useScoreTransport(options: Options) {
         void stopAt(targetMs).then((stopped) => {
             if (stopped && shouldResume) void playFrom(targetMs);
         });
-    }, [playFrom, stopAt]);
+    }, [fallbackMode, playFrom, publishPosition, publishState, stopAt]);
 
     const reset = useCallback((targetMs: number, durationMs = durationRef.current) => {
         playbackAttemptRef.current += 1;
         pendingStopAttemptRef.current = null;
         setRenderWindowIdle(true);
+        pauseFallbackAudio();
+        releaseFallbackAudio();
+        setFallbackMode(false);
         durationRef.current = durationMs;
         startRef.current = targetMs;
         publishPosition(targetMs);
         publishState('idle');
-    }, [publishPosition, publishState]);
+    }, [pauseFallbackAudio, publishPosition, publishState, releaseFallbackAudio]);
 
     const prefetchSoundFont = useCallback((signal?: AbortSignal) => (
         soundFontManagerRef.current.prefetch(signal)
@@ -228,9 +364,10 @@ export function useScoreTransport(options: Options) {
         const gain = gainNodeRef.current;
         audioContextRef.current = null;
         gainNodeRef.current = null;
+        releaseFallbackAudio();
         try { gain?.disconnect(); } catch { /* already disconnected */ }
         if (context && context.state !== 'closed') await context.close().catch(() => {});
-    }, [cancel]);
+    }, [cancel, releaseFallbackAudio]);
 
     useEffect(() => () => {
         void dispose();
@@ -241,14 +378,17 @@ export function useScoreTransport(options: Options) {
         let frame = window.requestAnimationFrame(function update() {
             const context = audioContextRef.current;
             const anchor = clockRef.current;
-            if (context && anchor) {
+            const fallbackAudio = fallbackAudioRef.current;
+            if (fallbackMode && fallbackAudio) {
+                publishPosition(fallbackAudio.currentTime * 1000);
+            } else if (context && anchor) {
                 const scoreTime = scoreTimeAt(anchor, context.currentTime);
                 if (scoreTime !== null) publishPosition(scoreTime * 1000);
             }
             frame = window.requestAnimationFrame(update);
         });
         return () => window.cancelAnimationFrame(frame);
-    }, [publishPosition, state]);
+    }, [fallbackMode, publishPosition, state]);
 
     return {
         state,
@@ -256,6 +396,7 @@ export function useScoreTransport(options: Options) {
         positionMs,
         positionRef,
         renderWindowIdle,
+        fallbackMode,
         togglePlayPause,
         stopAt,
         seek,

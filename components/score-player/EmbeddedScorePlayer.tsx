@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type {
     PlaybackTimeline,
@@ -15,18 +15,31 @@ import {
     timelineFromPositions,
 } from '@/lib/playback/timeline';
 import { useScoreTransport } from '@/lib/playback/use-score-transport';
+import {
+    parsePlayerCommand,
+    PLAYER_MESSAGE_VERSION,
+    resolveParentOrigin,
+    resolvePlayerId,
+} from '@/lib/playback/player-message-api';
 import PlayerControls from './PlayerControls';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 export default function EmbeddedScorePlayer() {
     const searchParams = useSearchParams();
+    const generatedId = useId();
     const scoreUrl = searchParams.get('score') ?? '';
     const configuredStartSeconds = Number(searchParams.get('start') ?? 0);
     const initialFollow = searchParams.get('follow') !== '0';
+    const requestedPlayerId = searchParams.get('playerId');
+    const requestedParentOrigin = searchParams.get('parentOrigin');
     const theme = ['light', 'dark'].includes(searchParams.get('theme') ?? '')
         ? searchParams.get('theme')!
         : '';
+    const playerId = useMemo(
+        () => resolvePlayerId(requestedPlayerId, `player-${generatedId.replace(/[^A-Za-z0-9._:-]/g, '') || 'default'}`),
+        [generatedId, requestedPlayerId],
+    );
 
     const [score, setScore] = useState<Score | null>(null);
     const scoreRef = useRef<Score | null>(null);
@@ -36,6 +49,7 @@ export default function EmbeddedScorePlayer() {
     const [title, setTitle] = useState('Score playback');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [loadAttempt, setLoadAttempt] = useState(0);
     const [currentPage, setCurrentPage] = useState(0);
     const [pageCount, setPageCount] = useState(1);
     const [progressiveHasMorePages, setProgressiveHasMorePages] = useState(false);
@@ -47,6 +61,14 @@ export default function EmbeddedScorePlayer() {
     const [follow, setFollow] = useState(initialFollow);
     const [volume, setVolume] = useState(1);
     const [audioMessage, setAudioMessage] = useState('');
+    const [parentOrigin, setParentOrigin] = useState<string | null>(null);
+    const playerRootRef = useRef<HTMLElement | null>(null);
+    const viewportRef = useRef<HTMLDivElement | null>(null);
+    const activeMeasureRef = useRef<SVGRectElement | null>(null);
+    const followRef = useRef(initialFollow);
+    const followResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const programmaticScrollRef = useRef(false);
+    const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const loadGenerationRef = useRef(0);
     const startMsRef = useRef(0);
     const renderGenerationRef = useRef(0);
@@ -65,9 +87,11 @@ export default function EmbeddedScorePlayer() {
     });
     const {
         state: transport,
+        stateRef: transportStateRef,
         positionMs,
         positionRef,
         renderWindowIdle,
+        fallbackMode,
         togglePlayPause,
         stopAt,
         seek,
@@ -75,6 +99,38 @@ export default function EmbeddedScorePlayer() {
         dispose: disposeTransport,
         prefetchSoundFont,
     } = transportController;
+
+    const setFollowPreference = useCallback((next: boolean) => {
+        if (followResumeTimerRef.current) clearTimeout(followResumeTimerRef.current);
+        followResumeTimerRef.current = null;
+        followRef.current = next;
+        setFollow(next);
+    }, []);
+
+    const suspendFollowTemporarily = useCallback(() => {
+        if (!followRef.current && !followResumeTimerRef.current) return;
+        if (followResumeTimerRef.current) clearTimeout(followResumeTimerRef.current);
+        followRef.current = false;
+        setFollow(false);
+        followResumeTimerRef.current = setTimeout(() => {
+            followResumeTimerRef.current = null;
+            followRef.current = true;
+            setFollow(true);
+        }, 4_000);
+    }, []);
+
+    useEffect(() => {
+        setParentOrigin(resolveParentOrigin(requestedParentOrigin, window.location.origin));
+    }, [requestedParentOrigin]);
+
+    useEffect(() => {
+        setFollowPreference(initialFollow);
+    }, [initialFollow, setFollowPreference]);
+
+    useEffect(() => () => {
+        if (followResumeTimerRef.current) clearTimeout(followResumeTimerRef.current);
+        if (programmaticScrollTimerRef.current) clearTimeout(programmaticScrollTimerRef.current);
+    }, []);
 
     useEffect(() => {
         const stored = Number(window.localStorage.getItem('ots-player-volume'));
@@ -84,6 +140,20 @@ export default function EmbeddedScorePlayer() {
     useEffect(() => {
         window.localStorage.setItem('ots-player-volume', String(volume));
     }, [volume]);
+
+    const postPlayerEvent = useCallback((
+        event: 'ready' | 'statechange' | 'timeupdate' | 'pagechange' | 'ended' | 'error',
+        detail?: Record<string, unknown>,
+    ) => {
+        if (!parentOrigin || window.parent === window) return;
+        window.parent.postMessage({
+            type: 'ots-player:event',
+            version: PLAYER_MESSAGE_VERSION,
+            playerId,
+            event,
+            ...(detail ? { detail } : {}),
+        }, parentOrigin);
+    }, [parentOrigin, playerId]);
 
     useEffect(() => {
         if (!scoreUrl) {
@@ -182,7 +252,7 @@ export default function EmbeddedScorePlayer() {
                 if (scoreRef.current === ownedScore) scoreRef.current = null;
             });
         };
-    }, [configuredStartSeconds, disposeTransport, prefetchSoundFont, resetTransport, scoreUrl]);
+    }, [configuredStartSeconds, disposeTransport, loadAttempt, prefetchSoundFont, resetTransport, scoreUrl]);
 
     useEffect(() => {
         if (!score) return;
@@ -226,12 +296,105 @@ export default function EmbeddedScorePlayer() {
         [currentPage, positions],
     );
 
+    const readyScoreRef = useRef<Score | null>(null);
+    useEffect(() => {
+        if (!score || loading || error || !svg || readyScoreRef.current === score) return;
+        readyScoreRef.current = score;
+        postPlayerEvent('ready', {
+            durationMs: timeline?.durationMs ?? 0,
+            pageCount,
+        });
+    }, [error, loading, pageCount, postPlayerEvent, score, svg, timeline?.durationMs]);
+
+    useEffect(() => {
+        postPlayerEvent('statechange', {
+            state: transport,
+            positionMs: positionRef.current,
+            durationMs: timeline?.durationMs ?? 0,
+            compatibilityAudio: fallbackMode,
+        });
+    }, [fallbackMode, positionRef, postPlayerEvent, timeline?.durationMs, transport]);
+
+    const lastTimeUpdateRef = useRef(0);
+    useEffect(() => {
+        if (transport !== 'playing') return;
+        const now = Date.now();
+        if (now - lastTimeUpdateRef.current < 250) return;
+        lastTimeUpdateRef.current = now;
+        postPlayerEvent('timeupdate', { positionMs, durationMs: timeline?.durationMs ?? 0 });
+    }, [positionMs, postPlayerEvent, timeline?.durationMs, transport]);
+
+    useEffect(() => {
+        postPlayerEvent('pagechange', { page: currentPage + 1, pageCount });
+    }, [currentPage, pageCount, postPlayerEvent]);
+
+    useEffect(() => {
+        if (transport === 'ended') postPlayerEvent('ended', { positionMs });
+    }, [positionMs, postPlayerEvent, transport]);
+
+    const lastPostedErrorRef = useRef('');
+    useEffect(() => {
+        const message = error || pageError || (transport === 'unavailable' ? audioMessage : '');
+        if (!message) {
+            lastPostedErrorRef.current = '';
+            return;
+        }
+        if (message === lastPostedErrorRef.current) return;
+        lastPostedErrorRef.current = message;
+        postPlayerEvent('error', {
+            category: error ? 'score' : pageError ? 'page' : 'audio',
+            message,
+        });
+    }, [audioMessage, error, pageError, postPlayerEvent, transport]);
+
+    useEffect(() => {
+        if (!parentOrigin) return;
+        const onMessage = (event: MessageEvent) => {
+            if (event.source !== window.parent || event.origin !== parentOrigin) return;
+            const command = parsePlayerCommand(event.data, playerId, timeline?.durationMs ?? 0);
+            if (!command) return;
+            switch (command.command) {
+                case 'play':
+                    if (!['playing', 'preparing'].includes(transportStateRef.current)) void togglePlayPause();
+                    break;
+                case 'pause':
+                    if (transportStateRef.current === 'playing') void togglePlayPause();
+                    break;
+                case 'toggle':
+                    void togglePlayPause();
+                    break;
+                case 'stop':
+                    void stopAt(startMsRef.current);
+                    break;
+                case 'seek':
+                    seek(command.value as number);
+                    break;
+                case 'set-volume':
+                    setVolume(command.value as number);
+                    break;
+                case 'set-follow':
+                    setFollowPreference(command.value as boolean);
+                    break;
+            }
+        };
+        window.addEventListener('message', onMessage);
+        return () => window.removeEventListener('message', onMessage);
+    }, [parentOrigin, playerId, seek, setFollowPreference, stopAt, timeline?.durationMs, togglePlayPause, transportStateRef]);
+
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === ' ' && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement)) {
+            const root = playerRootRef.current;
+            const target = event.target;
+            if (!root || !(target instanceof HTMLElement) || !root.contains(target)) return;
+            const ownsTextInput = target instanceof HTMLInputElement
+                || target instanceof HTMLButtonElement
+                || target instanceof HTMLSelectElement
+                || target instanceof HTMLTextAreaElement
+                || target.isContentEditable;
+            if (event.key === ' ' && !ownsTextInput) {
                 event.preventDefault();
                 void togglePlayPause();
-            } else if (event.key === 'Home') {
+            } else if (event.key === 'Home' && !ownsTextInput) {
                 event.preventDefault();
                 void stopAt(startMsRef.current);
             }
@@ -296,6 +459,31 @@ export default function EmbeddedScorePlayer() {
     }, [activeMeasure, currentPage, follow]);
 
     useEffect(() => {
+        if (!follow || activeMeasure?.page !== currentPage || !svg) return;
+        const frame = window.requestAnimationFrame(() => {
+            const viewport = viewportRef.current;
+            const activeRect = activeMeasureRef.current;
+            if (!viewport || !activeRect) return;
+            const viewportBox = viewport.getBoundingClientRect();
+            const measureBox = activeRect.getBoundingClientRect();
+            const targetTop = Math.max(0, viewport.scrollTop + measureBox.top - viewportBox.top - viewport.clientHeight * 0.28);
+            const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+            programmaticScrollRef.current = true;
+            if (typeof viewport.scrollTo === 'function') {
+                viewport.scrollTo({ top: targetTop, behavior: reducedMotion ? 'auto' : 'smooth' });
+            } else {
+                viewport.scrollTop = targetTop;
+            }
+            if (programmaticScrollTimerRef.current) clearTimeout(programmaticScrollTimerRef.current);
+            programmaticScrollTimerRef.current = setTimeout(() => {
+                programmaticScrollRef.current = false;
+                programmaticScrollTimerRef.current = null;
+            }, reducedMotion ? 0 : 350);
+        });
+        return () => window.cancelAnimationFrame(frame);
+    }, [activeMeasure?.id, activeMeasure?.page, currentPage, follow, svg]);
+
+    useEffect(() => {
         if (!pageRequestQueued || pageLoadBusy) return;
         if (!renderWindowIdle) return;
         setPageRequestQueued(false);
@@ -306,7 +494,7 @@ export default function EmbeddedScorePlayer() {
 
     const pageSize = positions?.pageSize;
     const goToNextPage = () => {
-        setFollow(false);
+        suspendFollowTemporarily();
         setPageError('');
         const nextPage = currentPage + 1;
         if (nextPage < pageCount) {
@@ -325,14 +513,34 @@ export default function EmbeddedScorePlayer() {
 
     return (
         <main
+            ref={playerRootRef}
             className="ots-score-player flex h-screen min-h-0 flex-col bg-[var(--player-canvas)] text-[var(--player-text)]"
             data-theme={theme || undefined}
             data-testid="embedded-score-player"
+            tabIndex={-1}
+            onPointerDownCapture={(event) => {
+                const target = event.target;
+                if (!(target instanceof Element) || target.closest('button,input,select,textarea,[contenteditable="true"]')) return;
+                playerRootRef.current?.focus({ preventScroll: true });
+            }}
         >
             <h1 className="sr-only">{title}</h1>
-            <div className="relative min-h-0 flex-1 overflow-auto p-3 sm:p-6">
+            <div
+                ref={viewportRef}
+                data-testid="player-viewport"
+                className="relative min-h-0 flex-1 overflow-auto p-3 sm:p-6"
+                onScroll={() => {
+                    if (programmaticScrollRef.current) return;
+                    suspendFollowTemporarily();
+                }}
+            >
                 {loading && <div className="flex h-full items-center justify-center text-sm text-[var(--player-muted)]" role="status">Loading score…</div>}
-                {error && <div className="mx-auto mt-10 max-w-xl rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-800" role="alert">{error}</div>}
+                {error && (
+                    <div className="mx-auto mt-10 flex max-w-xl items-center justify-between gap-4 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-800" role="alert">
+                        <span>{error}</span>
+                        {scoreUrl && <button type="button" className="shrink-0 font-semibold underline" onClick={() => setLoadAttempt((value) => value + 1)}>Retry</button>}
+                    </div>
+                )}
                 {!loading && !error && (
                     <div className="mx-auto origin-top" style={{ width: `${zoom * 100}%`, maxWidth: zoom <= 1 ? '100%' : 'none' }}>
                         <div className="relative mx-auto w-fit max-w-full overflow-hidden bg-white shadow-lg">
@@ -357,7 +565,7 @@ export default function EmbeddedScorePlayer() {
                                     ))}
                                     {activeMeasure?.page === currentPage && (
                                         <g pointerEvents="none">
-                                            <rect x={activeMeasure.x} y={activeMeasure.y} width={activeMeasure.width ?? activeMeasure.sx} height={activeMeasure.height ?? activeMeasure.sy} fill="rgb(8 145 178 / 0.13)" stroke="rgb(8 145 178 / 0.8)" strokeWidth="2" />
+                                            <rect ref={activeMeasureRef} x={activeMeasure.x} y={activeMeasure.y} width={activeMeasure.width ?? activeMeasure.sx} height={activeMeasure.height ?? activeMeasure.sy} fill="rgb(8 145 178 / 0.13)" stroke="rgb(8 145 178 / 0.8)" strokeWidth="2" />
                                             <line x1={activeMeasure.x} y1={activeMeasure.y} x2={activeMeasure.x} y2={activeMeasure.y + (activeMeasure.height ?? activeMeasure.sy)} stroke="rgb(8 145 178)" strokeWidth="4" />
                                         </g>
                                     )}
@@ -366,14 +574,15 @@ export default function EmbeddedScorePlayer() {
                         </div>
                     </div>
                 )}
-                {audioMessage && <div className="pointer-events-none sticky bottom-2 mx-auto mt-2 w-fit rounded-full bg-slate-900/85 px-3 py-1 text-xs text-white" role={transport === 'unavailable' ? 'alert' : 'status'}>{audioMessage}</div>}
+                {audioMessage && <div className="pointer-events-none sticky bottom-2 mx-auto mt-2 w-fit rounded-full bg-slate-900/85 px-3 py-1 text-xs text-white" role="status">{audioMessage}</div>}
                 {(pageLoadBusy || pageMessage) && <div className="pointer-events-none sticky bottom-2 mx-auto mt-2 w-fit rounded-full bg-slate-900/85 px-3 py-1 text-xs text-white" role="status">Preparing next page…</div>}
-                {pageError && <div className="sticky bottom-2 mx-auto mt-2 flex w-fit items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-900" role="alert"><span>{pageError}</span><button type="button" className="font-semibold underline" onClick={() => setPageError('')}>Dismiss</button></div>}
+                {pageError && <div className="sticky bottom-2 mx-auto mt-2 flex w-fit items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-900" role="status"><span>{pageError}</span><button type="button" className="font-semibold underline" onClick={() => setPageError('')}>Dismiss</button></div>}
             </div>
             <PlayerControls
                 state={transport}
                 disabled={loading || Boolean(error) || !score}
                 positionMs={positionMs}
+                startPositionMs={startMsRef.current}
                 durationMs={timeline?.durationMs ?? 0}
                 currentMeasureNumber={activeOccurrence ? activeOccurrence.measureIndex + 1 : undefined}
                 volume={volume}
@@ -385,12 +594,12 @@ export default function EmbeddedScorePlayer() {
                 onStop={() => void stopAt(startMsRef.current)}
                 onSeek={seek}
                 onVolume={setVolume}
-                onPreviousPage={() => { setFollow(false); setPageError(''); setCurrentPage((page) => Math.max(0, page - 1)); }}
+                onPreviousPage={() => { suspendFollowTemporarily(); setPageError(''); setCurrentPage((page) => Math.max(0, page - 1)); }}
                 onNextPage={goToNextPage}
                 onZoomOut={() => setZoom((value) => clamp(value - 0.1, 0.5, 2.5))}
                 onFitWidth={() => setZoom(1)}
                 onZoomIn={() => setZoom((value) => clamp(value + 0.1, 0.5, 2.5))}
-                onToggleFollow={() => setFollow((value) => !value)}
+                onToggleFollow={() => setFollowPreference(!follow)}
             />
         </main>
     );

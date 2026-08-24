@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
     search: new URLSearchParams({ score: '/score.musicxml', follow: '0' }),
@@ -7,9 +7,11 @@ const mocks = vi.hoisted(() => ({
     requestScoreLayoutProgress: vi.fn(),
     transport: {
         state: 'idle',
+        stateRef: { current: 'idle' },
         positionMs: 0,
         positionRef: { current: 0 },
         renderWindowIdle: false,
+        fallbackMode: false,
         togglePlayPause: vi.fn(),
         stopAt: vi.fn(),
         seek: vi.fn(),
@@ -57,10 +59,13 @@ const makeScore = () => ({
 });
 
 describe('EmbeddedScorePlayer progressive pages', () => {
+    afterEach(() => vi.useRealTimers());
+
     beforeEach(() => {
         vi.clearAllMocks();
         mocks.search = new URLSearchParams({ score: '/score.musicxml', follow: '0' });
         mocks.transport.state = 'idle';
+        mocks.transport.stateRef.current = 'idle';
         mocks.transport.positionMs = 0;
         mocks.transport.positionRef.current = 0;
         mocks.transport.renderWindowIdle = true;
@@ -112,6 +117,17 @@ describe('EmbeddedScorePlayer progressive pages', () => {
 
         expect(screen.getByTestId('player-svg')).toBeVisible();
         expect(screen.getByTestId('player-play')).toBeEnabled();
+    });
+
+    it('offers an inline retry after the score fails to load', async () => {
+        mocks.loadScoreFromUrl.mockRejectedValueOnce(new Error('The score could not be fetched (503).'));
+        render(<EmbeddedScorePlayer />);
+
+        await screen.findByText('The score could not be fetched (503).');
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+        await screen.findByTestId('player-svg');
+        expect(mocks.loadScoreFromUrl).toHaveBeenCalledTimes(2);
     });
 
     it('extends progressive layout when follow reaches the last known measure', async () => {
@@ -182,5 +198,75 @@ describe('EmbeddedScorePlayer progressive pages', () => {
         await waitFor(() => expect(screen.getByText('Page 1 of 2')).toBeInTheDocument());
         expect(screen.getByTestId('player-svg').innerHTML).toContain('data-page="0"');
         expect(screen.getByTestId('player-play')).toBeEnabled();
+    });
+
+    it('accepts valid host commands only from the configured parent origin', async () => {
+        mocks.search = new URLSearchParams({
+            score: '/score.musicxml',
+            follow: '0',
+            playerId: 'review-player',
+            parentOrigin: window.location.origin,
+        });
+        render(<EmbeddedScorePlayer />);
+        await screen.findByTestId('player-svg');
+
+        const command = {
+            type: 'ots-player:command',
+            version: 1,
+            playerId: 'review-player',
+            command: 'seek',
+            value: 750,
+        };
+        window.dispatchEvent(new MessageEvent('message', {
+            data: command,
+            origin: 'https://untrusted.example',
+            source: window,
+        }));
+        expect(mocks.transport.seek).not.toHaveBeenCalled();
+
+        window.dispatchEvent(new MessageEvent('message', {
+            data: command,
+            origin: window.location.origin,
+            source: window,
+        }));
+        expect(mocks.transport.seek).toHaveBeenCalledWith(750);
+    });
+
+    it('temporarily suspends follow after manual page navigation', async () => {
+        mocks.search = new URLSearchParams({ score: '/score.musicxml' });
+        const score = makeScore();
+        vi.mocked(score.npages).mockResolvedValue(2);
+        mocks.loadScoreFromUrl.mockResolvedValue({
+            loadedScore: score,
+            progressivePaging: false,
+            progressiveHasMore: false,
+            initialAvailablePages: 2,
+            engineMode: 'worker',
+            format: 'musicxml',
+            data: new Uint8Array([1]),
+        });
+        render(<EmbeddedScorePlayer />);
+        await screen.findByTestId('player-svg');
+
+        vi.useFakeTimers();
+        fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+        expect(screen.getAllByRole('button', { name: 'Follow score' })[0]).toHaveAttribute('aria-pressed', 'false');
+        act(() => vi.advanceTimersByTime(4_000));
+        expect(screen.getAllByRole('button', { name: 'Follow score' })[0]).toHaveAttribute('aria-pressed', 'true');
+        vi.useRealTimers();
+    });
+
+    it('owns playback shortcuts only while focus is inside the player', async () => {
+        render(<EmbeddedScorePlayer />);
+        const root = await screen.findByTestId('embedded-score-player');
+
+        fireEvent.keyDown(document.body, { key: ' ' });
+        expect(mocks.transport.togglePlayPause).not.toHaveBeenCalled();
+
+        root.focus();
+        fireEvent.keyDown(root, { key: ' ' });
+        expect(mocks.transport.togglePlayPause).toHaveBeenCalledOnce();
+        fireEvent.keyDown(screen.getByTestId('player-seek'), { key: 'Home' });
+        expect(mocks.transport.stopAt).not.toHaveBeenCalled();
     });
 });

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PlayerControls from '@/components/score-player/PlayerControls';
 
@@ -81,5 +81,22 @@ describe('PlayerControls', () => {
         render(<PlayerControls {...props({ disabled: true })} />);
         expect(screen.getByTestId('player-play')).toBeDisabled();
         expect(screen.getByTestId('player-seek')).toBeDisabled();
+    });
+
+    it('rewinds to the configured start position', () => {
+        render(<PlayerControls {...props({ positionMs: 2_000, startPositionMs: 2_000 })} />);
+        expect(screen.getByRole('button', { name: 'Stop and rewind' })).toBeDisabled();
+    });
+
+    it('exposes view and volume controls from the mobile More menu', () => {
+        const values = props();
+        render(<PlayerControls {...values} />);
+        const more = screen.getByRole('button', { name: 'More player controls' });
+        fireEvent.click(more);
+        const menu = more.closest('details');
+        expect(menu).toHaveAttribute('open');
+        expect(within(menu!).getByRole('slider', { name: 'Volume' })).toBeInTheDocument();
+        fireEvent.click(within(menu!).getByRole('button', { name: 'Fit width' }));
+        expect(values.onFitWidth).toHaveBeenCalledOnce();
     });
 });

@@ -18,6 +18,7 @@ type Props = {
     state: 'idle' | 'preparing' | 'playing' | 'paused' | 'ended' | 'unavailable';
     disabled?: boolean;
     positionMs: number;
+    startPositionMs?: number;
     durationMs: number;
     currentMeasureNumber?: number;
     volume: number;
@@ -74,7 +75,7 @@ export default function PlayerControls(props: Props) {
     return (
         <div className="sticky bottom-0 z-20 border-t border-[var(--player-border)] bg-[var(--player-panel)] px-3 py-3 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur">
             <div className="mx-auto flex max-w-6xl items-center gap-2">
-                <button type="button" className={controlClass} onClick={props.onStop} disabled={transportDisabled || props.positionMs <= 0} title="Stop and rewind" aria-label="Stop and rewind">
+                <button type="button" className={controlClass} onClick={props.onStop} disabled={transportDisabled || props.positionMs <= (props.startPositionMs ?? 0)} title="Stop and rewind" aria-label="Stop and rewind">
                     <RotateCcw size={18} aria-hidden="true" />
                 </button>
                 <button type="button" data-testid="player-play" className={`${controlClass} !border-cyan-600 !bg-cyan-600 !text-white hover:!bg-cyan-700`} onClick={props.onTogglePlayPause} disabled={transportDisabled} title={playLabel} aria-label={playLabel}>
@@ -125,7 +126,7 @@ export default function PlayerControls(props: Props) {
                     <span className="min-w-20 text-center tabular-nums" aria-live="polite">Page {props.currentPage + 1} of {props.pageCount}{props.hasMorePages ? '+' : ''}</span>
                     <button type="button" className={controlClass} onClick={props.onNextPage} disabled={props.currentPage >= props.pageCount - 1 && !props.hasMorePages} title="Next page" aria-label="Next page"><ChevronRight size={18} aria-hidden="true" /></button>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="hidden items-center gap-1 sm:flex">
                     <button type="button" className={controlClass} onClick={props.onZoomOut} title="Zoom out" aria-label="Zoom out"><Minus size={17} aria-hidden="true" /></button>
                     <button type="button" className={controlClass} onClick={props.onFitWidth} title="Fit width" aria-label="Fit width"><ScanLine size={17} aria-hidden="true" /></button>
                     <button type="button" className={controlClass} onClick={props.onZoomIn} title="Zoom in" aria-label="Zoom in"><Plus size={17} aria-hidden="true" /></button>
@@ -133,6 +134,26 @@ export default function PlayerControls(props: Props) {
                         <span className="font-semibold">Follow</span>
                     </button>
                 </div>
+                <details className="group relative sm:hidden">
+                    <summary role="button" className={`${controlClass} cursor-pointer list-none [&::-webkit-details-marker]:hidden`} aria-label="More player controls">
+                        <span className="text-xs font-semibold">More</span>
+                    </summary>
+                    <div className="absolute bottom-12 right-0 z-30 flex w-64 flex-col gap-3 rounded-xl border border-[var(--player-border)] bg-[var(--player-panel)] p-3 text-[var(--player-text)] shadow-xl">
+                        <label className="flex min-h-11 items-center gap-2" title="Volume">
+                            <Volume2 size={18} aria-hidden="true" />
+                            <span>Volume</span>
+                            <input aria-label="Volume" className="min-w-0 flex-1 accent-cyan-600" type="range" min={0} max={1} step={0.05} value={props.volume} onChange={(event) => props.onVolume(Number(event.currentTarget.value))} />
+                        </label>
+                        <div className="flex items-center justify-between gap-1">
+                            <button type="button" className={controlClass} onClick={props.onZoomOut} title="Zoom out" aria-label="Zoom out"><Minus size={17} aria-hidden="true" /></button>
+                            <button type="button" className={controlClass} onClick={props.onFitWidth} title="Fit width" aria-label="Fit width"><ScanLine size={17} aria-hidden="true" /></button>
+                            <button type="button" className={controlClass} onClick={props.onZoomIn} title="Zoom in" aria-label="Zoom in"><Plus size={17} aria-hidden="true" /></button>
+                            <button type="button" className={`${controlClass} ${props.follow ? '!border-cyan-500 !text-cyan-600' : ''}`} onClick={props.onToggleFollow} title={`Follow score ${props.follow ? 'on' : 'off'}`} aria-label="Follow score" aria-pressed={props.follow}>
+                                <span className="text-[10px] font-semibold">Follow</span>
+                            </button>
+                        </div>
+                    </div>
+                </details>
             </div>
         </div>
     );
