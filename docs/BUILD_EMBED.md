@@ -75,6 +75,48 @@ The build generates a static export in the `out/` directory:
 - **Format**: Static HTML/JS/CSS + WASM artifacts
 - **Includes**: `<base href="/score-editor/">` tag for proper path resolution when embedded
 
+## Embedding the Playback Player
+
+The same static `index.html` provides a read-only playback surface. Select it with
+`embed=player`; `embed=1` remains a compatibility alias:
+
+```html
+<iframe
+  src="https://example.org/score-editor/index.html?score=%2Fscores%2Fexample.musicxml&amp;embed=player&amp;playerId=example-player&amp;parentOrigin=https%3A%2F%2Fexample.org"
+  title="Playback of Example score"
+  width="100%"
+  height="640"
+  loading="lazy"
+  allow="autoplay"
+></iframe>
+```
+
+The browser must be able to fetch `score` using same-origin access or suitable CORS headers.
+Optional player parameters are:
+
+- `start=<seconds>` for a finite start position, clamped to the performance duration;
+- `follow=0` to disable score following initially;
+- `theme=auto|light|dark`;
+- `playerId=<bounded-id>` to identify host messages;
+- `parentOrigin=<exact-origin>` to enable cross-origin host messaging.
+
+The optional message API accepts commands only from `window.parent` at the exact configured
+`parentOrigin`; wildcards are rejected. Commands use this versioned envelope:
+
+```js
+iframe.contentWindow.postMessage({
+  type: 'ots-player:command',
+  version: 1,
+  playerId: 'example-player',
+  command: 'play', // play, pause, toggle, stop, seek, set-volume, set-follow
+}, 'https://example.org');
+```
+
+The player responds to the same exact origin with `ots-player:event` messages for `ready`,
+`statechange`, `timeupdate`, `pagechange`, `ended`, and `error`. Seek values are milliseconds;
+volume is between 0 and 1; follow is boolean. If `parentOrigin` is omitted, messaging defaults to
+same-origin hosts. In-frame controls remain fully functional without the message API.
+
 ### Guardrail: Prevent Large Soundfont Files in `out/`
 
 Before syncing `out/` into another repository (for example `OurTextScores/frontend/public/score-editor/`), verify `out/soundfonts/` is absent:

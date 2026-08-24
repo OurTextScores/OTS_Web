@@ -9,6 +9,33 @@ const scoreWithIterator = (iterator?: SynthAudioBatchIterator) => ({
     synthAudioBatch: vi.fn(async () => iterator ?? (vi.fn(async () => []) as SynthAudioBatchIterator)),
 }) as unknown as Score;
 
+const makeFallbackAudioContext = () => {
+    let contextState: AudioContextState = 'running';
+    const decodedBuffer = { duration: 20 } as AudioBuffer;
+    const source = {
+        buffer: null as AudioBuffer | null,
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(),
+        onended: null as (() => void) | null,
+    };
+    const gain = { gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() };
+    const context = {
+        currentTime: 2,
+        sampleRate: 44_100,
+        get state() { return contextState; },
+        destination: {} as AudioNode,
+        createGain: vi.fn(() => gain),
+        createBufferSource: vi.fn(() => source),
+        decodeAudioData: vi.fn(async () => decodedBuffer),
+        suspend: vi.fn(async () => { contextState = 'suspended'; }),
+        resume: vi.fn(async () => { contextState = 'running'; }),
+        close: vi.fn(async () => { contextState = 'closed'; }),
+    } as unknown as AudioContext;
+    return { context, decodedBuffer, gain, source };
+};
+
 afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -36,29 +63,8 @@ describe('useScoreTransport', () => {
     });
 
     it('uses explicit compatibility audio when streaming synthesis is unavailable', async () => {
-        let currentTime = 0;
-        let paused = true;
-        const audio = {
-            readyState: 1,
-            duration: 12,
-            volume: 1,
-            get currentTime() { return currentTime; },
-            set currentTime(value: number) { currentTime = value; },
-            get paused() { return paused; },
-            play: vi.fn(async () => { paused = false; }),
-            pause: vi.fn(() => { paused = true; }),
-            addEventListener: vi.fn(),
-            removeAttribute: vi.fn(),
-            load: vi.fn(),
-            onended: null as (() => void) | null,
-            onerror: null as (() => void) | null,
-        };
-        vi.stubGlobal('Audio', function FakeAudio() { return audio; });
-        vi.stubGlobal('URL', {
-            ...URL,
-            createObjectURL: vi.fn(() => 'blob:compatibility-audio'),
-            revokeObjectURL: vi.fn(),
-        });
+        const fallbackAudio = makeFallbackAudioContext();
+        vi.stubGlobal('AudioContext', function FakeAudioContext() { return fallbackAudio.context; });
         const score = {
             setSoundFont: vi.fn(),
             saveAudio: vi.fn(async () => new Uint8Array([1, 2, 3])),
@@ -80,8 +86,10 @@ describe('useScoreTransport', () => {
         await act(async () => { await result.current.togglePlayPause(); });
 
         expect(score.saveAudio).toHaveBeenCalledWith('wav');
-        expect(audio.play).toHaveBeenCalledOnce();
-        expect(audio.volume).toBe(0.75);
+        expect(fallbackAudio.context.decodeAudioData).toHaveBeenCalledOnce();
+        expect(fallbackAudio.gain.gain.value).toBe(0.75);
+        expect(fallbackAudio.source.connect).toHaveBeenCalledWith(fallbackAudio.gain);
+        expect(fallbackAudio.source.start).toHaveBeenCalledWith(0, 0);
         expect(result.current.fallbackMode).toBe(true);
         expect(result.current.state).toBe('playing');
         expect(onMessage).toHaveBeenCalledWith('Streaming unavailable — preparing compatibility audio…');
@@ -89,36 +97,8 @@ describe('useScoreTransport', () => {
     });
 
     it('falls back to compatibility audio when a streaming attempt fails', async () => {
-        const audio = {
-            readyState: 1,
-            duration: 12,
-            volume: 1,
-            currentTime: 0,
-            paused: true,
-            play: vi.fn(async () => {}),
-            pause: vi.fn(),
-            addEventListener: vi.fn(),
-            removeAttribute: vi.fn(),
-            load: vi.fn(),
-            onended: null as (() => void) | null,
-            onerror: null as (() => void) | null,
-        };
-        vi.stubGlobal('Audio', function FakeAudio() { return audio; });
-        vi.stubGlobal('URL', {
-            ...URL,
-            createObjectURL: vi.fn(() => 'blob:stream-fallback'),
-            revokeObjectURL: vi.fn(),
-        });
-        vi.stubGlobal('AudioContext', function FakeAudioContext() {
-            return {
-                currentTime: 0,
-                sampleRate: 44_100,
-                state: 'running',
-                destination: {},
-                createGain: () => ({ gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() }),
-                close: vi.fn(async () => {}),
-            };
-        });
+        const fallbackAudio = makeFallbackAudioContext();
+        vi.stubGlobal('AudioContext', function FakeAudioContext() { return fallbackAudio.context; });
         const score = {
             setSoundFont: vi.fn(),
             synthAudioBatch: vi.fn(async () => { throw new Error('stream failed'); }),
@@ -142,6 +122,72 @@ describe('useScoreTransport', () => {
         expect(score.saveAudio).toHaveBeenCalledWith('wav');
         expect(result.current.fallbackMode).toBe(true);
         expect(result.current.state).toBe('playing');
+    });
+
+    it('does not latch a failed compatibility decode over later streaming retries', async () => {
+        const fallbackAudio = makeFallbackAudioContext();
+        vi.mocked(fallbackAudio.context.decodeAudioData).mockRejectedValue(new DOMException('unsupported', 'EncodingError'));
+        vi.stubGlobal('AudioContext', function FakeAudioContext() { return fallbackAudio.context; });
+        const score = {
+            setSoundFont: vi.fn(),
+            synthAudioBatch: vi.fn(async () => { throw new Error('stream failed'); }),
+            saveAudio: vi.fn(async () => new Uint8Array([1, 2, 3])),
+        } as unknown as Score;
+        const manager = {
+            ensure: vi.fn(async () => true),
+            prefetch: vi.fn(),
+        } as unknown as SoundFontManager<Score>;
+        const { result } = renderHook(() => useScoreTransport({
+            score,
+            durationMs: 10_000,
+            startMs: 0,
+            volume: 1,
+            soundFontManager: manager,
+        }));
+
+        await act(async () => { await result.current.togglePlayPause(); });
+        expect(result.current.state).toBe('unavailable');
+        await act(async () => { await result.current.togglePlayPause(); });
+
+        expect(score.synthAudioBatch).toHaveBeenCalledTimes(2);
+        expect(score.saveAudio).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports AudioContext activation denial without rendering a WAV fallback', async () => {
+        const blocked = new DOMException('activation required', 'NotAllowedError');
+        const audioContext = {
+            currentTime: 0,
+            sampleRate: 44_100,
+            state: 'suspended',
+            destination: {} as AudioNode,
+            createGain: vi.fn(() => ({ gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() })),
+            resume: vi.fn(async () => { throw blocked; }),
+            close: vi.fn(async () => {}),
+        } as unknown as AudioContext;
+        vi.stubGlobal('AudioContext', function FakeAudioContext() { return audioContext; });
+        const score = {
+            setSoundFont: vi.fn(),
+            saveAudio: vi.fn(async () => new Uint8Array([1, 2, 3])),
+        } as unknown as Score;
+        const manager = {
+            ensure: vi.fn(async () => true),
+            prefetch: vi.fn(),
+        } as unknown as SoundFontManager<Score>;
+        const onMessage = vi.fn();
+        const { result } = renderHook(() => useScoreTransport({
+            score,
+            durationMs: 10_000,
+            startMs: 0,
+            volume: 1,
+            soundFontManager: manager,
+            onMessage,
+        }));
+
+        await act(async () => { await result.current.togglePlayPause(); });
+
+        expect(score.saveAudio).not.toHaveBeenCalled();
+        expect(result.current.state).toBe('idle');
+        expect(onMessage).toHaveBeenLastCalledWith('Playback was blocked. Press Play to try again.');
     });
 
     it('does not change a paused transport back to playing when more PCM arrives', async () => {
@@ -275,7 +321,7 @@ describe('useScoreTransport', () => {
         expect(result.current.state).toBe('playing');
     });
 
-    it('does not let a slow paused seek overwrite a newer play attempt', async () => {
+    it('adopts a paused seek target when Play supersedes its cancellation', async () => {
         let finishCancellation!: () => void;
         const cancellation = new Promise<void>((resolve) => { finishCancellation = resolve; });
         const floats = new Float32Array(1_024);
@@ -290,8 +336,8 @@ describe('useScoreTransport', () => {
         }) as SynthAudioBatchIterator;
         const secondIterator = vi.fn(async () => [{
             chunk: new Uint8Array(floats.buffer),
-            startTime: 0,
-            endTime: 0.1,
+            startTime: 4,
+            endTime: 4.1,
             done: true,
         }]) as SynthAudioBatchIterator;
         const iterators = [firstIterator, secondIterator];
@@ -353,6 +399,7 @@ describe('useScoreTransport', () => {
             await cancellation;
         });
         expect(result.current.state).toBe('playing');
-        expect(result.current.positionMs).toBe(0);
+        expect(synthAudioBatch).toHaveBeenNthCalledWith(2, 4, 2);
+        expect(result.current.positionMs).toBe(4_000);
     });
 });

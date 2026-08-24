@@ -8,6 +8,7 @@ import type {
     Score,
 } from '@/lib/webmscore-loader';
 import { sanitizeEngineSvg } from '@/lib/sanitize-svg';
+import { trackEditorAnalyticsEvent } from '@/lib/editor-analytics';
 import { loadScoreFromUrl, requestScoreLayoutProgress } from '@/lib/score-loader';
 import {
     occurrenceAtTime,
@@ -24,6 +25,10 @@ import {
 import PlayerControls from './PlayerControls';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const pageCountBucket = (count: number) => count <= 1 ? '1' : count <= 5 ? '2_to_5' : '6_plus';
+const durationBucket = (durationMs: number) => durationMs < 30_000
+    ? 'under_30s'
+    : durationMs < 120_000 ? '30s_to_2m' : durationMs < 600_000 ? '2m_to_10m' : '10m_plus';
 
 export default function EmbeddedScorePlayer() {
     const searchParams = useSearchParams();
@@ -39,6 +44,10 @@ export default function EmbeddedScorePlayer() {
     const playerId = useMemo(
         () => resolvePlayerId(requestedPlayerId, `player-${generatedId.replace(/[^A-Za-z0-9._:-]/g, '') || 'default'}`),
         [generatedId, requestedPlayerId],
+    );
+    const parentOrigin = useMemo(
+        () => resolveParentOrigin(requestedParentOrigin, window.location.origin),
+        [requestedParentOrigin],
     );
 
     const [score, setScore] = useState<Score | null>(null);
@@ -61,7 +70,8 @@ export default function EmbeddedScorePlayer() {
     const [follow, setFollow] = useState(initialFollow);
     const [volume, setVolume] = useState(1);
     const [audioMessage, setAudioMessage] = useState('');
-    const [parentOrigin, setParentOrigin] = useState<string | null>(null);
+    const [inputFormat, setInputFormat] = useState('');
+    const [hostReady, setHostReady] = useState(false);
     const playerRootRef = useRef<HTMLElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const activeMeasureRef = useRef<SVGRectElement | null>(null);
@@ -78,6 +88,9 @@ export default function EmbeddedScorePlayer() {
     const pageLoadBusyRef = useRef(false);
     const pageRequestNavigateRef = useRef(false);
     const pageLoadGenerationRef = useRef(0);
+    const loadStartedAtRef = useRef(0);
+    const loadDurationMsRef = useRef(0);
+    const playPreparationStartedAtRef = useRef<number | null>(null);
     const transportController = useScoreTransport({
         score,
         durationMs: timeline?.durationMs ?? 0,
@@ -120,10 +133,6 @@ export default function EmbeddedScorePlayer() {
     }, []);
 
     useEffect(() => {
-        setParentOrigin(resolveParentOrigin(requestedParentOrigin, window.location.origin));
-    }, [requestedParentOrigin]);
-
-    useEffect(() => {
         setFollowPreference(initialFollow);
     }, [initialFollow, setFollowPreference]);
 
@@ -140,6 +149,22 @@ export default function EmbeddedScorePlayer() {
     useEffect(() => {
         window.localStorage.setItem('ots-player-volume', String(volume));
     }, [volume]);
+
+    const emitPlayerTelemetry = useCallback((
+        eventName: string,
+        properties?: Record<string, string | number | boolean | undefined>,
+    ) => {
+        trackEditorAnalyticsEvent(eventName, {
+            surface: 'embedded_player',
+            input_format: inputFormat || undefined,
+            playback_mode: fallbackMode || audioMessage.toLowerCase().includes('compatibility')
+                ? 'wav_fallback'
+                : 'streaming',
+            page_count_bucket: pageCountBucket(pageCount),
+            duration_bucket: durationBucket(timeline?.durationMs ?? 0),
+            ...properties,
+        });
+    }, [audioMessage, fallbackMode, inputFormat, pageCount, timeline?.durationMs]);
 
     const postPlayerEvent = useCallback((
         event: 'ready' | 'statechange' | 'timeupdate' | 'pagechange' | 'ended' | 'error',
@@ -163,12 +188,16 @@ export default function EmbeddedScorePlayer() {
         }
         const controller = new AbortController();
         const generation = ++loadGenerationRef.current;
+        loadStartedAtRef.current = performance.now();
+        loadDurationMsRef.current = 0;
         const ownedRenderPromises = renderPromisesRef.current;
         let loadedScore: Score | null = null;
         setScore(null);
         setSvg('');
         setPositions(null);
         setTimeline(null);
+        setInputFormat('');
+        setHostReady(false);
         setProgressiveHasMorePages(false);
         pageLoadGenerationRef.current += 1;
         pageLoadBusyRef.current = false;
@@ -215,6 +244,8 @@ export default function EmbeddedScorePlayer() {
                 const nextTimeline = nativeTimeline ?? timelineFromPositions(measurePositions, metadataDurationMs);
                 setPositions(measurePositions);
                 setTimeline(nextTimeline);
+                setInputFormat(loadResult.format);
+                loadDurationMsRef.current = Math.max(0, Math.round(performance.now() - loadStartedAtRef.current));
                 const availablePages = loadResult.progressivePaging
                     ? loadResult.initialAvailablePages
                     : Number(pageTotal);
@@ -295,6 +326,8 @@ export default function EmbeddedScorePlayer() {
         () => positions?.elements.filter((element) => element.page === currentPage) ?? [],
         [currentPage, positions],
     );
+    const hasPlaybackFailure = transport === 'unavailable'
+        || audioMessage.startsWith('Playback was blocked.');
 
     const readyScoreRef = useRef<Score | null>(null);
     useEffect(() => {
@@ -304,37 +337,67 @@ export default function EmbeddedScorePlayer() {
             durationMs: timeline?.durationMs ?? 0,
             pageCount,
         });
-    }, [error, loading, pageCount, postPlayerEvent, score, svg, timeline?.durationMs]);
+        emitPlayerTelemetry('score_player_loaded', {
+            load_duration_ms: loadDurationMsRef.current,
+        });
+        setHostReady(true);
+    }, [emitPlayerTelemetry, error, loading, pageCount, postPlayerEvent, score, svg, timeline?.durationMs]);
 
     useEffect(() => {
+        if (!hostReady) return;
         postPlayerEvent('statechange', {
             state: transport,
             positionMs: positionRef.current,
             durationMs: timeline?.durationMs ?? 0,
             compatibilityAudio: fallbackMode,
         });
-    }, [fallbackMode, positionRef, postPlayerEvent, timeline?.durationMs, transport]);
+    }, [fallbackMode, hostReady, positionRef, postPlayerEvent, timeline?.durationMs, transport]);
+
+    const previousTransportRef = useRef(transport);
+    useEffect(() => {
+        const previous = previousTransportRef.current;
+        previousTransportRef.current = transport;
+        if (transport === previous) return;
+        if (transport === 'preparing') {
+            playPreparationStartedAtRef.current = performance.now();
+            return;
+        }
+        if (transport === 'playing') {
+            const preparationStartedAt = playPreparationStartedAtRef.current;
+            emitPlayerTelemetry('score_player_play_started', {
+                play_preparation_duration_ms: preparationStartedAt === null
+                    ? 0
+                    : Math.max(0, Math.round(performance.now() - preparationStartedAt)),
+                resumed: previous === 'paused',
+            });
+            playPreparationStartedAtRef.current = null;
+        } else if (transport === 'paused') {
+            emitPlayerTelemetry('score_player_paused');
+        } else if (transport === 'ended') {
+            emitPlayerTelemetry('score_player_completed');
+        }
+    }, [emitPlayerTelemetry, transport]);
 
     const lastTimeUpdateRef = useRef(0);
     useEffect(() => {
-        if (transport !== 'playing') return;
+        if (!hostReady || transport !== 'playing') return;
         const now = Date.now();
         if (now - lastTimeUpdateRef.current < 250) return;
         lastTimeUpdateRef.current = now;
         postPlayerEvent('timeupdate', { positionMs, durationMs: timeline?.durationMs ?? 0 });
-    }, [positionMs, postPlayerEvent, timeline?.durationMs, transport]);
+    }, [hostReady, positionMs, postPlayerEvent, timeline?.durationMs, transport]);
 
     useEffect(() => {
-        postPlayerEvent('pagechange', { page: currentPage + 1, pageCount });
-    }, [currentPage, pageCount, postPlayerEvent]);
+        if (hostReady) postPlayerEvent('pagechange', { page: currentPage + 1, pageCount });
+    }, [currentPage, hostReady, pageCount, postPlayerEvent]);
 
     useEffect(() => {
-        if (transport === 'ended') postPlayerEvent('ended', { positionMs });
-    }, [positionMs, postPlayerEvent, transport]);
+        if (hostReady && transport === 'ended') postPlayerEvent('ended', { positionMs });
+    }, [hostReady, positionMs, postPlayerEvent, transport]);
 
     const lastPostedErrorRef = useRef('');
     useEffect(() => {
-        const message = error || pageError || (transport === 'unavailable' ? audioMessage : '');
+        const message = error || pageError || (hasPlaybackFailure ? audioMessage : '');
         if (!message) {
             lastPostedErrorRef.current = '';
             return;
@@ -345,7 +408,18 @@ export default function EmbeddedScorePlayer() {
             category: error ? 'score' : pageError ? 'page' : 'audio',
             message,
         });
-    }, [audioMessage, error, pageError, postPlayerEvent, transport]);
+        emitPlayerTelemetry('score_player_error', {
+            error_category: error ? 'score' : pageError ? 'page' : 'audio',
+            load_duration_ms: error && loadStartedAtRef.current > 0
+                ? Math.max(loadDurationMsRef.current, Math.round(performance.now() - loadStartedAtRef.current))
+                : undefined,
+        });
+    }, [audioMessage, emitPlayerTelemetry, error, hasPlaybackFailure, pageError, postPlayerEvent]);
+
+    const handleSeek = useCallback((targetMs: number) => {
+        emitPlayerTelemetry('score_player_seeked');
+        seek(targetMs);
+    }, [emitPlayerTelemetry, seek]);
 
     useEffect(() => {
         if (!parentOrigin) return;
@@ -367,7 +441,7 @@ export default function EmbeddedScorePlayer() {
                     void stopAt(startMsRef.current);
                     break;
                 case 'seek':
-                    seek(command.value as number);
+                    handleSeek(command.value as number);
                     break;
                 case 'set-volume':
                     setVolume(command.value as number);
@@ -379,7 +453,7 @@ export default function EmbeddedScorePlayer() {
         };
         window.addEventListener('message', onMessage);
         return () => window.removeEventListener('message', onMessage);
-    }, [parentOrigin, playerId, seek, setFollowPreference, stopAt, timeline?.durationMs, togglePlayPause, transportStateRef]);
+    }, [handleSeek, parentOrigin, playerId, setFollowPreference, stopAt, timeline?.durationMs, togglePlayPause, transportStateRef]);
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
@@ -405,7 +479,13 @@ export default function EmbeddedScorePlayer() {
 
     const loadNextProgressivePage = useCallback(async (navigateToPage: boolean) => {
         const activeScore = scoreRef.current;
-        if (!activeScore || !progressiveHasMorePages || pageLoadBusyRef.current) return;
+        if (!activeScore || !progressiveHasMorePages) {
+            pageRequestNavigateRef.current = false;
+            setPageRequestQueued(false);
+            setPageMessage('');
+            return;
+        }
+        if (pageLoadBusyRef.current) return;
         const generation = ++pageLoadGenerationRef.current;
         const nextPage = pageCount;
         pageLoadBusyRef.current = true;
@@ -492,7 +572,19 @@ export default function EmbeddedScorePlayer() {
         void loadNextProgressivePage(navigateToPage);
     }, [loadNextProgressivePage, pageLoadBusy, pageRequestQueued, renderWindowIdle]);
 
+    useEffect(() => {
+        if (progressiveHasMorePages) return;
+        pageRequestNavigateRef.current = false;
+        setPageRequestQueued(false);
+        setPageMessage('');
+    }, [progressiveHasMorePages]);
+
     const pageSize = positions?.pageSize;
+    const transportAnnouncement = transport === 'playing'
+        ? 'Playback started.'
+        : transport === 'paused'
+            ? 'Playback paused.'
+            : transport === 'ended' ? 'Playback completed.' : '';
     const goToNextPage = () => {
         suspendFollowTemporarily();
         setPageError('');
@@ -536,7 +628,7 @@ export default function EmbeddedScorePlayer() {
             >
                 {loading && <div className="flex h-full items-center justify-center text-sm text-[var(--player-muted)]" role="status">Loading score…</div>}
                 {error && (
-                    <div className="mx-auto mt-10 flex max-w-xl items-center justify-between gap-4 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-800" role="alert">
+                    <div className="mx-auto mt-10 flex max-w-xl items-center justify-between gap-4 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-800" role="status">
                         <span>{error}</span>
                         {scoreUrl && <button type="button" className="shrink-0 font-semibold underline" onClick={() => setLoadAttempt((value) => value + 1)}>Retry</button>}
                     </div>
@@ -559,7 +651,7 @@ export default function EmbeddedScorePlayer() {
                                             className="cursor-pointer"
                                             onClick={() => {
                                                 const occurrence = occurrenceForMeasure(timeline, measure.id, positionRef.current);
-                                                if (occurrence) seek(occurrence.startMs);
+                                                if (occurrence) handleSeek(occurrence.startMs);
                                             }}
                                         />
                                     ))}
@@ -574,10 +666,11 @@ export default function EmbeddedScorePlayer() {
                         </div>
                     </div>
                 )}
-                {audioMessage && <div className="pointer-events-none sticky bottom-2 mx-auto mt-2 w-fit rounded-full bg-slate-900/85 px-3 py-1 text-xs text-white" role="status">{audioMessage}</div>}
-                {(pageLoadBusy || pageMessage) && <div className="pointer-events-none sticky bottom-2 mx-auto mt-2 w-fit rounded-full bg-slate-900/85 px-3 py-1 text-xs text-white" role="status">Preparing next page…</div>}
+                {audioMessage && <div className="pointer-events-none sticky bottom-2 mx-auto mt-2 w-fit rounded-full bg-slate-900/85 px-3 py-1 text-xs text-white" role={hasPlaybackFailure ? 'alert' : 'status'}>{audioMessage}</div>}
+                {(pageLoadBusy || pageMessage) && <div className="pointer-events-none sticky bottom-2 mx-auto mt-2 w-fit rounded-full bg-slate-900/85 px-3 py-1 text-xs text-white" role="status">{pageMessage || 'Preparing next page…'}</div>}
                 {pageError && <div className="sticky bottom-2 mx-auto mt-2 flex w-fit items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-900" role="status"><span>{pageError}</span><button type="button" className="font-semibold underline" onClick={() => setPageError('')}>Dismiss</button></div>}
             </div>
+            <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{transportAnnouncement}</div>
             <PlayerControls
                 state={transport}
                 disabled={loading || Boolean(error) || !score}
@@ -592,7 +685,7 @@ export default function EmbeddedScorePlayer() {
                 follow={follow}
                 onTogglePlayPause={() => void togglePlayPause()}
                 onStop={() => void stopAt(startMsRef.current)}
-                onSeek={seek}
+                onSeek={handleSeek}
                 onVolume={setVolume}
                 onPreviousPage={() => { suspendFollowTemporarily(); setPageError(''); setCurrentPage((page) => Math.max(0, page - 1)); }}
                 onNextPage={goToNextPage}

@@ -13,6 +13,8 @@ export type BrowserScoreHandle = {
   getKeySignature?: () => Promise<number> | number;
   addNoteFromRest?: (...args: unknown[]) => Promise<unknown>;
   listInstrumentTemplates?: (...args: unknown[]) => Promise<unknown>;
+  setSoundFont?: (bytes: Uint8Array) => Promise<void> | void;
+  saveAudio?: (format: 'wav') => Promise<Uint8Array>;
   playbackTimeline?: () => Promise<{
     schemaVersion: 1;
     durationMs: number;

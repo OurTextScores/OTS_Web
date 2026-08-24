@@ -135,7 +135,7 @@ export default function PlayerControls(props: Props) {
                     </button>
                 </div>
                 <details className="group relative sm:hidden">
-                    <summary role="button" className={`${controlClass} cursor-pointer list-none [&::-webkit-details-marker]:hidden`} aria-label="More player controls">
+                    <summary className={`${controlClass} cursor-pointer list-none [&::-webkit-details-marker]:hidden`} aria-label="More player controls">
                         <span className="text-xs font-semibold">More</span>
                     </summary>
                     <div className="absolute bottom-12 right-0 z-30 flex w-64 flex-col gap-3 rounded-xl border border-[var(--player-border)] bg-[var(--player-panel)] p-3 text-[var(--player-text)] shadow-xl">

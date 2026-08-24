@@ -91,7 +91,7 @@ describe('PlayerControls', () => {
     it('exposes view and volume controls from the mobile More menu', () => {
         const values = props();
         render(<PlayerControls {...values} />);
-        const more = screen.getByRole('button', { name: 'More player controls' });
+        const more = screen.getByLabelText('More player controls');
         fireEvent.click(more);
         const menu = more.closest('details');
         expect(menu).toHaveAttribute('open');

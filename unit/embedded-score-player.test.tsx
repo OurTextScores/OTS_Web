@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
     search: new URLSearchParams({ score: '/score.musicxml', follow: '0' }),
     loadScoreFromUrl: vi.fn(),
     requestScoreLayoutProgress: vi.fn(),
+    trackEvent: vi.fn(),
+    onTransportMessage: null as ((message: string) => void) | null,
     transport: {
         state: 'idle',
         stateRef: { current: 'idle' },
@@ -27,7 +29,13 @@ vi.mock('@/lib/score-loader', () => ({
     requestScoreLayoutProgress: mocks.requestScoreLayoutProgress,
 }));
 vi.mock('@/lib/playback/use-score-transport', () => ({
-    useScoreTransport: () => mocks.transport,
+    useScoreTransport: (options: { onMessage?: (message: string) => void }) => {
+        mocks.onTransportMessage = options.onMessage ?? null;
+        return mocks.transport;
+    },
+}));
+vi.mock('@/lib/editor-analytics', () => ({
+    trackEditorAnalyticsEvent: mocks.trackEvent,
 }));
 
 import EmbeddedScorePlayer from '@/components/score-player/EmbeddedScorePlayer';
@@ -69,6 +77,7 @@ describe('EmbeddedScorePlayer progressive pages', () => {
         mocks.transport.positionMs = 0;
         mocks.transport.positionRef.current = 0;
         mocks.transport.renderWindowIdle = true;
+        mocks.onTransportMessage = null;
         const score = makeScore();
         mocks.loadScoreFromUrl.mockResolvedValue({
             loadedScore: score,
@@ -98,7 +107,7 @@ describe('EmbeddedScorePlayer progressive pages', () => {
         await screen.findByTestId('player-svg');
 
         fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
-        expect(screen.getByRole('status', { name: '' })).toHaveTextContent('Preparing next page…');
+        expect(screen.getByText('Preparing next page…')).toBeInTheDocument();
         expect(mocks.requestScoreLayoutProgress).not.toHaveBeenCalled();
 
         mocks.transport.renderWindowIdle = true;
@@ -124,10 +133,59 @@ describe('EmbeddedScorePlayer progressive pages', () => {
         render(<EmbeddedScorePlayer />);
 
         await screen.findByText('The score could not be fetched (503).');
+        expect(screen.getByText('The score could not be fetched (503).').closest('[role="status"]')).not.toBeNull();
         fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
 
         await screen.findByTestId('player-svg');
         expect(mocks.loadScoreFromUrl).toHaveBeenCalledTimes(2);
+        expect(mocks.trackEvent).toHaveBeenCalledWith('score_player_error', expect.objectContaining({
+            surface: 'embedded_player',
+            error_category: 'score',
+        }));
+    });
+
+    it('emits bounded player telemetry without score metadata', async () => {
+        const view = render(<EmbeddedScorePlayer />);
+        await screen.findByTestId('player-svg');
+        await waitFor(() => expect(mocks.trackEvent).toHaveBeenCalledWith(
+            'score_player_loaded',
+            expect.objectContaining({
+                surface: 'embedded_player',
+                input_format: 'musicxml',
+                page_count_bucket: '1',
+                duration_bucket: 'under_30s',
+            }),
+        ));
+
+        mocks.transport.state = 'playing';
+        mocks.transport.stateRef.current = 'playing';
+        view.rerender(<EmbeddedScorePlayer />);
+        expect(mocks.trackEvent).toHaveBeenCalledWith('score_player_play_started', expect.any(Object));
+        expect(screen.getByText('Playback started.')).toBeInTheDocument();
+        mocks.transport.state = 'paused';
+        mocks.transport.stateRef.current = 'paused';
+        view.rerender(<EmbeddedScorePlayer />);
+        expect(mocks.trackEvent).toHaveBeenCalledWith('score_player_paused', expect.any(Object));
+        expect(screen.getByText('Playback paused.')).toBeInTheDocument();
+        mocks.transport.state = 'ended';
+        mocks.transport.stateRef.current = 'ended';
+        view.rerender(<EmbeddedScorePlayer />);
+        expect(mocks.trackEvent).toHaveBeenCalledWith('score_player_completed', expect.any(Object));
+
+        expect(JSON.stringify(mocks.trackEvent.mock.calls)).not.toContain('/score.musicxml');
+        expect(JSON.stringify(mocks.trackEvent.mock.calls)).not.toContain('Test score');
+    });
+
+    it('announces playback failure assertively', async () => {
+        const view = render(<EmbeddedScorePlayer />);
+        await screen.findByTestId('player-svg');
+
+        act(() => mocks.onTransportMessage?.('Playback soundfont is unavailable.'));
+        mocks.transport.state = 'unavailable';
+        mocks.transport.stateRef.current = 'unavailable';
+        view.rerender(<EmbeddedScorePlayer />);
+
+        expect(screen.getByRole('alert')).toHaveTextContent('Playback soundfont is unavailable.');
     });
 
     it('extends progressive layout when follow reaches the last known measure', async () => {
@@ -230,6 +288,7 @@ describe('EmbeddedScorePlayer progressive pages', () => {
             source: window,
         }));
         expect(mocks.transport.seek).toHaveBeenCalledWith(750);
+        expect(mocks.trackEvent).toHaveBeenCalledWith('score_player_seeked', expect.any(Object));
     });
 
     it('temporarily suspends follow after manual page navigation', async () => {

@@ -37,3 +37,43 @@ test('native timeline expands pickup, repeats, endings, and tempo changes', asyn
     [15_000, 17_000],
   ]);
 });
+
+test('native float WAV compatibility audio decodes through Web Audio', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto('/?score=/test_scores/playback_timeline.musicxml');
+  await page.waitForFunction(
+    () => Boolean((window as BrowserScoreWindow).__webmscore?.saveAudio),
+    undefined,
+    { timeout: 60_000 },
+  );
+
+  const result = await page.evaluate(async () => {
+    const score = (window as BrowserScoreWindow).__webmscore;
+    if (!score?.setSoundFont || !score.saveAudio) {
+      throw new Error('Compatibility audio exports are unavailable');
+    }
+    const soundFontResponse = await fetch('/soundfonts/default.sf3');
+    if (!soundFontResponse.ok) throw new Error(`Soundfont fetch failed (${soundFontResponse.status})`);
+    await score.setSoundFont(new Uint8Array(await soundFontResponse.arrayBuffer()));
+    const wav = await score.saveAudio('wav');
+    const context = new AudioContext({ sampleRate: 44_100 });
+    const decoded = await context.decodeAudioData(wav.slice().buffer as ArrayBuffer);
+    const gain = context.createGain();
+    gain.connect(context.destination);
+    const source = context.createBufferSource();
+    source.buffer = decoded;
+    source.connect(gain);
+    source.start(0, 1);
+    source.stop();
+    await context.close();
+    return {
+      wavBytes: wav.byteLength,
+      duration: decoded.duration,
+      channels: decoded.numberOfChannels,
+    };
+  });
+
+  expect(result.wavBytes).toBeGreaterThan(1_000_000);
+  expect(result.duration).toBeCloseTo(20, 1);
+  expect(result.channels).toBe(2);
+});
