@@ -564,6 +564,23 @@ class WebMscore {
     }
 
     /**
+     * Return the repeat-expanded, tempo-aware measure occurrence timeline.
+     * @returns {Promise<import('../schemas').PlaybackTimeline | null>}
+     */
+    async playbackTimeline() {
+        const dataptr = Module.ccall('playbackTimeline',
+            'number',
+            ['number', 'number'],
+            [this.scoreptr, this.excerptId]
+        )
+        const json = WasmRes.readText(dataptr)
+        if (!json || json === 'null') {
+            return null
+        }
+        return JSON.parse(json)
+    }
+
+    /**
      * Resolve the inclusive measure range covered by the current selection.
      * @returns {Promise<{startMeasureIndex: number, endMeasureIndex: number} | null>}
      */

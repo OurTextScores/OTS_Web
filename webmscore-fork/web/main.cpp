@@ -1,6 +1,7 @@
 #include <emscripten/emscripten.h>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include <QGuiApplication>
+#include <QHash>
 #include <QFontDatabase>
 #include <QDataStream>
 #include <QJsonArray>
@@ -1691,6 +1693,71 @@ WasmRes _measureRangeForPage(uintptr_t score_ptr, int pageIndex, int excerptId)
     QJsonObject result;
     result.insert(QStringLiteral("startMeasureIndex"), startMeasureIndex);
     result.insert(QStringLiteral("endMeasureIndex"), endMeasureIndex);
+    return WasmRes(QJsonDocument(result).toJson(QJsonDocument::Compact));
+}
+
+WasmRes _playbackTimeline(uintptr_t score_ptr, int excerptId)
+{
+    MainScore score(score_ptr, excerptId);
+    auto* engravingScore = static_cast<engraving::Score*>(score);
+    if (!engravingScore) {
+        return WasmRes(QByteArray("null"));
+    }
+
+    // Playback and the positions writer both use the expanded repeat list. Keep
+    // this export on the same authority so callers never have to reconstruct
+    // repeats, voltas, jumps, or tempo changes in JavaScript.
+    engravingScore->masterScore()->setExpandRepeats(true);
+    const auto& repeatList = engravingScore->repeatList();
+
+    QHash<const engraving::Measure*, int> measureIndices;
+    int measureIndex = 0;
+    for (auto* measure = engravingScore->firstMeasureMM(); measure; measure = measure->nextMeasureMM()) {
+        measureIndices.insert(measure, measureIndex++);
+    }
+
+    QJsonArray occurrences;
+    int occurrenceIndex = 0;
+    for (const engraving::RepeatSegment* repeatSegment : repeatList) {
+        const int rawSegmentStart = repeatSegment->tick;
+        const int rawSegmentEnd = rawSegmentStart + repeatSegment->len();
+        const int tickOffset = repeatSegment->utick - repeatSegment->tick;
+
+        for (auto* measure = engravingScore->tick2measureMM(engraving::Fraction::fromTicks(rawSegmentStart));
+             measure;
+             measure = measure->nextMeasureMM()) {
+            const int rawMeasureStart = measure->tick().ticks();
+            const int rawMeasureEnd = measure->endTick().ticks();
+            const int rawStart = std::max(rawMeasureStart, rawSegmentStart);
+            const int rawEnd = std::min(rawMeasureEnd, rawSegmentEnd);
+            if (rawEnd > rawStart) {
+                const int playedStart = rawStart + tickOffset;
+                const int playedEnd = rawEnd + tickOffset;
+                QJsonObject occurrence;
+                occurrence.insert(QStringLiteral("occurrenceIndex"), occurrenceIndex++);
+                occurrence.insert(QStringLiteral("measureIndex"), measureIndices.value(measure, -1));
+                occurrence.insert(QStringLiteral("startMs"),
+                                  std::llround(repeatList.utick2utime(playedStart) * 1000.0));
+                occurrence.insert(QStringLiteral("endMs"),
+                                  std::llround(repeatList.utick2utime(playedEnd) * 1000.0));
+                occurrences.append(occurrence);
+            }
+
+            if (rawMeasureEnd >= rawSegmentEnd) {
+                break;
+            }
+        }
+    }
+
+    const int durationMs = static_cast<int>(
+        std::llround(repeatList.utick2utime(repeatList.ticks()) * 1000.0)
+    );
+    QJsonObject result;
+    result.insert(QStringLiteral("schemaVersion"), 1);
+    result.insert(QStringLiteral("durationMs"), durationMs);
+    // Matches NotationPlayback's existing three-second playback tail.
+    result.insert(QStringLiteral("renderDurationMs"), durationMs + 3000);
+    result.insert(QStringLiteral("occurrences"), occurrences);
     return WasmRes(QJsonDocument(result).toJson(QJsonDocument::Compact));
 }
 
@@ -7764,6 +7831,11 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     WasmResBytes measureRangeForPage(uintptr_t score_ptr, int pageIndex, int excerptId = -1) {
         return _measureRangeForPage(score_ptr, pageIndex, excerptId);
+    };
+
+    EMSCRIPTEN_KEEPALIVE
+    WasmResBytes playbackTimeline(uintptr_t score_ptr, int excerptId = -1) {
+        return _playbackTimeline(score_ptr, excerptId);
     };
 
     EMSCRIPTEN_KEEPALIVE

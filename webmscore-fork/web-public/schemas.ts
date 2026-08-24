@@ -152,6 +152,20 @@ export interface ScoreMetadata {
     textFramesData: ScoreTextFramesData;
 }
 
+export interface PlaybackTimelineOccurrence {
+    occurrenceIndex: number;
+    measureIndex: number;
+    startMs: number;
+    endMs: number;
+}
+
+export interface PlaybackTimeline {
+    schemaVersion: 1;
+    durationMs: number;
+    renderDurationMs: number;
+    occurrences: PlaybackTimelineOccurrence[];
+}
+
 export interface PositionElement {
     /**
      * element index

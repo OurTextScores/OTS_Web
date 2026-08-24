@@ -57,6 +57,20 @@ export interface Positions {
     };
 }
 
+export interface PlaybackTimelineOccurrence {
+    occurrenceIndex: number;
+    measureIndex: number;
+    startMs: number;
+    endMs: number;
+}
+
+export interface PlaybackTimeline {
+    schemaVersion: 1;
+    durationMs: number;
+    renderDurationMs: number;
+    occurrences: PlaybackTimelineOccurrence[];
+}
+
 export interface GripEditInfo {
     page: number;
     grips: Array<{
@@ -128,6 +142,7 @@ export interface Score {
     npages?: () => Promise<number>;
     measurePositions: () => Promise<Positions>;
     measureRangeForPage?: (pageIndex: number) => Promise<{ startMeasureIndex: number; endMeasureIndex: number } | null> | { startMeasureIndex: number; endMeasureIndex: number } | null;
+    playbackTimeline?: () => Promise<PlaybackTimeline | null> | PlaybackTimeline | null;
     selectionMeasureRange?: () => Promise<{ startMeasureIndex: number; endMeasureIndex: number } | null> | { startMeasureIndex: number; endMeasureIndex: number } | null;
     segmentPositions: () => Promise<Positions>;
     measureSignatureCount?: (partIndex: number) => Promise<number> | number;

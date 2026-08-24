@@ -88,7 +88,12 @@ import {
 } from '../lib/ourtextscores-api-client';
 import { appendMusicXmlMeasures, appendMusicXmlParts } from '../lib/musicxml-append-parts';
 import { sanitizeEngineSvg } from '../lib/sanitize-svg';
-import { DEFAULT_RENDER_WINDOW, releaseScheduledSource, renderWindowDelayMs, type RenderWindow } from '../lib/playback-window';
+import { DEFAULT_RENDER_WINDOW, type RenderWindow } from '../lib/playback-window';
+import {
+    scheduleSynthBatchStream,
+    stopSynthStream as stopSharedSynthStream,
+} from '../lib/playback/stream-scheduler';
+import { buildSoundFontCandidates as resolveSoundFontCandidates } from '../lib/playback/soundfont';
 import { extractPatchAnnotations, PATCH_ANNOTATIONS_INSTRUCTION, type PatchAnnotation } from '../lib/patch-annotations';
 import {
     extractTraceContextFromHeaders,
@@ -8043,50 +8048,7 @@ ${partsBodyXml}
 
 
     const buildSoundFontCandidates = useCallback((): string[] => {
-        const urls: string[] = [];
-        const seen = new Set<string>();
-        const add = (url: string) => {
-            if (!url || seen.has(url)) {
-                return;
-            }
-            seen.add(url);
-            urls.push(url);
-        };
-
-        const cdnRaw = (process.env.NEXT_PUBLIC_SOUNDFONT_CDN_URL || '').trim();
-        if (cdnRaw) {
-            const cdn = cdnRaw.replace(/\/+$/, '');
-            const lower = cdn.toLowerCase();
-            const pointsToFile = lower.endsWith('.sf2') || lower.endsWith('.sf3');
-
-            if (pointsToFile) {
-                add(cdn);
-            } else {
-                add(`${cdn}.sf3`);
-                add(`${cdn}.sf2`);
-                add(`${cdn}/MuseScore_General.sf3`);
-                add(`${cdn}/MuseScore_General.sf2`);
-                add(`${cdn}/default.sf3`);
-                add(`${cdn}/default.sf2`);
-            }
-        }
-
-        // Same-origin fallbacks. The embed is served under a basePath, and a
-        // path written from the origin root misses the files vendored beside
-        // it — which is why playback failed in the scanner with the soundfont
-        // sitting right there at `/score-editor/soundfonts/default.sf3`. Next's
-        // `basePath` rewrites links and imports, not strings fetched at
-        // runtime, so this has to say so itself.
-        const basePath =
-            process.env.NEXT_PUBLIC_BUILD_MODE === 'embed' ? '/score-editor' : '';
-        for (const prefix of basePath ? [basePath, ''] : ['']) {
-            add(`${prefix}/soundfonts/MuseScore_General.sf3`);
-            add(`${prefix}/soundfonts/MuseScore_General.sf2`);
-            add(`${prefix}/soundfonts/default.sf3`);
-            add(`${prefix}/soundfonts/default.sf2`);
-        }
-
-        return urls;
+        return resolveSoundFontCandidates();
     }, []);
 
     const prefetchSoundFontBytes = useCallback(async (): Promise<{ url: string; buf: Uint8Array } | null> => {
@@ -14012,29 +13974,7 @@ ${partsBodyXml}
         }
     };
 
-    const stopSynthStream = async (
-        sourcesRef: React.MutableRefObject<AudioBufferSourceNode[]>,
-        iteratorRef: React.MutableRefObject<SynthBatchIterator | null>,
-        options?: { awaitCancel?: boolean },
-    ) => {
-        sourcesRef.current.forEach(src => {
-            try {
-                src.stop();
-            } catch {
-                // ignore
-            }
-        });
-        sourcesRef.current = [];
-        const iter = iteratorRef.current;
-        iteratorRef.current = null;
-        if (iter) {
-            const cancelPromise = iter(true).catch(() => { /* ignore */ });
-            if (options?.awaitCancel) {
-                await cancelPromise;
-            }
-        }
-    };
-
+    const stopSynthStream = stopSharedSynthStream;
     const stopPreviewAudio = async (options?: { awaitCancel?: boolean }) => {
         previewPlaybackGenerationRef.current += 1;
         await stopSynthStream(previewAudioSourcesRef, previewStreamIteratorRef, options);
@@ -14107,261 +14047,26 @@ ${partsBodyXml}
             prerollSeconds?: number;
             startupBufferSeconds?: number;
             minStartupBatches?: number;
-            /** Bounds render-ahead. null disables throttling for short one-shot clips. */
             renderWindow?: RenderWindow | null;
-            /** Overrides which isPlaying/isPaused state trackTransportState updates. Defaults to the main transport's. */
             stateSetters?: { setIsPlaying: (value: boolean) => void; setIsPaused: (value: boolean) => void };
         },
     ) => {
         const setPlaying = options.stateSetters?.setIsPlaying ?? setIsPlaying;
         const setPaused = options.stateSetters?.setIsPaused ?? setIsPaused;
-        const audioCtx = await ensureAudioContextReady();
-        const generation = ++options.generationRef.current;
-        options.iteratorRef.current = batchFn;
-        const prerollSeconds = options.prerollSeconds ?? SYNTH_START_PREROLL_SECONDS;
-        const startupBufferSeconds = options.startupBufferSeconds ?? 0;
-        const minStartupBatches = options.minStartupBatches ?? 1;
-        let baseTime: number | null = null;
-        let streamStartTimeSeconds: number | null = null;
-        let lastSource: AudioBufferSourceNode | null = null;
-        let startedAny = false;
-        let batchCount = 0;
-        let bufferedUntilSeconds = 0;
-        let pendingChunks: { buffer: AudioBuffer; relativeChunkStart: number }[] = [];
-        const mergeWindowSeconds = options.debugLabel === 'selection-transport' ? 0.5 : 0;
-        const mergeTargetFrames = mergeWindowSeconds > 0
-            ? Math.max(512, Math.round(audioCtx.sampleRate * mergeWindowSeconds))
-            : 0;
-        const contiguousToleranceSeconds = 1 / audioCtx.sampleRate;
-        let mergedChunkState: {
-            relativeChunkStart: number;
-            lastRelativeChunkEnd: number;
-            channels: number;
-            totalFrames: number;
-            channelSlices: Float32Array[][];
-        } | null = null;
-
-        const scheduleChunk = (buffer: AudioBuffer, relativeChunkStart: number) => {
-            if (baseTime === null) {
-                baseTime = audioCtx.currentTime + prerollSeconds;
-            }
-            const source = audioCtx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(audioCtx.destination);
-            const scheduledStart = baseTime + relativeChunkStart;
-            source.start(scheduledStart);
-            // Release each source as it finishes. Without this the array only ever
-            // grows -- it is cleared when the *final* source ends -- so every buffer
-            // behind the playhead stays strongly referenced and the render window
-            // bounds nothing. The final source's handler below releases too.
-            source.onended = () => {
-                releaseScheduledSource(options.sourcesRef.current, source);
-            };
-            options.sourcesRef.current.push(source);
-            lastSource = source;
-            startedAny = true;
-            if (options.trackTransportState) {
-                setPlaying(true);
-            }
-        };
-
-        const enqueueBuffer = (buffer: AudioBuffer, relativeChunkStart: number, hitDoneForChunk: boolean) => {
-            if (baseTime === null && batchCount < minStartupBatches && !hitDoneForChunk) {
-                pendingChunks.push({ buffer, relativeChunkStart });
-            } else if (baseTime === null && bufferedUntilSeconds < startupBufferSeconds && !hitDoneForChunk) {
-                pendingChunks.push({ buffer, relativeChunkStart });
-            } else {
-                if (baseTime === null) {
-                    flushPendingChunks();
-                }
-                scheduleChunk(buffer, relativeChunkStart);
-            }
-        };
-
-        const flushMergedChunk = (hitDoneForChunk: boolean) => {
-            if (!mergedChunkState) {
-                return null;
-            }
-            const { channels, totalFrames, channelSlices, relativeChunkStart } = mergedChunkState;
-            const buffer = audioCtx.createBuffer(channels, totalFrames, audioCtx.sampleRate);
-            for (let ch = 0; ch < channels; ch += 1) {
-                const merged = new Float32Array(totalFrames);
-                let offset = 0;
-                for (const slice of channelSlices[ch]) {
-                    merged.set(slice, offset);
-                    offset += slice.length;
-                }
-                buffer.copyToChannel(merged, ch);
-            }
-            mergedChunkState = null;
-            return enqueueBuffer(buffer, relativeChunkStart, hitDoneForChunk);
-        };
-
-        const flushPendingChunks = () => {
-            if (pendingChunks.length === 0) {
-                return;
-            }
-            for (const pending of pendingChunks) {
-                scheduleChunk(pending.buffer, pending.relativeChunkStart);
-            }
-            pendingChunks = [];
-        };
-
-        while (options.generationRef.current === generation) {
-            // Render-ahead window. Without this the loop pulls until the score is
-            // exhausted, scheduling every chunk of a 22-minute score up front
-            // (~115k source nodes, ~450MB of buffers). Idle once we are far enough
-            // ahead, and let the playhead catch up. Short one-shot streams
-            // (auditions, previews) pass renderWindow: null and are never throttled.
-            if (options.renderWindow && baseTime !== null) {
-                let delayMs = renderWindowDelayMs(
-                    (baseTime + bufferedUntilSeconds) - audioCtx.currentTime,
-                    options.renderWindow,
-                );
-                while (delayMs > 0 && options.generationRef.current === generation) {
-                    await new Promise<void>((resolve) => { setTimeout(resolve, Math.min(delayMs, 1000)); });
-                    delayMs = renderWindowDelayMs(
-                        (baseTime + bufferedUntilSeconds) - audioCtx.currentTime,
-                        options.renderWindow,
-                    );
-                }
-                if (options.generationRef.current !== generation) {
-                    break;
-                }
-            }
-
-            const batch = await batchFn(false);
-            batchCount += 1;
-            if (!Array.isArray(batch) || batch.length === 0) {
-                break;
-            }
-
-            let hitDone = false;
-            for (const res of batch) {
-                if (!res) continue;
-                const absoluteChunkStart = Number.isFinite(res.startTime) ? Number(res.startTime) : 0;
-                if (streamStartTimeSeconds === null) {
-                    streamStartTimeSeconds = absoluteChunkStart;
-                }
-                const relativeChunkStart = Math.max(0, absoluteChunkStart - streamStartTimeSeconds);
-
-                if (res.done) {
-                    hitDone = true;
-                }
-                const relativeChunkEnd = typeof res.endTime === 'number'
-                    ? Math.max(0, res.endTime - streamStartTimeSeconds)
-                    : null;
-                if (typeof relativeChunkEnd === 'number') {
-                    if (relativeChunkEnd > bufferedUntilSeconds) {
-                        bufferedUntilSeconds = relativeChunkEnd;
-                    }
-                }
-                if (options.maxDurationSeconds && typeof relativeChunkEnd === 'number' && relativeChunkEnd >= options.maxDurationSeconds) {
-                    hitDone = true;
-                }
-
-                const floats = new Float32Array(res.chunk.buffer, res.chunk.byteOffset, res.chunk.byteLength / 4);
-                const framesPerChannel = 512;
-                let channels = Math.floor(floats.length / framesPerChannel);
-                if (!Number.isInteger(channels) || channels < 1) channels = 1;
-                if (channels > 2) channels = 2;
-
-                const channelSlices: Float32Array[] = [];
-                for (let ch = 0; ch < channels; ch += 1) {
-                    const start = ch * framesPerChannel;
-                    channelSlices.push(Float32Array.from(floats.subarray(start, start + framesPerChannel)));
-                }
-                const shouldMerge =
-                    mergeTargetFrames > 0
-                    && typeof relativeChunkEnd === 'number'
-                    && !hitDone;
-                if (shouldMerge) {
-                    const canAppend = mergedChunkState
-                        && mergedChunkState.channels === channels
-                        && Math.abs(relativeChunkStart - mergedChunkState.lastRelativeChunkEnd) <= contiguousToleranceSeconds
-                        && (mergedChunkState.totalFrames + framesPerChannel) <= mergeTargetFrames;
-                    if (!canAppend && mergedChunkState) {
-                        flushMergedChunk(false);
-                    }
-                    if (!mergedChunkState) {
-                        mergedChunkState = {
-                            relativeChunkStart,
-                            lastRelativeChunkEnd: relativeChunkEnd,
-                            channels,
-                            totalFrames: framesPerChannel,
-                            channelSlices: channelSlices.map(slice => [slice]),
-                        };
-                    } else {
-                        mergedChunkState.lastRelativeChunkEnd = relativeChunkEnd;
-                        mergedChunkState.totalFrames += framesPerChannel;
-                        for (let ch = 0; ch < channels; ch += 1) {
-                            mergedChunkState.channelSlices[ch].push(channelSlices[ch]);
-                        }
-                    }
-                    if (mergedChunkState.totalFrames >= mergeTargetFrames) {
-                        flushMergedChunk(false);
-                    }
-                } else {
-                    if (mergedChunkState) {
-                        flushMergedChunk(false);
-                    }
-                    const buffer = audioCtx.createBuffer(channels, framesPerChannel, audioCtx.sampleRate);
-                    for (let ch = 0; ch < channels; ch += 1) {
-                        buffer.copyToChannel(new Float32Array(channelSlices[ch]), ch);
-                    }
-                    enqueueBuffer(buffer, relativeChunkStart, hitDone);
-                }
-
-                if (hitDone) break;
-            }
-
-            if (hitDone && mergedChunkState) {
-                flushMergedChunk(true);
-            }
-
-            if (baseTime === null && (hitDone || (batchCount >= minStartupBatches && bufferedUntilSeconds >= startupBufferSeconds))) {
-                flushPendingChunks();
-            }
-
-            if (hitDone) {
-                break;
-            }
-        }
-
-        if (mergedChunkState) {
-            flushMergedChunk(false);
-        }
-
-        if (baseTime === null && pendingChunks.length > 0) {
-            flushPendingChunks();
-        }
-
-        if (!startedAny || options.generationRef.current !== generation) {
-            stopSynthStream(options.sourcesRef, options.iteratorRef);
-            if (options.trackTransportState) {
-                setPlaying(false);
-                setPaused(false);
-            }
-            return;
-        }
-
-        const finalSource = lastSource as AudioBufferSourceNode | null;
-        if (finalSource) {
-            finalSource.onended = () => {
-                // This overwrites the per-source handler assigned in scheduleChunk,
-                // so it must release as well as finish the transport.
-                releaseScheduledSource(options.sourcesRef.current, finalSource);
-                if (options.generationRef.current !== generation) {
-                    return;
-                }
-                options.sourcesRef.current = [];
-                options.iteratorRef.current = null;
-                if (options.trackTransportState) {
-                    setPlaying(false);
-                    setPaused(false);
-                }
-            };
-        }
+        const audioContext = await ensureAudioContextReady();
+        await scheduleSynthBatchStream(batchFn, audioContext, {
+            sourcesRef: options.sourcesRef,
+            iteratorRef: options.iteratorRef,
+            generationRef: options.generationRef,
+            maxDurationSeconds: options.maxDurationSeconds,
+            debugLabel: options.debugLabel,
+            prerollSeconds: options.prerollSeconds,
+            startupBufferSeconds: options.startupBufferSeconds,
+            minStartupBatches: options.minStartupBatches,
+            renderWindow: options.renderWindow,
+            onPlayingChange: options.trackTransportState ? setPlaying : undefined,
+            onPausedChange: options.trackTransportState ? setPaused : undefined,
+        });
     };
 
     const playFromUrl = async (url: string, options?: { revokeOnEnded?: boolean }) => {

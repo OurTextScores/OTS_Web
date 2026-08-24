@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { buildSoundFontCandidates } from '@/lib/playback/soundfont';
 
 /**
  * The embed is served under a basePath, and a soundfont path written from the
@@ -8,31 +9,12 @@ import { describe, expect, it } from 'vitest';
  * `/score-editor/soundfonts/default.sf3` and the editor asking for
  * `/soundfonts/default.sf3`.
  *
- * The candidate list is built inside a component, so this asserts the shape it
- * has to have rather than reaching into it: every same-origin fallback must be
- * offered under the embed prefix before the bare one.
+ * Every same-origin fallback must be offered under the embed prefix before the
+ * bare one.
  */
-const buildCandidates = (buildMode: string | undefined) => {
-    const urls: string[] = [];
-    const seen = new Set<string>();
-    const add = (url: string) => {
-        if (seen.has(url)) return;
-        seen.add(url);
-        urls.push(url);
-    };
-    const basePath = buildMode === 'embed' ? '/score-editor' : '';
-    for (const prefix of basePath ? [basePath, ''] : ['']) {
-        add(`${prefix}/soundfonts/MuseScore_General.sf3`);
-        add(`${prefix}/soundfonts/MuseScore_General.sf2`);
-        add(`${prefix}/soundfonts/default.sf3`);
-        add(`${prefix}/soundfonts/default.sf2`);
-    }
-    return urls;
-};
-
 describe('soundfont candidates', () => {
     it('looks under the embed basePath first, then the origin root', () => {
-        const candidates = buildCandidates('embed');
+        const candidates = buildSoundFontCandidates({ embedBuild: true });
 
         expect(candidates[0]).toBe('/score-editor/soundfonts/MuseScore_General.sf3');
         // The file actually vendored with the embed today.
@@ -45,7 +27,7 @@ describe('soundfont candidates', () => {
     });
 
     it('offers only the origin root outside an embed build', () => {
-        const candidates = buildCandidates(undefined);
+        const candidates = buildSoundFontCandidates({ embedBuild: false });
 
         expect(candidates).toEqual([
             '/soundfonts/MuseScore_General.sf3',
@@ -53,5 +35,15 @@ describe('soundfont candidates', () => {
             '/soundfonts/default.sf3',
             '/soundfonts/default.sf2',
         ]);
+    });
+
+    it('puts a configured CDN ahead of local fallbacks without duplicates', () => {
+        const candidates = buildSoundFontCandidates({
+            cdnUrl: 'https://cdn.example.test/default.sf3',
+            embedBuild: false,
+        });
+
+        expect(candidates[0]).toBe('https://cdn.example.test/default.sf3');
+        expect(new Set(candidates).size).toBe(candidates.length);
     });
 });

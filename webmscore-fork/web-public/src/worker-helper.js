@@ -437,6 +437,11 @@ class WebMscoreW {
         return this.rpc('measureRangeForPage', [pageIndex])
     }
 
+    /** Return the repeat-expanded, tempo-aware playback timeline. */
+    playbackTimeline() {
+        return this.rpc('playbackTimeline')
+    }
+
     /**
      * Resolve the inclusive measure range covered by the current selection.
      * @returns {Promise<{startMeasureIndex: number, endMeasureIndex: number} | null>}

@@ -1,6 +1,8 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 
 // Dynamically import ScoreEditor to avoid SSR issues with WASM/window
 const ScoreEditor = dynamic(() => import('@/components/ScoreEditor'), {
@@ -12,10 +14,39 @@ const ScoreEditor = dynamic(() => import('@/components/ScoreEditor'), {
   ),
 });
 
-export default function Home() {
+const EmbeddedScorePlayer = dynamic(() => import('@/components/score-player/EmbeddedScorePlayer'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-screen items-center justify-center bg-slate-100 text-slate-600">
+      Loading player…
+    </div>
+  ),
+});
+
+function AppContent() {
+  const searchParams = useSearchParams();
+  const hasCompareMode = Boolean(
+    (searchParams.get('compareLeft') && searchParams.get('compareRight'))
+      || searchParams.get('reviewScore'),
+  );
+  const embedMode = searchParams.get('embed');
+  const showPlayer = Boolean(
+    searchParams.get('score')
+      && !hasCompareMode
+      && (embedMode === 'player' || embedMode === '1'),
+  );
+
   return (
     <main className="min-h-screen bg-white">
-      <ScoreEditor />
+      {showPlayer ? <EmbeddedScorePlayer /> : <ScoreEditor />}
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center bg-slate-100 text-slate-600">Loading…</div>}>
+      <AppContent />
+    </Suspense>
   );
 }
