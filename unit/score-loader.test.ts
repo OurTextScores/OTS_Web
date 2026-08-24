@@ -47,8 +47,9 @@ describe('shared score loader', () => {
         });
         const engine = fakeEngine(vi.fn(async () => score));
         const data = new Uint8Array(2 * 1024 * 1024);
+        const logStage = vi.fn();
 
-        const result = await loadScoreWithInitialLayout(engine, 'musicxml', data);
+        const result = await loadScoreWithInitialLayout(engine, 'musicxml', data, { logStage });
 
         expect(engine.load).toHaveBeenCalledWith('musicxml', expect.any(Uint8Array), [], false);
         expect(score.layoutUntilPageState).toHaveBeenCalledWith(0);
@@ -58,5 +59,47 @@ describe('shared score loader', () => {
             progressiveHasMore: true,
             initialAvailablePages: 2,
         });
+        expect(logStage).toHaveBeenCalledWith('progressive-load:start', { timeoutMs: 12_000 });
+        expect(logStage).toHaveBeenCalledWith('progressive-load:done');
+        expect(logStage).toHaveBeenCalledWith('initial-layout:start', { timeoutMs: 10_000 });
+        expect(logStage).toHaveBeenCalledWith('initial-layout:done', expect.objectContaining({ targetSatisfied: true }));
+    });
+
+    it('preserves eager load stage breadcrumbs', async () => {
+        const score = fakeScore();
+        const engine = fakeEngine(vi.fn(async () => score));
+        const logStage = vi.fn();
+
+        await loadScoreWithInitialLayout(engine, 'musicxml', new Uint8Array([1]), { logStage });
+
+        expect(logStage.mock.calls.map(([stage]) => stage)).toEqual([
+            'eager-load:start',
+            'eager-load:done',
+        ]);
+    });
+
+    it('preserves progressive eager-fallback breadcrumbs', async () => {
+        const progressiveScore = fakeScore();
+        const fallbackScore = fakeScore();
+        const engine = fakeEngine(vi.fn()
+            .mockResolvedValueOnce(progressiveScore)
+            .mockResolvedValueOnce(fallbackScore));
+        const logStage = vi.fn();
+
+        const result = await loadScoreWithInitialLayout(
+            engine,
+            'musicxml',
+            new Uint8Array(2 * 1024 * 1024),
+            { logStage },
+        );
+
+        expect(result.loadedScore).toBe(fallbackScore);
+        expect(progressiveScore.destroy).toHaveBeenCalledOnce();
+        expect(logStage.mock.calls.map(([stage]) => stage)).toEqual([
+            'progressive-load:start',
+            'progressive-load:done',
+            'eager-fallback:start',
+            'eager-fallback:done',
+        ]);
     });
 });

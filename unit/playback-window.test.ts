@@ -23,6 +23,11 @@ describe('renderWindowDelayMs', () => {
         expect(renderWindowDelayMs(21, WINDOW)).toBe(11_000);
     });
 
+    it('keeps draining to low water after hysteresis has started', () => {
+        expect(renderWindowDelayMs(19, WINDOW, true)).toBe(9_000);
+        expect(renderWindowDelayMs(10, WINDOW, true)).toBe(0);
+    });
+
     it('refills in batches rather than waking per chunk', () => {
         // Crossing the horizon by a hair must still idle down to low water, or the
         // loop busy-waits: one wake per chunk is what the window exists to avoid.

@@ -50,9 +50,14 @@ export const DEFAULT_RENDER_WINDOW: RenderWindow = {
  * How long to idle before pulling the next batch.
  *
  * @param aheadSeconds how far scheduled audio currently extends beyond the playhead
+ * @param draining whether the horizon was already crossed and hysteresis is draining to low water
  * @returns milliseconds to wait; 0 means pull immediately
  */
-export function renderWindowDelayMs(aheadSeconds: number, window: RenderWindow = DEFAULT_RENDER_WINDOW): number {
+export function renderWindowDelayMs(
+    aheadSeconds: number,
+    window: RenderWindow = DEFAULT_RENDER_WINDOW,
+    draining = false,
+): number {
     if (!Number.isFinite(aheadSeconds)) {
         // A non-finite reading means the caller has no usable clock yet. Keep
         // pulling rather than stalling playback on a bad measurement.
@@ -62,7 +67,7 @@ export function renderWindowDelayMs(aheadSeconds: number, window: RenderWindow =
     const horizon = Math.max(0, window.horizonSeconds);
     const lowWater = Math.min(Math.max(0, window.lowWaterSeconds), horizon);
 
-    if (aheadSeconds <= horizon) {
+    if (!draining && aheadSeconds <= horizon) {
         return 0;
     }
 

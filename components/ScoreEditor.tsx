@@ -5781,7 +5781,7 @@ ${partsBodyXml}
         setInteractionState({ preparing: false, ready: false });
         soundFontLoadedRef.current = false;
         triedSoundFontRef.current = false;
-        soundFontManagerRef.current?.clear();
+        soundFontManagerRef.current?.invalidateTargets();
         setSoundFontLoaded(false);
         setTriedSoundFont(false);
         setScoreDirtySinceCheckpoint(false);
@@ -5986,7 +5986,7 @@ ${partsBodyXml}
         setInteractionState({ preparing: false, ready: false });
         soundFontLoadedRef.current = false;
         triedSoundFontRef.current = false;
-        soundFontManagerRef.current?.clear();
+        soundFontManagerRef.current?.invalidateTargets();
         setSoundFontLoaded(false);
         setTriedSoundFont(false);
         setScoreDirtySinceCheckpoint(false);

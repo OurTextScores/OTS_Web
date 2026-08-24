@@ -101,9 +101,18 @@ export class SoundFontManager<TTarget extends SoundFontTarget> {
         this.pendingSource = null;
     }
 
-    clear() {
+    /** Explicitly evict source bytes as well as invalidating target installs. */
+    evictSource() {
         this.version += 1;
         this.source = null;
+        this.pendingSource = null;
+    }
+
+    /** Reinstall on future targets without evicting already-fetched source bytes. */
+    invalidateTargets() {
+        this.version += 1;
+        // A fetch started under the prior version cannot populate this version.
+        // Let a subsequent request start fresh without evicting a completed cache.
         this.pendingSource = null;
     }
 

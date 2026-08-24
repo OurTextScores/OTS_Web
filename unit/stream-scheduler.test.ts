@@ -230,6 +230,7 @@ describe('stream scheduler', () => {
                     onended: null as (() => void) | null,
                 })),
             } as unknown as AudioContext;
+            const onRenderWindowIdleChange = vi.fn();
             const run = scheduleSynthBatchStream(iterator, audioContext, {
                 sourcesRef: ref([]),
                 iteratorRef: ref<SynthAudioBatchIterator | null>(null),
@@ -237,15 +238,18 @@ describe('stream scheduler', () => {
                 debugLabel: 'window-test',
                 prerollSeconds: 0,
                 renderWindow: { horizonSeconds: 20, lowWaterSeconds: 10 },
+                onRenderWindowIdleChange,
             });
             await vi.advanceTimersByTimeAsync(0);
             expect(iterator).toHaveBeenCalledTimes(1);
+            expect(onRenderWindowIdleChange).toHaveBeenCalledWith(true);
 
             await vi.advanceTimersByTimeAsync(14_000);
             expect(iterator).toHaveBeenCalledTimes(1);
             await vi.advanceTimersByTimeAsync(1_000);
             await run;
             expect(iterator).toHaveBeenCalledTimes(2);
+            expect(onRenderWindowIdleChange).toHaveBeenLastCalledWith(false);
         } finally {
             vi.useRealTimers();
         }

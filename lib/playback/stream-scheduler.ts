@@ -23,6 +23,8 @@ export type StreamPlaybackOptions = StreamPlaybackTarget & {
     /** Bounds render-ahead. null disables throttling for short one-shot clips. */
     renderWindow?: RenderWindow | null;
     onPlayingChange?: (playing: boolean) => void;
+    /** Signals a safe render-ahead idle window for lower-priority worker work. */
+    onRenderWindowIdleChange?: (idle: boolean) => void;
     /** Called once the Web Audio clock is anchored to the score timeline. */
     onClockAnchor?: (anchor: { contextTime: number; scoreTimeSeconds: number }) => void;
     /** Called after the final scheduled source naturally finishes. */
@@ -174,18 +176,14 @@ export async function scheduleSynthBatchStream(
                 (baseTime + bufferedUntilSeconds) - audioContext.currentTime,
                 options.renderWindow,
             );
-            const lowWaterSeconds = Math.min(
-                Math.max(0, options.renderWindow.lowWaterSeconds),
-                Math.max(0, options.renderWindow.horizonSeconds),
-            );
+            if (delayMs > 0) options.onRenderWindowIdleChange?.(true);
             while (delayMs > 0 && options.generationRef.current === generation) {
                 await new Promise<void>((resolve) => { setTimeout(resolve, Math.min(delayMs, 1000)); });
                 const aheadSeconds = (baseTime + bufferedUntilSeconds) - audioContext.currentTime;
-                delayMs = Number.isFinite(aheadSeconds)
-                    ? Math.max(0, (aheadSeconds - lowWaterSeconds) * 1000)
-                    : 0;
+                delayMs = renderWindowDelayMs(aheadSeconds, options.renderWindow, true);
             }
             if (options.generationRef.current !== generation) break;
+            options.onRenderWindowIdleChange?.(false);
         }
 
         const batch = await batchFn(false);

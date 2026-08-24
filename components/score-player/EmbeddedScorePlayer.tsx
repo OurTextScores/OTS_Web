@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type {
     PlaybackTimeline,
@@ -40,6 +40,9 @@ export default function EmbeddedScorePlayer() {
     const [pageCount, setPageCount] = useState(1);
     const [progressiveHasMorePages, setProgressiveHasMorePages] = useState(false);
     const [pageLoadBusy, setPageLoadBusy] = useState(false);
+    const [pageRequestQueued, setPageRequestQueued] = useState(false);
+    const [pageMessage, setPageMessage] = useState('');
+    const [pageError, setPageError] = useState('');
     const [zoom, setZoom] = useState(1);
     const [follow, setFollow] = useState(initialFollow);
     const [volume, setVolume] = useState(1);
@@ -49,6 +52,10 @@ export default function EmbeddedScorePlayer() {
     const renderGenerationRef = useRef(0);
     const renderPromiseRef = useRef<Promise<void> | null>(null);
     const renderPromisesRef = useRef(new Set<Promise<void>>());
+    const lastRenderedPageRef = useRef<number | null>(null);
+    const pageLoadBusyRef = useRef(false);
+    const pageRequestNavigateRef = useRef(false);
+    const pageLoadGenerationRef = useRef(0);
     const transportController = useScoreTransport({
         score,
         durationMs: timeline?.durationMs ?? 0,
@@ -60,6 +67,7 @@ export default function EmbeddedScorePlayer() {
         state: transport,
         positionMs,
         positionRef,
+        renderWindowIdle,
         togglePlayPause,
         stopAt,
         seek,
@@ -92,6 +100,14 @@ export default function EmbeddedScorePlayer() {
         setPositions(null);
         setTimeline(null);
         setProgressiveHasMorePages(false);
+        pageLoadGenerationRef.current += 1;
+        pageLoadBusyRef.current = false;
+        setPageLoadBusy(false);
+        setPageRequestQueued(false);
+        pageRequestNavigateRef.current = false;
+        setPageMessage('');
+        setPageError('');
+        lastRenderedPageRef.current = null;
         setLoading(true);
         setError('');
 
@@ -173,11 +189,23 @@ export default function EmbeddedScorePlayer() {
         const generation = ++renderGenerationRef.current;
         const renderPromise = score.saveSvg(currentPage, true, false)
             .then((rendered) => {
-                if (renderGenerationRef.current === generation) setSvg(sanitizeEngineSvg(rendered));
+                if (renderGenerationRef.current === generation) {
+                    setSvg(sanitizeEngineSvg(rendered));
+                    lastRenderedPageRef.current = currentPage;
+                }
             })
             .catch((renderError) => {
                 if (renderGenerationRef.current === generation) {
-                    setError(renderError instanceof Error ? renderError.message : 'This score page could not be rendered.');
+                    const message = renderError instanceof Error
+                        ? renderError.message
+                        : 'This score page could not be rendered.';
+                    const lastRenderedPage = lastRenderedPageRef.current;
+                    if (lastRenderedPage === null) {
+                        setError(message);
+                    } else {
+                        setPageError(message);
+                        if (lastRenderedPage !== currentPage) setCurrentPage(lastRenderedPage);
+                    }
                 }
             });
         renderPromiseRef.current = renderPromise;
@@ -192,11 +220,6 @@ export default function EmbeddedScorePlayer() {
     const activeMeasure = activeOccurrence && positions
         ? positions.elements[activeOccurrence.measureIndex] ?? null
         : null;
-
-    useEffect(() => {
-        if (!follow || !activeMeasure || activeMeasure.page === currentPage) return;
-        setCurrentPage(clamp(activeMeasure.page, 0, pageCount - 1));
-    }, [activeMeasure, currentPage, follow, pageCount]);
 
     const visibleMeasures = useMemo(
         () => positions?.elements.filter((element) => element.page === currentPage) ?? [],
@@ -217,34 +240,87 @@ export default function EmbeddedScorePlayer() {
         return () => window.removeEventListener('keydown', onKeyDown);
     }, [stopAt, togglePlayPause]);
 
+    const loadNextProgressivePage = useCallback(async (navigateToPage: boolean) => {
+        const activeScore = scoreRef.current;
+        if (!activeScore || !progressiveHasMorePages || pageLoadBusyRef.current) return;
+        const generation = ++pageLoadGenerationRef.current;
+        const nextPage = pageCount;
+        pageLoadBusyRef.current = true;
+        setPageLoadBusy(true);
+        setPageMessage('Preparing next page…');
+        setPageError('');
+        try {
+            await (renderPromiseRef.current ?? Promise.resolve());
+            if (scoreRef.current !== activeScore || pageLoadGenerationRef.current !== generation) return;
+            const progress = await requestScoreLayoutProgress(activeScore, nextPage);
+            if (scoreRef.current !== activeScore || pageLoadGenerationRef.current !== generation) return;
+            setPageCount(Math.max(pageCount, progress.availablePages));
+            setProgressiveHasMorePages(progress.hasMorePages);
+            if (progress.targetSatisfied) {
+                const nextPositions = await activeScore.measurePositions().catch(() => null);
+                if (
+                    scoreRef.current === activeScore
+                    && pageLoadGenerationRef.current === generation
+                ) {
+                    if (nextPositions) setPositions(nextPositions);
+                    if (navigateToPage) setCurrentPage(nextPage);
+                }
+            }
+        } catch (layoutError) {
+            if (pageLoadGenerationRef.current !== generation) return;
+            setPageError(layoutError instanceof Error
+                ? layoutError.message
+                : 'The next score page could not be laid out.');
+        } finally {
+            if (pageLoadGenerationRef.current === generation) {
+                pageLoadBusyRef.current = false;
+                setPageLoadBusy(false);
+                setPageMessage('');
+            }
+        }
+    }, [pageCount, progressiveHasMorePages]);
+
+    useEffect(() => {
+        if (!follow || !activeOccurrence || !progressiveHasMorePages) return;
+        const lastKnownMeasureIndex = (positions?.elements.length ?? 0) - 1;
+        if (!activeMeasure || activeOccurrence.measureIndex >= Math.max(0, lastKnownMeasureIndex - 1)) {
+            pageRequestNavigateRef.current = false;
+            setPageRequestQueued(true);
+            setPageMessage('Preparing next page…');
+        }
+    }, [activeMeasure, activeOccurrence, follow, positions?.elements.length, progressiveHasMorePages]);
+
+    useEffect(() => {
+        if (!follow || !activeMeasure || activeMeasure.page === currentPage) return;
+        setCurrentPage(activeMeasure.page);
+    }, [activeMeasure, currentPage, follow]);
+
+    useEffect(() => {
+        if (!pageRequestQueued || pageLoadBusy) return;
+        if (!renderWindowIdle) return;
+        setPageRequestQueued(false);
+        const navigateToPage = pageRequestNavigateRef.current;
+        pageRequestNavigateRef.current = false;
+        void loadNextProgressivePage(navigateToPage);
+    }, [loadNextProgressivePage, pageLoadBusy, pageRequestQueued, renderWindowIdle]);
+
     const pageSize = positions?.pageSize;
-    const goToNextPage = async () => {
+    const goToNextPage = () => {
         setFollow(false);
+        setPageError('');
         const nextPage = currentPage + 1;
         if (nextPage < pageCount) {
             setCurrentPage(nextPage);
             return;
         }
-        const activeScore = scoreRef.current;
-        if (!activeScore || !progressiveHasMorePages || pageLoadBusy) return;
-        setPageLoadBusy(true);
-        try {
-            await (renderPromiseRef.current ?? Promise.resolve());
-            if (scoreRef.current !== activeScore) return;
-            const progress = await requestScoreLayoutProgress(activeScore, nextPage);
-            if (scoreRef.current !== activeScore) return;
-            setPageCount(Math.max(pageCount, progress.availablePages));
-            setProgressiveHasMorePages(progress.hasMorePages);
-            if (progress.targetSatisfied) {
-                setCurrentPage(nextPage);
-                const nextPositions = await activeScore.measurePositions().catch(() => null);
-                if (scoreRef.current === activeScore && nextPositions) setPositions(nextPositions);
-            }
-        } catch (pageError) {
-            setError(pageError instanceof Error ? pageError.message : 'The next score page could not be laid out.');
-        } finally {
-            setPageLoadBusy(false);
+        if (!progressiveHasMorePages || pageLoadBusy) return;
+        if (!renderWindowIdle) {
+            pageRequestNavigateRef.current = true;
+            setPageRequestQueued(true);
+            setPageMessage('Preparing next page…');
+            return;
         }
+        void loadNextProgressivePage(true);
     };
 
     return (
@@ -291,6 +367,8 @@ export default function EmbeddedScorePlayer() {
                     </div>
                 )}
                 {audioMessage && <div className="pointer-events-none sticky bottom-2 mx-auto mt-2 w-fit rounded-full bg-slate-900/85 px-3 py-1 text-xs text-white" role={transport === 'unavailable' ? 'alert' : 'status'}>{audioMessage}</div>}
+                {(pageLoadBusy || pageMessage) && <div className="pointer-events-none sticky bottom-2 mx-auto mt-2 w-fit rounded-full bg-slate-900/85 px-3 py-1 text-xs text-white" role="status">Preparing next page…</div>}
+                {pageError && <div className="sticky bottom-2 mx-auto mt-2 flex w-fit items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-900" role="alert"><span>{pageError}</span><button type="button" className="font-semibold underline" onClick={() => setPageError('')}>Dismiss</button></div>}
             </div>
             <PlayerControls
                 state={transport}
@@ -307,8 +385,8 @@ export default function EmbeddedScorePlayer() {
                 onStop={() => void stopAt(startMsRef.current)}
                 onSeek={seek}
                 onVolume={setVolume}
-                onPreviousPage={() => { setFollow(false); setCurrentPage((page) => Math.max(0, page - 1)); }}
-                onNextPage={() => { void goToNextPage(); }}
+                onPreviousPage={() => { setFollow(false); setPageError(''); setCurrentPage((page) => Math.max(0, page - 1)); }}
+                onNextPage={goToNextPage}
                 onZoomOut={() => setZoom((value) => clamp(value - 0.1, 0.5, 2.5))}
                 onFitWidth={() => setZoom(1)}
                 onZoomIn={() => setZoom((value) => clamp(value + 0.1, 0.5, 2.5))}

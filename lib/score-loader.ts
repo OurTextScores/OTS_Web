@@ -110,7 +110,9 @@ export async function loadScoreWithInitialLayout(
         && isLargeScoreData(data)
         && (format === 'musicxml' || format === 'mscz' || format === 'mscx' || format === 'mxl');
     if (!progressive) {
+        options.logStage?.('eager-load:start');
         const loadedScore = await engine.load(format, data);
+        options.logStage?.('eager-load:done');
         return { loadedScore, progressivePaging: false, progressiveHasMore: false, initialAvailablePages: 1 };
     }
 
@@ -126,11 +128,13 @@ export async function loadScoreWithInitialLayout(
         );
         options.logStage?.('progressive-load:done');
         if (progressiveScore.layoutUntilPage || progressiveScore.layoutUntilPageState) {
+            options.logStage?.('initial-layout:start', { timeoutMs: firstPageTimeoutMs });
             const state = await withTimeout(
                 requestScoreLayoutProgress(progressiveScore, 0, options.runSerialized),
                 firstPageTimeoutMs,
                 'Initial incremental layout',
             );
+            options.logStage?.('initial-layout:done', state);
             if (state.targetSatisfied) {
                 return {
                     loadedScore: progressiveScore,
@@ -141,6 +145,7 @@ export async function loadScoreWithInitialLayout(
             }
         }
         if (progressiveScore.relayout) {
+            options.logStage?.('relayout-fallback:start');
             await withTimeout(
                 (options.runSerialized ?? directOperation)(
                     () => Promise.resolve(progressiveScore!.relayout!()),
@@ -149,6 +154,7 @@ export async function loadScoreWithInitialLayout(
                 20_000,
                 'Progressive relayout fallback',
             );
+            options.logStage?.('relayout-fallback:done');
             return {
                 loadedScore: progressiveScore,
                 progressivePaging: false,
@@ -164,7 +170,9 @@ export async function loadScoreWithInitialLayout(
         console.warn('Progressive score load failed, retrying with eager layout.', error);
     }
 
+    options.logStage?.('eager-fallback:start');
     const loadedScore = await engine.load(format, data);
+    options.logStage?.('eager-fallback:done');
     return { loadedScore, progressivePaging: false, progressiveHasMore: false, initialAvailablePages: 1 };
 }
 

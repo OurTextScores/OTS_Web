@@ -56,6 +56,20 @@ describe('SoundFontManager', () => {
         expect(vi.mocked(target.setSoundFont).mock.calls[1][0]).toEqual(new Uint8Array([9]));
     });
 
+    it('invalidates target installations without evicting cached source bytes', async () => {
+        const load = vi.fn(async () => ({ url: '/default.sf3', bytes: new Uint8Array([3]) }));
+        const manager = new SoundFontManager(load);
+        const first = makeTarget();
+        const second = makeTarget();
+        await manager.ensure(first);
+
+        manager.invalidateTargets();
+        expect(manager.isApplied(first)).toBe(false);
+        expect(await manager.ensure(second)).toBe(true);
+        expect(load).toHaveBeenCalledOnce();
+        expect(second.setSoundFont).toHaveBeenCalledWith(new Uint8Array([3]));
+    });
+
     it('does not let a stale fetch overwrite replacement bytes', async () => {
         let finish!: (value: { url: string; bytes: Uint8Array }) => void;
         const load = new Promise<{ url: string; bytes: Uint8Array }>((resolve) => { finish = resolve; });
