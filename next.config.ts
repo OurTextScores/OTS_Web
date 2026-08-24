@@ -4,6 +4,8 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || undefined,
   output: process.env.BUILD_MODE === 'embed' ? 'export' : undefined,
   basePath: process.env.BUILD_MODE === 'embed' ? '/score-editor' : undefined,
+  // Keep the development-tools launcher away from the player's bottom transport rail.
+  devIndicators: { position: 'top-right' },
   // Disable image optimization for static export
   images: process.env.BUILD_MODE === 'embed' ? { unoptimized: true } : undefined,
   // Skip Next build type-check when explicitly requested (or for embed export).

@@ -635,10 +635,10 @@ export default function EmbeddedScorePlayer() {
                 )}
                 {!loading && !error && (
                     <div className="mx-auto origin-top" style={{ width: `${zoom * 100}%`, maxWidth: zoom <= 1 ? '100%' : 'none' }}>
-                        <div className="relative mx-auto w-fit max-w-full overflow-hidden bg-white shadow-lg">
-                            <div className="[&_svg]:block [&_svg]:h-auto [&_svg]:max-w-full" data-testid="player-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+                        <div className="relative mx-auto w-full overflow-hidden bg-white shadow-lg">
+                            <div className="[&_svg]:block [&_svg]:h-auto [&_svg]:w-full" data-testid="player-svg" dangerouslySetInnerHTML={{ __html: svg }} />
                             {pageSize && (
-                                <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+                                <svg data-testid="player-overlay" className="absolute inset-0 h-full w-full" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
                                     {visibleMeasures.map((measure) => (
                                         <rect
                                             key={measure.id}
@@ -657,7 +657,7 @@ export default function EmbeddedScorePlayer() {
                                     ))}
                                     {activeMeasure?.page === currentPage && (
                                         <g pointerEvents="none">
-                                            <rect ref={activeMeasureRef} x={activeMeasure.x} y={activeMeasure.y} width={activeMeasure.width ?? activeMeasure.sx} height={activeMeasure.height ?? activeMeasure.sy} fill="rgb(8 145 178 / 0.13)" stroke="rgb(8 145 178 / 0.8)" strokeWidth="2" />
+                                            <rect data-testid="active-measure-highlight" ref={activeMeasureRef} x={activeMeasure.x} y={activeMeasure.y} width={activeMeasure.width ?? activeMeasure.sx} height={activeMeasure.height ?? activeMeasure.sy} fill="rgb(8 145 178 / 0.13)" stroke="rgb(8 145 178 / 0.8)" strokeWidth="2" />
                                             <line x1={activeMeasure.x} y1={activeMeasure.y} x2={activeMeasure.x} y2={activeMeasure.y + (activeMeasure.height ?? activeMeasure.sy)} stroke="rgb(8 145 178)" strokeWidth="4" />
                                         </g>
                                     )}

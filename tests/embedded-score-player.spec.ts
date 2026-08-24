@@ -11,6 +11,58 @@ test.describe('embedded score player', () => {
         const duration = await page.getByTestId('player-seek').getAttribute('max');
         expect(Number(duration)).toBeGreaterThan(0);
         await expect(page.getByText(/^Page 1 of /)).toBeVisible();
+
+        const fittedWidths = await page.evaluate(() => {
+            const viewport = document.querySelector('[data-testid="player-viewport"]') as HTMLElement;
+            const svg = document.querySelector('[data-testid="player-svg"] > svg') as SVGElement;
+            return {
+                available: viewport.clientWidth - 48,
+                score: svg.getBoundingClientRect().width,
+            };
+        });
+        expect(Math.abs(fittedWidths.score - fittedWidths.available)).toBeLessThanOrEqual(2);
+    });
+
+    test('fits the score and transport without horizontal overflow on mobile', async ({ page }) => {
+        await page.setViewportSize({ width: 390, height: 700 });
+        await page.goto('/?score=%2Ftest_scores%2Fplayback_timeline.musicxml&embed=player');
+        await expect(page.getByTestId('player-svg').locator('svg')).toBeVisible({ timeout: 30_000 });
+
+        const layout = await page.evaluate(() => {
+            const viewport = document.querySelector('[data-testid="player-viewport"]') as HTMLElement;
+            const svg = document.querySelector('[data-testid="player-svg"] > svg') as SVGElement;
+            const controls = document.querySelector('[data-testid="player-play"]')?.closest('.sticky') as HTMLElement;
+            return {
+                expectedScoreWidth: viewport.clientWidth - 24,
+                scoreWidth: svg.getBoundingClientRect().width,
+                controlsClientWidth: controls.clientWidth,
+                controlsScrollWidth: controls.scrollWidth,
+            };
+        });
+        expect(Math.abs(layout.scoreWidth - layout.expectedScoreWidth)).toBeLessThanOrEqual(2);
+        expect(layout.controlsScrollWidth).toBeLessThanOrEqual(layout.controlsClientWidth);
+    });
+
+    test('keeps the active-measure overlay aligned while zooming', async ({ page }) => {
+        await page.goto('/?score=%2Ftest_scores%2Fplayback_timeline.musicxml&embed=player');
+        await expect(page.getByTestId('active-measure-highlight')).toBeVisible({ timeout: 30_000 });
+
+        const alignmentError = async () => page.evaluate(() => {
+            const notation = document.querySelector('[data-testid="player-svg"] > svg') as SVGSVGElement;
+            const highlight = document.querySelector('[data-testid="active-measure-highlight"]') as SVGRectElement;
+            const notationBox = notation.getBoundingClientRect();
+            const highlightBox = highlight.getBoundingClientRect();
+            const viewBox = notation.viewBox.baseVal;
+            const expectedX = notationBox.left + Number(highlight.getAttribute('x')) / viewBox.width * notationBox.width;
+            const expectedY = notationBox.top + Number(highlight.getAttribute('y')) / viewBox.height * notationBox.height;
+            return Math.max(Math.abs(highlightBox.left - expectedX), Math.abs(highlightBox.top - expectedY));
+        });
+
+        expect(await alignmentError()).toBeLessThan(1);
+        await page.getByRole('button', { name: 'Zoom in' }).click();
+        expect(await alignmentError()).toBeLessThan(1);
+        await page.getByRole('button', { name: 'Zoom out' }).click();
+        expect(await alignmentError()).toBeLessThan(1);
     });
 
     test('keeps embed=1 as a player compatibility alias', async ({ page }) => {
